@@ -1,5 +1,5 @@
-use std::path::PathBuf;
-use std::process::{ExitStatus, Stdio};
+use std::path::{Path, PathBuf};
+use std::process::{Command as StdCommand, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -232,6 +232,30 @@ async fn run_chat_stream(
             "modelo '{}' nao encontrado",
             request.model_id
         )));
+    }
+
+    let model_scan = scan_model_dir(&model_path)
+        .await
+        .map_err(|error| ChatStreamError::Io(format!("falha lendo modelo: {error}")))?;
+    if !model_scan.is_runnable() {
+        return Err(ChatStreamError::InvalidRequest(format!(
+            "modelo '{}' nao possui pesos safetensors validos para mlx_lm.generate",
+            model_path.display()
+        )));
+    }
+
+    if model_scan.safetensors_bytes > 0 {
+        if let Some(system_memory) = detect_system_memory_bytes() {
+            let safe_limit = system_memory.saturating_mul(85) / 100;
+            if model_scan.safetensors_bytes > safe_limit {
+                return Err(ChatStreamError::InvalidRequest(format!(
+                    "modelo '{}' exige aproximadamente {} de pesos, acima do limite seguro da maquina (RAM fisica {}); escolha um modelo menor ou quantizacao mais agressiva",
+                    model_path.display(),
+                    format_size(model_scan.safetensors_bytes),
+                    format_size(system_memory),
+                )));
+            }
+        }
     }
 
     let prompt = build_prompt(&request.messages);
@@ -654,6 +678,82 @@ fn parse_tokens_and_rate(rest: &str) -> (Option<usize>, Option<f32>) {
 fn parse_f32_flexible(value: &str) -> Option<f32> {
     let normalized = value.trim().replace(',', ".");
     normalized.parse::<f32>().ok()
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct ModelScan {
+    has_config: bool,
+    has_safetensors_index: bool,
+    safetensors_files: usize,
+    safetensors_bytes: u64,
+}
+
+impl ModelScan {
+    fn is_runnable(self) -> bool {
+        self.has_config && (self.safetensors_files > 0 || self.has_safetensors_index)
+    }
+}
+
+async fn scan_model_dir(path: &Path) -> Result<ModelScan, std::io::Error> {
+    let mut entries = tokio::fs::read_dir(path).await?;
+    let mut has_config = false;
+    let mut has_safetensors_index = false;
+    let mut safetensors_files = 0_usize;
+    let mut safetensors_bytes = 0_u64;
+
+    loop {
+        let entry = entries.next_entry().await?;
+        let Some(entry) = entry else { break };
+        let metadata = entry.metadata().await?;
+        if metadata.is_dir() {
+            continue;
+        }
+
+        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        if name == "config.json" {
+            has_config = true;
+        }
+        if name == "model.safetensors.index.json" {
+            has_safetensors_index = true;
+        }
+        if name.ends_with(".safetensors") {
+            safetensors_files += 1;
+            safetensors_bytes = safetensors_bytes.saturating_add(metadata.len());
+        }
+    }
+
+    Ok(ModelScan {
+        has_config,
+        has_safetensors_index,
+        safetensors_files,
+        safetensors_bytes,
+    })
+}
+
+fn detect_system_memory_bytes() -> Option<u64> {
+    #[cfg(target_os = "macos")]
+    {
+        let output = StdCommand::new("sysctl")
+            .arg("-n")
+            .arg("hw.memsize")
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let raw = String::from_utf8_lossy(&output.stdout);
+        return raw.trim().parse::<u64>().ok();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+
+fn format_size(bytes: u64) -> String {
+    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+    format!("{:.1} GiB", bytes as f64 / GIB)
 }
 
 fn describe_exit_status(status: ExitStatus) -> String {
