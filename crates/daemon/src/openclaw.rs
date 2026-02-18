@@ -72,6 +72,13 @@ struct OpenClawConfigSnapshot {
     parsed: Value,
 }
 
+#[derive(Debug)]
+struct OpenClawSessionState {
+    key: String,
+    model_provider: Option<String>,
+    model: Option<String>,
+}
+
 impl OpenClawRuntime {
     pub fn new(cfg: OpenClawRuntimeConfig) -> Self {
         Self { cfg }
@@ -193,7 +200,7 @@ impl OpenClawRuntime {
         &self,
         model_reference: String,
     ) -> Result<OpenClawCurrentModel, OpenClawError> {
-        self.patch_session_model_with_retry(&model_reference, 6).await?;
+        self.apply_model_with_retry(&model_reference, 6).await?;
         let alias_map = self.load_alias_map().await?;
         self.read_current_model(&alias_map).await
     }
@@ -207,23 +214,24 @@ impl OpenClawRuntime {
             .await?;
 
         let model_reference = format!("openai/{local_model_path}");
-        self.patch_session_model_with_retry(&model_reference, 12)
-            .await?;
+        self.apply_model_with_retry(&model_reference, 12).await?;
 
         let alias_map = self.load_alias_map().await?;
         self.read_current_model(&alias_map).await
     }
 
-    async fn patch_session_model_with_retry(
+    async fn apply_model_with_retry(
         &self,
         model_reference: &str,
         attempts: usize,
     ) -> Result<(), OpenClawError> {
+        self.patch_default_primary_model(model_reference).await?;
+
         let retries = attempts.max(1);
         let mut last_error = "erro desconhecido".to_string();
 
         for attempt in 0..retries {
-            match self.patch_session_model(model_reference).await {
+            match self.patch_active_sessions_model(model_reference).await {
                 Ok(()) => return Ok(()),
                 Err(error) => {
                     last_error = error.to_string();
@@ -238,13 +246,151 @@ impl OpenClawRuntime {
         }
 
         Err(OpenClawError::Unavailable(format!(
-            "nao foi possivel aplicar modelo '{model_reference}': {last_error}"
+            "nao foi possivel aplicar modelo '{model_reference}' nas sessoes ativas: {last_error}"
         )))
     }
 
-    async fn patch_session_model(&self, model_reference: &str) -> Result<(), OpenClawError> {
+    async fn patch_default_primary_model(
+        &self,
+        model_reference: &str,
+    ) -> Result<(), OpenClawError> {
+        let snapshot = self.fetch_config_snapshot().await?;
+        let current_primary = snapshot
+            .parsed
+            .pointer("/agents/defaults/model/primary")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or("");
+
+        if current_primary == model_reference {
+            return Ok(());
+        }
+
+        let patch = json!({
+            "agents": {
+                "defaults": {
+                    "model": {
+                        "primary": model_reference
+                    }
+                }
+            }
+        });
+
+        self.apply_config_patch(
+            snapshot.hash,
+            patch,
+            "mlx-pilot model switch",
+            200,
+            Duration::from_secs(30),
+        )
+        .await
+    }
+
+    async fn patch_active_sessions_model(&self, model_reference: &str) -> Result<(), OpenClawError> {
+        let sessions = self.list_sessions(800).await?;
+        let mut target_keys = BTreeSet::new();
+
+        if sessions.is_empty() {
+            target_keys.insert(self.cfg.session_key.clone());
+        } else {
+            for session in sessions {
+                if !session_matches_target_model(&session, model_reference) {
+                    target_keys.insert(session.key);
+                }
+            }
+
+            target_keys.insert(self.cfg.session_key.clone());
+        }
+
+        let mut errors = Vec::new();
+        for session_key in target_keys {
+            if let Err(error) = self
+                .patch_single_session_model(&session_key, model_reference)
+                .await
+            {
+                let details = error.to_string();
+                if looks_missing_session_error(&details) {
+                    continue;
+                }
+                errors.push(format!("{session_key}: {details}"));
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(OpenClawError::Unavailable(format!(
+                "falhas em sessions.patch: {}",
+                errors.join(" | ")
+            )))
+        }
+    }
+
+    async fn list_sessions(&self, limit: usize) -> Result<Vec<OpenClawSessionState>, OpenClawError> {
         let params = json!({
-            "key": self.cfg.session_key,
+            "limit": limit.clamp(50, 2000),
+        });
+        let params_json = serde_json::to_string(&params).map_err(|error| OpenClawError::Parse {
+            details: format!("falha serializando params sessions.list: {error}"),
+        })?;
+
+        let args = vec![
+            "gateway".to_string(),
+            "call".to_string(),
+            "sessions.list".to_string(),
+            "--json".to_string(),
+            "--timeout".to_string(),
+            "12000".to_string(),
+            "--params".to_string(),
+            params_json,
+        ];
+
+        let response = self.run_command_json(args, Duration::from_secs(18)).await?;
+        let mut sessions = Vec::new();
+
+        if let Some(entries) = response.pointer("/sessions").and_then(Value::as_array) {
+            for entry in entries {
+                let Some(key) = entry
+                    .get("key")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                else {
+                    continue;
+                };
+
+                let model_provider = entry
+                    .get("modelProvider")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToString::to_string);
+
+                let model = entry
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToString::to_string);
+
+                sessions.push(OpenClawSessionState {
+                    key: key.to_string(),
+                    model_provider,
+                    model,
+                });
+            }
+        }
+
+        Ok(sessions)
+    }
+
+    async fn patch_single_session_model(
+        &self,
+        session_key: &str,
+        model_reference: &str,
+    ) -> Result<(), OpenClawError> {
+        let params = json!({
+            "key": session_key,
             "model": model_reference,
         });
         let params_json = serde_json::to_string(&params).map_err(|error| OpenClawError::Parse {
@@ -264,9 +410,12 @@ impl OpenClawRuntime {
 
         let response = self.run_command_json(args, Duration::from_secs(18)).await?;
         if let Some(false) = response.get("ok").and_then(Value::as_bool) {
-            return Err(OpenClawError::BadRequest(
-                "gateway recusou sessions.patch".to_string(),
-            ));
+            let reason = get_string(&response, "/error/message")
+                .or_else(|| get_string(&response, "/error"))
+                .unwrap_or_else(|| "gateway recusou sessions.patch".to_string());
+            return Err(OpenClawError::BadRequest(format!(
+                "gateway recusou sessions.patch para '{session_key}': {reason}"
+            )));
         }
 
         Ok(())
@@ -1124,6 +1273,30 @@ fn parse_model_reference(reference: &str) -> Option<(String, String)> {
     }
 
     Some((provider.to_string(), model.to_string()))
+}
+
+fn session_matches_target_model(session: &OpenClawSessionState, model_reference: &str) -> bool {
+    let Some((target_provider, target_model)) = parse_model_reference(model_reference) else {
+        return false;
+    };
+
+    session
+        .model_provider
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|provider| provider == target_provider)
+        && session
+            .model
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|model| model == target_model)
+}
+
+fn looks_missing_session_error(details: &str) -> bool {
+    let normalized = details.to_lowercase();
+    normalized.contains("session not found")
+        || normalized.contains("unknown session")
+        || normalized.contains("nao encontrado")
 }
 
 fn looks_local_model_path(model: &str) -> bool {
