@@ -1,5 +1,6 @@
 const STORAGE_DAEMON_URL = "mlxPilotDaemonUrl";
 const STORAGE_CHAT_THREADS = "mlxPilotChatThreadsV2";
+const STORAGE_OPENCLAW_OBSERVABILITY = "mlxPilotOpenClawObservabilityV1";
 
 const STREAM_CHARS_PER_TICK = 22;
 const STREAM_TICK_MS = 20;
@@ -48,7 +49,11 @@ const downloadList = document.getElementById("download-list");
 const downloadItemTemplate = document.getElementById("download-item-template");
 
 const openclawStatusText = document.getElementById("openclaw-status-text");
+const openclawRuntimeMeta = document.getElementById("openclaw-runtime-meta");
 const refreshOpenclawStatusBtn = document.getElementById("refresh-openclaw-status");
+const openclawStartBtn = document.getElementById("openclaw-start-btn");
+const openclawStopBtn = document.getElementById("openclaw-stop-btn");
+const openclawRestartBtn = document.getElementById("openclaw-restart-btn");
 
 const openclawViewButtons = Array.from(document.querySelectorAll(".openclaw-view-btn"));
 const openclawMultiViewToggle = document.getElementById("openclaw-multi-view");
@@ -101,10 +106,12 @@ let lastDownloadsFingerprint = "";
 let downloadsTimer = null;
 
 let openclawStatusLoaded = false;
+let openclawObservabilityLoaded = false;
 let openclawChatInFlight = false;
 let openclawLogsTimer = null;
 let openclawActiveLogStream = "gateway";
 let openclawLogCursor = 0;
+let openclawRuntimeActionInFlight = false;
 let openclawSelectedViews = new Set(["chat"]);
 let openclawMultiView = false;
 let openclawModelsCatalog = {
@@ -1303,13 +1310,156 @@ function renderOpenClawUsage(usage) {
   openclawUsage.textContent = parts.length ? parts.join(" • ") : "-";
 }
 
-function updateOpenClawObservability(response) {
-  const provider = response.provider || "provider n/d";
-  const model = response.model || "model n/d";
+function normalizeOpenClawObservability(response = {}) {
+  const skills = Array.isArray(response.skills)
+    ? response.skills
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    : [];
+  const tools = Array.isArray(response.tools)
+    ? response.tools
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    : [];
+
+  return {
+    provider: typeof response.provider === "string" ? response.provider.trim() : "",
+    model: typeof response.model === "string" ? response.model.trim() : "",
+    usage: response.usage && typeof response.usage === "object" ? response.usage : null,
+    skills,
+    tools,
+    updated_at: Number.isFinite(Number(response.updated_at))
+      ? Number(response.updated_at)
+      : null,
+  };
+}
+
+function persistOpenClawObservability(snapshot) {
+  localStorage.setItem(STORAGE_OPENCLAW_OBSERVABILITY, JSON.stringify(snapshot));
+}
+
+function applyOpenClawObservability(snapshot, { persist = true } = {}) {
+  const normalized = normalizeOpenClawObservability(snapshot);
+  const provider = normalized.provider || "provider n/d";
+  const model = normalized.model || "model n/d";
+
   openclawProviderModel.textContent = `${provider} • ${model}`;
-  renderOpenClawUsage(response.usage);
-  renderChipList(openclawSkills, response.skills, "Nenhuma skill reportada");
-  renderChipList(openclawTools, response.tools, "Nenhuma tool reportada");
+  renderOpenClawUsage(normalized.usage);
+  renderChipList(openclawSkills, normalized.skills, "Nenhuma skill reportada");
+  renderChipList(openclawTools, normalized.tools, "Nenhuma tool reportada");
+
+  if (persist) {
+    persistOpenClawObservability(normalized);
+  }
+}
+
+function restoreOpenClawObservabilityFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_OPENCLAW_OBSERVABILITY);
+    if (!raw) {
+      return false;
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return false;
+    }
+
+    applyOpenClawObservability(parsed, { persist: false });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function updateOpenClawObservability(response) {
+  applyOpenClawObservability(response);
+}
+
+async function loadOpenClawObservability() {
+  try {
+    const payload = await fetchJson("/openclaw/observability");
+    applyOpenClawObservability(payload);
+    openclawObservabilityLoaded = true;
+  } catch (error) {
+    if (!openclawObservabilityLoaded) {
+      const restored = restoreOpenClawObservabilityFromStorage();
+      if (!restored) {
+        clearChipList(openclawSkills, "Nenhuma skill reportada");
+        clearChipList(openclawTools, "Nenhuma tool reportada");
+      }
+    }
+  }
+}
+
+function setOpenClawRuntimeButtons(serviceStatus = "") {
+  const normalized = String(serviceStatus || "").toLowerCase();
+  const running = normalized === "running" || normalized === "active";
+
+  openclawStartBtn.disabled = openclawRuntimeActionInFlight || running;
+  openclawStopBtn.disabled = openclawRuntimeActionInFlight || !running;
+  openclawRestartBtn.disabled = openclawRuntimeActionInFlight || !running;
+}
+
+function renderOpenClawRuntimeState(runtime) {
+  if (!runtime || typeof runtime !== "object") {
+    openclawRuntimeMeta.textContent = "runtime: n/d";
+    setOpenClawRuntimeButtons("");
+    return;
+  }
+
+  const status = runtime.service_status || "unknown";
+  const state = runtime.service_state || "unknown";
+  const pid = runtime.pid != null ? `pid ${runtime.pid}` : "sem pid";
+  const rpc = runtime.rpc_ok ? "rpc ok" : "rpc indisponivel";
+  const issues = Array.isArray(runtime.issues) ? runtime.issues.filter(Boolean) : [];
+
+  let text = `runtime: ${status}/${state} • ${pid} • ${rpc}`;
+  if (issues.length) {
+    text += ` • ${issues[0]}`;
+  }
+
+  openclawRuntimeMeta.textContent = text;
+  setOpenClawRuntimeButtons(status);
+}
+
+async function loadOpenClawRuntimeStatus() {
+  try {
+    const runtime = await fetchJson("/openclaw/runtime");
+    renderOpenClawRuntimeState(runtime);
+  } catch (error) {
+    openclawRuntimeMeta.textContent = `runtime indisponivel • ${error.message}`;
+    setOpenClawRuntimeButtons("");
+  }
+}
+
+async function runOpenClawRuntimeAction(action) {
+  if (openclawRuntimeActionInFlight) {
+    return;
+  }
+
+  openclawRuntimeActionInFlight = true;
+  setOpenClawRuntimeButtons("");
+  setStatus(`openclaw ${action}`, "running");
+
+  try {
+    const payload = await fetchJson("/openclaw/runtime", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+
+    renderOpenClawRuntimeState(payload.runtime);
+    await loadOpenClawStatus();
+    await loadOpenClawObservability();
+    setStatus(`openclaw ${action} ok`);
+  } catch (error) {
+    setStatus(`erro openclaw ${action}`, "error");
+    openclawRuntimeMeta.textContent = `falha ${action} • ${error.message}`;
+  } finally {
+    openclawRuntimeActionInFlight = false;
+    await loadOpenClawRuntimeStatus();
+  }
 }
 
 function addOpenClawChatMessage(role, content, meta = "") {
@@ -1657,10 +1807,13 @@ function toggleOpenClawView(view) {
 function onOpenClawTabSelected() {
   startOpenClawLogPolling();
 
-  if (!openclawStatusLoaded) {
-    void loadOpenClawStatus();
+  if (!openclawObservabilityLoaded) {
+    restoreOpenClawObservabilityFromStorage();
   }
 
+  void loadOpenClawStatus();
+  void loadOpenClawRuntimeStatus();
+  void loadOpenClawObservability();
   void loadOpenClawModelCatalog();
 }
 
@@ -1700,7 +1853,9 @@ saveUrlBtn.addEventListener("click", () => {
   daemonBaseUrl = daemonInput.value.trim().replace(/\/$/, "");
   localStorage.setItem(STORAGE_DAEMON_URL, daemonBaseUrl);
   openclawStatusLoaded = false;
+  openclawObservabilityLoaded = false;
   resetOpenClawLogState();
+  openclawRuntimeMeta.textContent = "runtime: verificando...";
   setStatus("url salva");
   void bootstrap();
 });
@@ -1837,6 +1992,20 @@ tabButtons.forEach((button) => {
 
 refreshOpenclawStatusBtn.addEventListener("click", () => {
   void loadOpenClawStatus();
+  void loadOpenClawRuntimeStatus();
+  void loadOpenClawObservability();
+});
+
+openclawStartBtn.addEventListener("click", () => {
+  void runOpenClawRuntimeAction("start");
+});
+
+openclawStopBtn.addEventListener("click", () => {
+  void runOpenClawRuntimeAction("stop");
+});
+
+openclawRestartBtn.addEventListener("click", () => {
+  void runOpenClawRuntimeAction("restart");
 });
 
 openclawViewButtons.forEach((button) => {
@@ -1889,8 +2058,11 @@ async function bootstrap() {
     ensureActiveThread();
 
     renderOpenClawViews();
-    clearChipList(openclawSkills, "Nenhuma skill reportada");
-    clearChipList(openclawTools, "Nenhuma tool reportada");
+    if (!restoreOpenClawObservabilityFromStorage()) {
+      clearChipList(openclawSkills, "Nenhuma skill reportada");
+      clearChipList(openclawTools, "Nenhuma tool reportada");
+    }
+    setOpenClawRuntimeButtons("");
 
     renderThreadList();
     rebuildChatFromThread();

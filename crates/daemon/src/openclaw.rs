@@ -132,7 +132,10 @@ impl OpenClawRuntime {
         let current = self.read_current_model(&alias_map).await?;
 
         let mut cloud_models = self.list_configured_cloud_models(&alias_map).await?;
-        if current.source == "cloud" && !cloud_models.iter().any(|entry| entry.reference == current.reference)
+        if current.source == "cloud"
+            && !cloud_models
+                .iter()
+                .any(|entry| entry.reference == current.reference)
         {
             cloud_models.insert(
                 0,
@@ -167,7 +170,9 @@ impl OpenClawRuntime {
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| {
-                    OpenClawError::BadRequest("model_reference e obrigatorio para source=cloud".to_string())
+                    OpenClawError::BadRequest(
+                        "model_reference e obrigatorio para source=cloud".to_string(),
+                    )
                 })?
                 .to_string();
             return self.set_cloud_model(reference).await;
@@ -186,9 +191,7 @@ impl OpenClawRuntime {
                 })?
                 .to_string();
 
-            return self
-                .set_local_model(path, request.local_model_name)
-                .await;
+            return self.set_local_model(path, request.local_model_name).await;
         }
 
         Err(OpenClawError::BadRequest(
@@ -286,7 +289,10 @@ impl OpenClawRuntime {
         .await
     }
 
-    async fn patch_active_sessions_model(&self, model_reference: &str) -> Result<(), OpenClawError> {
+    async fn patch_active_sessions_model(
+        &self,
+        model_reference: &str,
+    ) -> Result<(), OpenClawError> {
         let sessions = self.list_sessions(800).await?;
         let mut target_keys = BTreeSet::new();
 
@@ -326,7 +332,10 @@ impl OpenClawRuntime {
         }
     }
 
-    async fn list_sessions(&self, limit: usize) -> Result<Vec<OpenClawSessionState>, OpenClawError> {
+    async fn list_sessions(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<OpenClawSessionState>, OpenClawError> {
         let params = json!({
             "limit": limit.clamp(50, 2000),
         });
@@ -436,8 +445,7 @@ impl OpenClawRuntime {
             .is_none()
         {
             return Err(OpenClawError::BadRequest(
-                "OpenClaw nao possui provider openai configurado para modelos locais"
-                    .to_string(),
+                "OpenClaw nao possui provider openai configurado para modelos locais".to_string(),
             ));
         }
 
@@ -458,7 +466,10 @@ impl OpenClawRuntime {
 
         if !exists {
             patch_needed = true;
-            openai_models.push(local_model_catalog_entry(local_model_path, local_model_name.clone()));
+            openai_models.push(local_model_catalog_entry(
+                local_model_path,
+                local_model_name.clone(),
+            ));
         }
 
         let model_reference = format!("openai/{local_model_path}");
@@ -500,8 +511,14 @@ impl OpenClawRuntime {
             }
         });
 
-        self.apply_config_patch(snapshot.hash, patch, "mlx-pilot local model sync", 300, Duration::from_secs(35))
-            .await
+        self.apply_config_patch(
+            snapshot.hash,
+            patch,
+            "mlx-pilot local model sync",
+            300,
+            Duration::from_secs(35),
+        )
+        .await
     }
 
     async fn ensure_runtime_compatibility(&self) -> Result<(), OpenClawError> {
@@ -531,7 +548,10 @@ impl OpenClawRuntime {
                 .collect::<Vec<_>>();
 
             if normalized != path_prepend_original {
-                root_patch.insert("tools".to_string(), json!({ "exec": { "pathPrepend": normalized } }));
+                root_patch.insert(
+                    "tools".to_string(),
+                    json!({ "exec": { "pathPrepend": normalized } }),
+                );
             }
         }
 
@@ -721,10 +741,9 @@ impl OpenClawRuntime {
         ];
 
         let response = self.run_command_json(args, Duration::from_secs(24)).await?;
-        let hash = get_string(&response, "/hash")
-            .ok_or_else(|| OpenClawError::Parse {
-                details: "config.get sem hash".to_string(),
-            })?;
+        let hash = get_string(&response, "/hash").ok_or_else(|| OpenClawError::Parse {
+            details: "config.get sem hash".to_string(),
+        })?;
 
         let parsed = if let Some(value) = response.pointer("/parsed") {
             value.clone()
@@ -757,12 +776,19 @@ impl OpenClawRuntime {
             &mut aliases,
         );
 
-        if let Some(agents) = snapshot.parsed.pointer("/agents").and_then(Value::as_object) {
+        if let Some(agents) = snapshot
+            .parsed
+            .pointer("/agents")
+            .and_then(Value::as_object)
+        {
             for (agent_id, agent_value) in agents {
                 if agent_id == "defaults" {
                     continue;
                 }
-                collect_model_aliases(agent_value.get("models").and_then(Value::as_object), &mut aliases);
+                collect_model_aliases(
+                    agent_value.get("models").and_then(Value::as_object),
+                    &mut aliases,
+                );
             }
         }
 
@@ -794,7 +820,11 @@ impl OpenClawRuntime {
             refs.extend(defaults_models.keys().cloned());
         }
 
-        if let Some(agents) = snapshot.parsed.pointer("/agents").and_then(Value::as_object) {
+        if let Some(agents) = snapshot
+            .parsed
+            .pointer("/agents")
+            .and_then(Value::as_object)
+        {
             for (agent_id, agent_value) in agents {
                 if agent_id == "defaults" {
                     continue;
@@ -868,8 +898,8 @@ impl OpenClawRuntime {
 
         let default_provider = get_string(&response, "/defaults/modelProvider")
             .unwrap_or_else(|| "deepseek".to_string());
-        let default_model = get_string(&response, "/defaults/model")
-            .unwrap_or_else(|| "deepseek-chat".to_string());
+        let default_model =
+            get_string(&response, "/defaults/model").unwrap_or_else(|| "deepseek-chat".to_string());
 
         let mut provider = default_provider.clone();
         let mut model = default_model.clone();
@@ -980,10 +1010,12 @@ impl OpenClawRuntime {
             });
         }
 
-        let mut file = fs::File::open(&path).await.map_err(|error| OpenClawError::Io {
-            context: format!("falha ao abrir {}", path.display()),
-            source: error.to_string(),
-        })?;
+        let mut file = fs::File::open(&path)
+            .await
+            .map_err(|error| OpenClawError::Io {
+                context: format!("falha ao abrir {}", path.display()),
+                source: error.to_string(),
+            })?;
         file.seek(SeekFrom::Start(cursor))
             .await
             .map_err(|error| OpenClawError::Io {
@@ -1065,6 +1097,179 @@ impl OpenClawRuntime {
 
         let response = self.run_command_json(args, timeout_limit).await?;
         Ok(normalize_chat_response(response))
+    }
+
+    pub async fn observability(&self) -> Result<OpenClawObservabilityResponse, OpenClawError> {
+        let _ = self.ensure_runtime_compatibility().await;
+        let history = self.read_recent_history(120).await.ok();
+        let skills_status = self.read_skills_status().await.ok();
+
+        if history.is_none() && skills_status.is_none() {
+            return Err(OpenClawError::Unavailable(
+                "nao foi possivel carregar observabilidade do openclaw".to_string(),
+            ));
+        }
+
+        let mut provider = None;
+        let mut model = None;
+        let mut usage = None;
+        let mut updated_at = None;
+        let mut tools = Vec::new();
+        let mut skills = Vec::new();
+
+        if let Some(history_value) = history.as_ref() {
+            let latest = latest_assistant_message(history_value);
+            if let Some(assistant) = latest {
+                provider = assistant
+                    .get("provider")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToString::to_string);
+                model = assistant
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToString::to_string);
+                usage = assistant.get("usage").and_then(build_usage);
+                updated_at = assistant.get("timestamp").and_then(Value::as_u64);
+            }
+
+            tools = extract_tools_from_history(history_value);
+        }
+
+        if let Some(skills_value) = skills_status.as_ref() {
+            skills = extract_eligible_skills(skills_value);
+        }
+
+        let mut config_snapshot = None;
+        if skills.is_empty() || tools.is_empty() {
+            config_snapshot = self.fetch_config_snapshot().await.ok();
+        }
+
+        if skills.is_empty() {
+            if let Some(snapshot) = config_snapshot.as_ref() {
+                skills = extract_skills_from_config(&snapshot.parsed);
+            }
+        }
+
+        if tools.is_empty() {
+            if let Some(snapshot) = config_snapshot.as_ref() {
+                tools = extract_tools_from_config(&snapshot.parsed);
+            }
+        }
+
+        if tools.is_empty() {
+            tools.push("exec".to_string());
+        }
+        if skills.is_empty() {
+            skills.push("default".to_string());
+        }
+
+        Ok(OpenClawObservabilityResponse {
+            session_key: self.cfg.session_key.clone(),
+            provider,
+            model,
+            usage,
+            skills,
+            tools,
+            updated_at,
+        })
+    }
+
+    pub async fn runtime_status(&self) -> Result<OpenClawRuntimeStateResponse, OpenClawError> {
+        let raw = self.read_gateway_status().await?;
+        Ok(parse_runtime_status(&raw))
+    }
+
+    pub async fn runtime_action(
+        &self,
+        request: OpenClawRuntimeActionRequest,
+    ) -> Result<OpenClawRuntimeActionResponse, OpenClawError> {
+        let action = request.action.trim().to_lowercase();
+        let (args, timeout_limit) = match action.as_str() {
+            "start" => (
+                vec![
+                    "gateway".to_string(),
+                    "start".to_string(),
+                    "--json".to_string(),
+                ],
+                Duration::from_secs(45),
+            ),
+            "stop" => (
+                vec![
+                    "gateway".to_string(),
+                    "stop".to_string(),
+                    "--json".to_string(),
+                ],
+                Duration::from_secs(35),
+            ),
+            "restart" => (
+                vec![
+                    "gateway".to_string(),
+                    "restart".to_string(),
+                    "--json".to_string(),
+                ],
+                Duration::from_secs(45),
+            ),
+            _ => {
+                return Err(OpenClawError::BadRequest(
+                    "acao invalida: use start, stop ou restart".to_string(),
+                ));
+            }
+        };
+
+        self.run_command_json(args, timeout_limit).await?;
+        let runtime = self.runtime_status().await?;
+
+        Ok(OpenClawRuntimeActionResponse { action, runtime })
+    }
+
+    async fn read_recent_history(&self, limit: usize) -> Result<Value, OpenClawError> {
+        let params = json!({
+            "sessionKey": self.cfg.session_key,
+            "limit": limit.clamp(10, 500),
+        });
+        let params_json = serde_json::to_string(&params).map_err(|error| OpenClawError::Parse {
+            details: format!("falha serializando params chat.history: {error}"),
+        })?;
+
+        let args = vec![
+            "gateway".to_string(),
+            "call".to_string(),
+            "chat.history".to_string(),
+            "--json".to_string(),
+            "--timeout".to_string(),
+            "15000".to_string(),
+            "--params".to_string(),
+            params_json,
+        ];
+
+        self.run_command_json(args, Duration::from_secs(20)).await
+    }
+
+    async fn read_skills_status(&self) -> Result<Value, OpenClawError> {
+        let args = vec![
+            "gateway".to_string(),
+            "call".to_string(),
+            "skills.status".to_string(),
+            "--json".to_string(),
+            "--timeout".to_string(),
+            "15000".to_string(),
+        ];
+
+        self.run_command_json(args, Duration::from_secs(20)).await
+    }
+
+    async fn read_gateway_status(&self) -> Result<Value, OpenClawError> {
+        let args = vec![
+            "gateway".to_string(),
+            "status".to_string(),
+            "--json".to_string(),
+        ];
+
+        self.run_command_json(args, Duration::from_secs(25)).await
     }
 
     fn resolve_log_path(&self, stream: &str) -> Result<PathBuf, OpenClawError> {
@@ -1233,6 +1438,199 @@ pub struct OpenClawUsage {
     pub cache_write: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OpenClawObservabilityResponse {
+    pub session_key: String,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub usage: Option<OpenClawUsage>,
+    pub skills: Vec<String>,
+    pub tools: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OpenClawRuntimeStateResponse {
+    pub service_status: String,
+    pub service_state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u64>,
+    pub rpc_ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port_status: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub issues: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OpenClawRuntimeActionRequest {
+    pub action: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OpenClawRuntimeActionResponse {
+    pub action: String,
+    pub runtime: OpenClawRuntimeStateResponse,
+}
+
+fn latest_assistant_message(root: &Value) -> Option<&Value> {
+    root.pointer("/messages")
+        .and_then(Value::as_array)
+        .and_then(|messages| {
+            messages
+                .iter()
+                .rev()
+                .find(|entry| entry.get("role").and_then(Value::as_str) == Some("assistant"))
+        })
+}
+
+fn extract_tools_from_history(root: &Value) -> Vec<String> {
+    let mut tools = Vec::new();
+
+    if let Some(messages) = root.pointer("/messages").and_then(Value::as_array) {
+        for message in messages.iter().rev() {
+            if let Some(name) = message
+                .get("toolName")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                push_unique_name(&mut tools, name);
+            }
+
+            if let Some(contents) = message.get("content").and_then(Value::as_array) {
+                for content in contents {
+                    if let Some(name) = content
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                    {
+                        push_unique_name(&mut tools, name);
+                    }
+                }
+            }
+        }
+    }
+
+    tools
+}
+
+fn extract_eligible_skills(root: &Value) -> Vec<String> {
+    let mut skills = Vec::new();
+
+    if let Some(entries) = root.pointer("/skills").and_then(Value::as_array) {
+        for entry in entries {
+            let eligible = entry
+                .get("eligible")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let disabled = entry
+                .get("disabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+
+            if !eligible || disabled {
+                continue;
+            }
+
+            if let Some(name) = entry
+                .get("name")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                push_unique_name(&mut skills, name);
+            }
+        }
+    }
+
+    skills
+}
+
+fn extract_skills_from_config(root: &Value) -> Vec<String> {
+    let mut skills = Vec::new();
+
+    if let Some(entries) = root.pointer("/skills/entries").and_then(Value::as_object) {
+        for name in entries.keys() {
+            let normalized = name.trim();
+            if !normalized.is_empty() {
+                push_unique_name(&mut skills, normalized);
+            }
+        }
+    }
+
+    skills
+}
+
+fn extract_tools_from_config(root: &Value) -> Vec<String> {
+    let mut tools = Vec::new();
+    let ignored = ["allow", "deny", "profile", "elevated"];
+
+    if let Some(entries) = root.pointer("/tools").and_then(Value::as_object) {
+        for name in entries.keys() {
+            let normalized = name.trim();
+            if normalized.is_empty() || ignored.iter().any(|value| value == &normalized) {
+                continue;
+            }
+            push_unique_name(&mut tools, normalized);
+        }
+    }
+
+    tools
+}
+
+fn parse_runtime_status(root: &Value) -> OpenClawRuntimeStateResponse {
+    let service_status =
+        get_string(root, "/service/runtime/status").unwrap_or_else(|| "unknown".to_string());
+    let service_state =
+        get_string(root, "/service/runtime/state").unwrap_or_else(|| "unknown".to_string());
+    let pid = get_u64(root, "/service/runtime/pid");
+    let rpc_ok = root
+        .pointer("/rpc/ok")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let port_status = get_string(root, "/port/status");
+    let issues = root
+        .pointer("/service/configAudit/issues")
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| entry.get("message").and_then(Value::as_str))
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    OpenClawRuntimeStateResponse {
+        service_status,
+        service_state,
+        pid,
+        rpc_ok,
+        port_status,
+        issues,
+    }
+}
+
+fn push_unique_name(values: &mut Vec<String>, candidate: &str) {
+    if values.len() >= 48 {
+        return;
+    }
+
+    let normalized = candidate.trim();
+    if normalized.is_empty() {
+        return;
+    }
+
+    if !values.iter().any(|value| value == normalized) {
+        values.push(normalized.to_string());
+    }
 }
 
 fn local_model_catalog_entry(local_model_path: &str, local_model_name: Option<String>) -> Value {
@@ -1451,7 +1849,10 @@ fn build_usage(value: &Value) -> Option<OpenClawUsage> {
         output: value.get("output").and_then(Value::as_u64),
         cache_read: value.get("cacheRead").and_then(Value::as_u64),
         cache_write: value.get("cacheWrite").and_then(Value::as_u64),
-        total: value.get("total").and_then(Value::as_u64),
+        total: value
+            .get("total")
+            .and_then(Value::as_u64)
+            .or_else(|| value.get("totalTokens").and_then(Value::as_u64)),
     };
 
     if usage.input.is_none()

@@ -21,3 +21,4 @@ bytes = "1"
 tokio-stream = "0.1"
 mlx-ollama-core = { path = "../core" }
 mlx-provider = { path = "../providers/mlx" }
+ollama-provider = { path = "../providers/ollama" }

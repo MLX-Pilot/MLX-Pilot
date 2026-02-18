@@ -5,6 +5,7 @@ mod openclaw;
 
 use std::io;
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
@@ -17,27 +18,32 @@ use catalog::{
     CatalogConfig, CatalogError, CatalogSearchQuery, CatalogService, CatalogSourceDescriptor,
     CreateDownloadRequest, DownloadJob, RemoteModelCard,
 };
-use chat_stream::{spawn_chat_stream, ChatRuntimeConfig};
+use chat_stream::{spawn_chat_stream, ChatRuntimeConfig, ChatStreamEvent};
 use config::AppConfig;
 use mlx_ollama_core::{ChatRequest, ChatResponse, ModelDescriptor, ModelProvider, ProviderError};
 use mlx_provider::{MlxProvider, MlxProviderConfig};
+use ollama_provider::{OllamaProvider, OllamaProviderConfig};
 use openclaw::{
     OpenClawChatRequest, OpenClawChatResponse, OpenClawCloudModel, OpenClawCurrentModel,
     OpenClawError, OpenClawLogChunkResponse, OpenClawLogQuery, OpenClawModelsStateResponse,
-    OpenClawRuntime, OpenClawRuntimeConfig, OpenClawSetModelRequest, OpenClawStatusResponse,
+    OpenClawObservabilityResponse, OpenClawRuntime, OpenClawRuntimeActionRequest,
+    OpenClawRuntimeActionResponse, OpenClawRuntimeConfig, OpenClawRuntimeStateResponse,
+    OpenClawSetModelRequest, OpenClawStatusResponse,
 };
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Clone)]
 struct AppState {
     provider: Arc<dyn ModelProvider>,
+    openclaw_local_provider: Arc<dyn ModelProvider>,
     catalog: Arc<CatalogService>,
     chat_runtime: ChatRuntimeConfig,
     openclaw_runtime: Arc<OpenClawRuntime>,
@@ -179,13 +185,27 @@ async fn main() -> anyhow::Result<()> {
     let cfg = AppConfig::from_env();
     info!("starting daemon on {}", cfg.bind_addr);
 
-    let provider = Arc::new(MlxProvider::new(MlxProviderConfig {
+    let mlx_provider = Arc::new(MlxProvider::new(MlxProviderConfig {
         models_dir: cfg.models_dir.clone(),
         command: cfg.mlx_command.clone(),
         command_prefix_args: cfg.mlx_prefix_args.clone(),
         command_suffix_args: cfg.mlx_suffix_args.clone(),
         timeout: cfg.mlx_timeout,
     }));
+
+    let provider: Arc<dyn ModelProvider> = match cfg.local_provider.as_str() {
+        "mlx" => mlx_provider.clone(),
+        "ollama" => Arc::new(OllamaProvider::new(OllamaProviderConfig {
+            base_url: cfg.ollama_base_url.clone(),
+            timeout: cfg.ollama_timeout,
+        })),
+        other => {
+            warn!("unknown APP_LOCAL_PROVIDER '{other}', falling back to mlx");
+            mlx_provider.clone()
+        }
+    };
+
+    info!("chat provider selected: {}", provider.provider_id());
 
     let catalog = Arc::new(CatalogService::new(CatalogConfig {
         hf_api_base: cfg.hf_api_base.clone(),
@@ -197,6 +217,7 @@ async fn main() -> anyhow::Result<()> {
 
     let state = AppState {
         provider,
+        openclaw_local_provider: mlx_provider,
         catalog,
         chat_runtime: ChatRuntimeConfig {
             models_dir: cfg.models_dir.clone(),
@@ -224,6 +245,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/chat", post(chat))
         .route("/chat/stream", post(chat_stream))
         .route("/openclaw/status", get(openclaw_status))
+        .route("/openclaw/observability", get(openclaw_observability))
+        .route(
+            "/openclaw/runtime",
+            get(openclaw_runtime_status).post(openclaw_runtime_action),
+        )
         .route("/openclaw/models", get(openclaw_models))
         .route("/openclaw/logs", get(openclaw_logs))
         .route("/openclaw/model", post(openclaw_set_model))
@@ -298,7 +324,11 @@ async fn chat_stream(
         }));
     }
 
-    let receiver = spawn_chat_stream(state.chat_runtime.clone(), request);
+    let receiver = if state.provider.provider_id() == "mlx" {
+        spawn_chat_stream(state.chat_runtime.clone(), request)
+    } else {
+        spawn_provider_compat_stream(state.provider.clone(), request)
+    };
 
     let stream = ReceiverStream::new(receiver).map(|event| {
         let mut payload = serde_json::to_vec(&event).unwrap_or_else(|_| {
@@ -317,6 +347,54 @@ async fn chat_stream(
         .map_err(|error| AppError::NotFound(format!("falha ao criar resposta: {error}")))?;
 
     Ok(response)
+}
+
+fn spawn_provider_compat_stream(
+    provider: Arc<dyn ModelProvider>,
+    request: ChatRequest,
+) -> mpsc::Receiver<ChatStreamEvent> {
+    let (tx, rx) = mpsc::channel(16);
+
+    tokio::spawn(async move {
+        let started = Instant::now();
+        if tx.send(ChatStreamEvent::status("waiting")).await.is_err() {
+            return;
+        }
+
+        match provider.chat(request).await {
+            Ok(response) => {
+                let answer = response.message.content.trim().to_string();
+                if !answer.is_empty() {
+                    let _ = tx.send(ChatStreamEvent::answer_delta(answer)).await;
+                }
+
+                let latency_ms = response
+                    .latency_ms
+                    .max(started.elapsed().as_millis() as u64);
+
+                let done_event = ChatStreamEvent {
+                    event: "done".to_string(),
+                    status: Some("completed".to_string()),
+                    delta: None,
+                    message: None,
+                    prompt_tokens: Some(response.usage.prompt_tokens),
+                    completion_tokens: Some(response.usage.completion_tokens),
+                    total_tokens: Some(response.usage.total_tokens),
+                    prompt_tps: None,
+                    generation_tps: None,
+                    peak_memory_gb: None,
+                    latency_ms: Some(latency_ms),
+                    raw_metrics: None,
+                };
+                let _ = tx.send(done_event).await;
+            }
+            Err(error) => {
+                let _ = tx.send(ChatStreamEvent::error(error.to_string())).await;
+            }
+        }
+    });
+
+    rx
 }
 
 async fn catalog_sources(
@@ -374,6 +452,28 @@ async fn openclaw_status(
     Ok(Json(state.openclaw_runtime.status().await))
 }
 
+async fn openclaw_observability(
+    State(state): State<AppState>,
+) -> Result<Json<OpenClawObservabilityResponse>, AppError> {
+    let response = state.openclaw_runtime.observability().await?;
+    Ok(Json(response))
+}
+
+async fn openclaw_runtime_status(
+    State(state): State<AppState>,
+) -> Result<Json<OpenClawRuntimeStateResponse>, AppError> {
+    let status = state.openclaw_runtime.runtime_status().await?;
+    Ok(Json(status))
+}
+
+async fn openclaw_runtime_action(
+    State(state): State<AppState>,
+    Json(request): Json<OpenClawRuntimeActionRequest>,
+) -> Result<Json<OpenClawRuntimeActionResponse>, AppError> {
+    let response = state.openclaw_runtime.runtime_action(request).await?;
+    Ok(Json(response))
+}
+
 async fn openclaw_logs(
     State(state): State<AppState>,
     Query(query): Query<OpenClawLogQuery>,
@@ -386,7 +486,7 @@ async fn openclaw_models(
     State(state): State<AppState>,
 ) -> Result<Json<OpenClawModelsResponse>, AppError> {
     let model_state: OpenClawModelsStateResponse = state.openclaw_runtime.models_state().await?;
-    let local_models = state.provider.list_models().await?;
+    let local_models = state.openclaw_local_provider.list_models().await?;
 
     let mapped_local = local_models
         .into_iter()
@@ -436,11 +536,13 @@ async fn openclaw_set_model(
                 ))
             })?;
 
-        let local_models = state.provider.list_models().await?;
+        let local_models = state.openclaw_local_provider.list_models().await?;
         let selected = local_models
             .into_iter()
             .find(|entry| entry.id == model_id)
-            .ok_or_else(|| AppError::NotFound(format!("modelo local '{model_id}' nao encontrado")))?;
+            .ok_or_else(|| {
+                AppError::NotFound(format!("modelo local '{model_id}' nao encontrado"))
+            })?;
 
         let result = state
             .openclaw_runtime

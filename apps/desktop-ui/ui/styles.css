@@ -804,6 +804,20 @@ textarea:focus {
   gap: 12px;
 }
 
+.openclaw-header-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.openclaw-runtime-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .openclaw-controls {
   display: flex;
   justify-content: space-between;
@@ -1003,6 +1017,19 @@ textarea:focus {
 }
 
 @media (max-width: 760px) {
+  .openclaw-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .openclaw-header-actions {
+    align-items: stretch;
+  }
+
+  .openclaw-runtime-actions {
+    justify-content: flex-start;
+  }
+
   .discover-controls,
   .openclaw-controls,
   .openclaw-log-controls {

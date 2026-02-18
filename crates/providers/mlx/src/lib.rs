@@ -277,12 +277,13 @@ impl ModelProvider for MlxProvider {
             });
         }
 
-        let model_scan = Self::scan_model_dir(&model_path)
-            .await
-            .map_err(|source| ProviderError::Io {
-                context: format!("reading model directory {}", model_path.display()),
-                source,
-            })?;
+        let model_scan =
+            Self::scan_model_dir(&model_path)
+                .await
+                .map_err(|source| ProviderError::Io {
+                    context: format!("reading model directory {}", model_path.display()),
+                    source,
+                })?;
         if !model_scan.is_runnable() {
             return Err(ProviderError::InvalidRequest {
                 details: format!(
