@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::process::Stdio;
+use std::process::{ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -257,6 +257,7 @@ async fn run_chat_stream(
     }
 
     args.extend(cfg.command_suffix_args.clone());
+    let command_preview = format!("{} {}", cfg.command, args.join(" "));
 
     send_event(&tx, ChatStreamEvent::status("waiting")).await?;
 
@@ -368,10 +369,22 @@ async fn run_chat_stream(
             .map_err(|error| ChatStreamError::Io(format!("falha ao aguardar stderr: {error}")))?;
 
         if !status.success() {
+            let mut failure_details = describe_exit_status(status);
+            let trimmed_stderr = stderr_output.trim();
+            if !trimmed_stderr.is_empty() {
+                failure_details.push_str("; ");
+                failure_details.push_str(trimmed_stderr);
+            } else {
+                let stdout_tail = tail_text(&collected, 700);
+                if !stdout_tail.is_empty() {
+                    failure_details.push_str("; stdout: ");
+                    failure_details.push_str(&stdout_tail);
+                }
+            }
+
             return Err(ChatStreamError::CommandFailed(format!(
                 "comando '{}' falhou: {}",
-                cfg.command,
-                stderr_output.trim()
+                command_preview, failure_details
             )));
         }
 
@@ -641,4 +654,29 @@ fn parse_tokens_and_rate(rest: &str) -> (Option<usize>, Option<f32>) {
 fn parse_f32_flexible(value: &str) -> Option<f32> {
     let normalized = value.trim().replace(',', ".");
     normalized.parse::<f32>().ok()
+}
+
+fn describe_exit_status(status: ExitStatus) -> String {
+    status
+        .code()
+        .map(|value| format!("exit code {value}"))
+        .unwrap_or_else(|| "terminated by signal".to_string())
+}
+
+fn tail_text(raw: &str, max_chars: usize) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let total_chars = trimmed.chars().count();
+    if total_chars <= max_chars {
+        return trimmed.to_string();
+    }
+
+    let tail = trimmed
+        .chars()
+        .skip(total_chars.saturating_sub(max_chars))
+        .collect::<String>();
+    format!("...{tail}")
 }

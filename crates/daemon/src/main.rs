@@ -22,10 +22,11 @@ use config::AppConfig;
 use mlx_ollama_core::{ChatRequest, ChatResponse, ModelDescriptor, ModelProvider, ProviderError};
 use mlx_provider::{MlxProvider, MlxProviderConfig};
 use openclaw::{
-    OpenClawChatRequest, OpenClawChatResponse, OpenClawError, OpenClawLogChunkResponse,
-    OpenClawLogQuery, OpenClawRuntime, OpenClawRuntimeConfig, OpenClawStatusResponse,
+    OpenClawChatRequest, OpenClawChatResponse, OpenClawCloudModel, OpenClawCurrentModel,
+    OpenClawError, OpenClawLogChunkResponse, OpenClawLogQuery, OpenClawModelsStateResponse,
+    OpenClawRuntime, OpenClawRuntimeConfig, OpenClawSetModelRequest, OpenClawStatusResponse,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
@@ -134,6 +135,7 @@ fn map_openclaw_error(error: OpenClawError) -> (StatusCode, String) {
             StatusCode::GATEWAY_TIMEOUT,
             format!("timeout ao consultar openclaw ({seconds}s)"),
         ),
+        OpenClawError::Unavailable(message) => (StatusCode::SERVICE_UNAVAILABLE, message),
     }
 }
 
@@ -146,6 +148,28 @@ struct ErrorBody {
 struct HealthBody {
     status: &'static str,
     provider: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct OpenClawLocalModel {
+    id: String,
+    name: String,
+    path: String,
+}
+
+#[derive(Debug, Serialize)]
+struct OpenClawModelsResponse {
+    session_key: String,
+    current: OpenClawCurrentModel,
+    cloud_models: Vec<OpenClawCloudModel>,
+    local_models: Vec<OpenClawLocalModel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenClawModelRequest {
+    source: String,
+    model_reference: Option<String>,
+    local_model_id: Option<String>,
 }
 
 #[tokio::main]
@@ -200,7 +224,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/chat", post(chat))
         .route("/chat/stream", post(chat_stream))
         .route("/openclaw/status", get(openclaw_status))
+        .route("/openclaw/models", get(openclaw_models))
         .route("/openclaw/logs", get(openclaw_logs))
+        .route("/openclaw/model", post(openclaw_set_model))
         .route("/openclaw/chat", post(openclaw_chat))
         .route("/catalog/sources", get(catalog_sources))
         .route("/catalog/models", get(catalog_models))
@@ -354,6 +380,83 @@ async fn openclaw_logs(
 ) -> Result<Json<OpenClawLogChunkResponse>, AppError> {
     let chunk = state.openclaw_runtime.read_logs(query).await?;
     Ok(Json(chunk))
+}
+
+async fn openclaw_models(
+    State(state): State<AppState>,
+) -> Result<Json<OpenClawModelsResponse>, AppError> {
+    let model_state: OpenClawModelsStateResponse = state.openclaw_runtime.models_state().await?;
+    let local_models = state.provider.list_models().await?;
+
+    let mapped_local = local_models
+        .into_iter()
+        .map(|entry| OpenClawLocalModel {
+            id: entry.id,
+            name: entry.name,
+            path: entry.path,
+        })
+        .collect::<Vec<_>>();
+
+    Ok(Json(OpenClawModelsResponse {
+        session_key: model_state.session_key,
+        current: model_state.current,
+        cloud_models: model_state.cloud_models,
+        local_models: mapped_local,
+    }))
+}
+
+async fn openclaw_set_model(
+    State(state): State<AppState>,
+    Json(request): Json<OpenClawModelRequest>,
+) -> Result<Json<OpenClawCurrentModel>, AppError> {
+    let source = request.source.trim().to_lowercase();
+
+    if source == "cloud" {
+        let result = state
+            .openclaw_runtime
+            .set_model(OpenClawSetModelRequest {
+                source,
+                model_reference: request.model_reference,
+                local_model_path: None,
+                local_model_name: None,
+            })
+            .await?;
+        return Ok(Json(result));
+    }
+
+    if source == "local" {
+        let model_id = request
+            .local_model_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                AppError::OpenClaw(OpenClawError::BadRequest(
+                    "local_model_id e obrigatorio para source=local".to_string(),
+                ))
+            })?;
+
+        let local_models = state.provider.list_models().await?;
+        let selected = local_models
+            .into_iter()
+            .find(|entry| entry.id == model_id)
+            .ok_or_else(|| AppError::NotFound(format!("modelo local '{model_id}' nao encontrado")))?;
+
+        let result = state
+            .openclaw_runtime
+            .set_model(OpenClawSetModelRequest {
+                source,
+                model_reference: None,
+                local_model_path: Some(selected.path),
+                local_model_name: Some(selected.name),
+            })
+            .await?;
+        return Ok(Json(result));
+    }
+
+    Err(AppError::OpenClaw(OpenClawError::BadRequest(
+        "source invalido: use cloud ou local".to_string(),
+    )))
 }
 
 async fn openclaw_chat(

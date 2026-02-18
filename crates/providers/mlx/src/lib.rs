@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{Command as StdCommand, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -89,8 +89,12 @@ impl MlxProvider {
             .unwrap_or_else(|| path.display().to_string())
     }
 
-    async fn looks_like_model_dir(path: &Path) -> Result<bool, std::io::Error> {
+    async fn scan_model_dir(path: &Path) -> Result<ModelScan, std::io::Error> {
         let mut entries = tokio::fs::read_dir(path).await?;
+        let mut has_config = false;
+        let mut has_safetensors_index = false;
+        let mut safetensors_files = 0_usize;
+        let mut safetensors_bytes = 0_u64;
 
         loop {
             let entry = entries.next_entry().await?;
@@ -101,20 +105,89 @@ impl MlxProvider {
             }
 
             let file_name = entry.file_name().to_string_lossy().to_ascii_lowercase();
-            if file_name == "config.json"
-                || file_name == "generation_config.json"
-                || file_name == "tokenizer.json"
-                || file_name == "tokenizer.model"
-                || file_name.ends_with(".safetensors")
-                || file_name.ends_with(".bin")
-                || file_name.ends_with(".gguf")
-                || file_name.ends_with(".mlx")
-            {
-                return Ok(true);
+            if file_name == "config.json" {
+                has_config = true;
+            }
+            if file_name == "model.safetensors.index.json" {
+                has_safetensors_index = true;
+            }
+            if file_name.ends_with(".safetensors") {
+                safetensors_files += 1;
+                safetensors_bytes = safetensors_bytes.saturating_add(metadata.len());
             }
         }
 
-        Ok(false)
+        Ok(ModelScan {
+            has_config,
+            has_safetensors_index,
+            safetensors_files,
+            safetensors_bytes,
+        })
+    }
+
+    fn format_size(bytes: u64) -> String {
+        const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+        format!("{:.1} GiB", bytes as f64 / GIB)
+    }
+
+    fn detect_system_memory_bytes() -> Option<u64> {
+        #[cfg(target_os = "macos")]
+        {
+            let output = StdCommand::new("sysctl")
+                .arg("-n")
+                .arg("hw.memsize")
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            let raw = String::from_utf8_lossy(&output.stdout);
+            return raw.trim().parse::<u64>().ok();
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            None
+        }
+    }
+
+    fn command_status_details(status: &ExitStatus) -> String {
+        status
+            .code()
+            .map(|code| format!("exit code {code}"))
+            .unwrap_or_else(|| "terminated by signal".to_string())
+    }
+
+    fn tail_text(raw: &str, max_chars: usize) -> String {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return String::new();
+        }
+
+        let char_count = trimmed.chars().count();
+        if char_count <= max_chars {
+            return trimmed.to_string();
+        }
+
+        let tail = trimmed
+            .chars()
+            .skip(char_count.saturating_sub(max_chars))
+            .collect::<String>();
+        format!("...{tail}")
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct ModelScan {
+    has_config: bool,
+    has_safetensors_index: bool,
+    safetensors_files: usize,
+    safetensors_bytes: u64,
+}
+
+impl ModelScan {
+    fn is_runnable(self) -> bool {
+        self.has_config && (self.safetensors_files > 0 || self.has_safetensors_index)
     }
 }
 
@@ -167,14 +240,13 @@ impl ModelProvider for MlxProvider {
                 continue;
             }
 
-            let is_model_dir =
-                Self::looks_like_model_dir(&path)
-                    .await
-                    .map_err(|source| ProviderError::Io {
-                        context: format!("reading model directory {}", path.display()),
-                        source,
-                    })?;
-            if !is_model_dir {
+            let scan = Self::scan_model_dir(&path)
+                .await
+                .map_err(|source| ProviderError::Io {
+                    context: format!("reading model directory {}", path.display()),
+                    source,
+                })?;
+            if !scan.is_runnable() {
                 continue;
             }
 
@@ -203,6 +275,37 @@ impl ModelProvider for MlxProvider {
             return Err(ProviderError::ModelNotFound {
                 model_id: request.model_id,
             });
+        }
+
+        let model_scan = Self::scan_model_dir(&model_path)
+            .await
+            .map_err(|source| ProviderError::Io {
+                context: format!("reading model directory {}", model_path.display()),
+                source,
+            })?;
+        if !model_scan.is_runnable() {
+            return Err(ProviderError::InvalidRequest {
+                details: format!(
+                    "modelo '{}' nao possui pesos safetensors validos para mlx_lm.generate",
+                    model_path.display()
+                ),
+            });
+        }
+
+        if model_scan.safetensors_bytes > 0 {
+            if let Some(system_memory) = Self::detect_system_memory_bytes() {
+                let safe_limit = system_memory.saturating_mul(85) / 100;
+                if model_scan.safetensors_bytes > safe_limit {
+                    return Err(ProviderError::Unavailable {
+                        details: format!(
+                            "modelo '{}' exige aproximadamente {} de pesos, acima do limite seguro da maquina (RAM fisica {}); escolha um modelo menor ou quantizacao mais agressiva",
+                            model_path.display(),
+                            Self::format_size(model_scan.safetensors_bytes),
+                            Self::format_size(system_memory),
+                        ),
+                    });
+                }
+            }
         }
 
         let prompt = Self::build_prompt(&request.messages);
@@ -250,14 +353,30 @@ impl ModelProvider for MlxProvider {
                 source,
             })?;
 
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
         if !output.status.success() {
+            let status_detail = Self::command_status_details(&output.status);
+            let mut details = status_detail;
+            if !stderr.is_empty() {
+                details.push_str("; ");
+                details.push_str(&stderr);
+            } else {
+                let stdout_tail = Self::tail_text(&stdout, 700);
+                if !stdout_tail.is_empty() {
+                    details.push_str("; stdout: ");
+                    details.push_str(&stdout_tail);
+                }
+            }
+
             return Err(ProviderError::CommandFailed {
                 command: command_debug,
-                stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+                stderr: details,
             });
         }
 
-        let raw = String::from_utf8_lossy(&output.stdout).to_string();
+        let raw = stdout;
         let text = Self::extract_text(&raw);
 
         let prompt_tokens = prompt.split_whitespace().count();

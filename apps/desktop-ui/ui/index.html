@@ -10,8 +10,8 @@
     <div class="bg-layer bg-a"></div>
     <div class="bg-layer bg-b"></div>
 
-    <div class="app-shell">
-      <aside class="sidebar glass">
+    <div id="app-shell" class="app-shell chat-mode">
+      <aside id="chat-sidebar" class="chat-sidebar glass">
         <div class="brand">
           <p class="brand-eyebrow">MLX Pilot</p>
           <h1>Local + Cloud Model Hub</h1>
@@ -29,11 +29,11 @@
 
         <section class="panel-block">
           <div class="panel-title-row">
-            <h2>Modelos Locais</h2>
-            <button id="refresh-models" class="ghost-btn">Atualizar</button>
+            <h2>Historico</h2>
+            <button id="new-chat-thread" class="ghost-btn">Nova conversa</button>
           </div>
-          <p id="local-model-count" class="meta-note">-</p>
-          <ul id="models-list" class="models-list"></ul>
+          <p id="chat-history-meta" class="meta-note">-</p>
+          <ul id="chat-history-list" class="history-list"></ul>
         </section>
       </aside>
 
@@ -50,14 +50,23 @@
               OpenClaw
             </button>
           </div>
-          <div id="status-pill" class="status-pill">pronto</div>
+
+          <div class="topbar-right">
+            <div id="chat-model-switcher" class="chat-model-switcher">
+              <label for="chat-model-select">Modelo</label>
+              <select id="chat-model-select" class="input compact-input"></select>
+              <button id="refresh-models" class="ghost-btn">Atualizar</button>
+            </div>
+            <div id="status-pill" class="status-pill">pronto</div>
+          </div>
         </header>
 
         <section id="panel-chat" class="main-panel active" role="tabpanel">
           <header class="chat-header glass">
             <div>
               <p class="chat-eyebrow">Sessao Atual</p>
-              <h2 id="selected-model-label">Nenhum modelo selecionado</h2>
+              <h2 id="selected-thread-label">Nova conversa</h2>
+              <p id="selected-model-label" class="meta-note">Nenhum modelo selecionado</p>
             </div>
           </header>
 
@@ -71,6 +80,7 @@
               required
             ></textarea>
             <div class="chat-form-actions">
+              <button id="cancel-edit" type="button" class="ghost-btn hidden">Cancelar edicao</button>
               <button id="stop-generation" type="button" class="ghost-btn" disabled>Parar</button>
               <button type="submit" class="primary-btn">Enviar</button>
             </div>
@@ -118,20 +128,51 @@
         <section id="panel-openclaw" class="main-panel" role="tabpanel">
           <header class="openclaw-header glass">
             <div>
-              <p class="chat-eyebrow">OpenClaw Native</p>
-              <h2>Logs em tempo real + Chat de desenvolvimento</h2>
-            </div>
-
-            <div class="openclaw-header-actions">
+              <p class="chat-eyebrow">OpenClaw Integration</p>
+              <h2>Chat, observabilidade e configuracao</h2>
               <p id="openclaw-status-text" class="meta-note">status: verificando...</p>
-              <button id="refresh-openclaw-status" class="ghost-btn">Atualizar status</button>
             </div>
+            <button id="refresh-openclaw-status" class="ghost-btn">Atualizar status</button>
           </header>
 
-          <section class="openclaw-layout">
-            <article class="openclaw-log-panel glass">
+          <section class="openclaw-controls glass">
+            <div class="openclaw-subtabs" role="tablist" aria-label="OpenClaw visualizacao">
+              <button class="tab-btn openclaw-view-btn active" data-openclaw-view="chat">Chat</button>
+              <button class="tab-btn openclaw-view-btn" data-openclaw-view="logs">Logs</button>
+              <button class="tab-btn openclaw-view-btn" data-openclaw-view="observability">Skills e Tools</button>
+              <button class="tab-btn openclaw-view-btn" data-openclaw-view="config">Configuracao</button>
+            </div>
+
+            <label class="openclaw-multi-toggle">
+              <input id="openclaw-multi-view" type="checkbox" />
+              Mostrar mais de um painel ao mesmo tempo
+            </label>
+          </section>
+
+          <section id="openclaw-panels" class="openclaw-panels single-mode">
+            <article id="openclaw-panel-chat" class="openclaw-panel openclaw-chat-panel glass active">
               <div class="panel-title-row">
-                <h3>Logs</h3>
+                <h3>Chat com OpenClaw</h3>
+              </div>
+
+              <section id="openclaw-chat-log" class="openclaw-chat-log"></section>
+
+              <form id="openclaw-chat-form" class="openclaw-chat-form">
+                <textarea
+                  id="openclaw-message-input"
+                  rows="4"
+                  placeholder="Converse com o OpenClaw aqui..."
+                  required
+                ></textarea>
+                <div class="chat-form-actions">
+                  <button type="submit" class="primary-btn">Enviar para OpenClaw</button>
+                </div>
+              </form>
+            </article>
+
+            <article id="openclaw-panel-logs" class="openclaw-panel openclaw-log-panel glass">
+              <div class="panel-title-row">
+                <h3>Logs em tempo real</h3>
                 <button id="clear-openclaw-log" class="ghost-btn">Limpar</button>
               </div>
 
@@ -152,29 +193,8 @@
               <pre id="openclaw-log-viewer" class="openclaw-log-viewer"></pre>
             </article>
 
-            <article class="openclaw-chat-panel glass">
-              <div class="panel-title-row">
-                <h3>Chat com OpenClaw</h3>
-              </div>
-
-              <section id="openclaw-chat-log" class="openclaw-chat-log"></section>
-
-              <form id="openclaw-chat-form" class="openclaw-chat-form">
-                <textarea
-                  id="openclaw-message-input"
-                  rows="3"
-                  placeholder="Converse com o OpenClaw aqui..."
-                  required
-                ></textarea>
-                <div class="chat-form-actions">
-                  <button type="submit" class="primary-btn">Enviar para OpenClaw</button>
-                </div>
-              </form>
-            </article>
-
-            <aside class="openclaw-meta-panel glass">
-              <h3>Skills e Tools</h3>
-              <p class="meta-note">Ultima resposta recebida</p>
+            <article id="openclaw-panel-observability" class="openclaw-panel openclaw-meta-panel glass">
+              <h3>Skills e Tools da ultima resposta</h3>
 
               <div class="openclaw-meta-block">
                 <p class="openclaw-meta-label">Modelo</p>
@@ -195,7 +215,41 @@
                 <p class="openclaw-meta-label">Tools disponiveis</p>
                 <ul id="openclaw-tools" class="chip-list"></ul>
               </div>
-            </aside>
+            </article>
+
+            <article id="openclaw-panel-config" class="openclaw-panel openclaw-config-panel glass">
+              <h3>Configuracao de modelo OpenClaw</h3>
+
+              <label class="field-group">
+                <span>Origem do modelo</span>
+                <select id="openclaw-model-source" class="input">
+                  <option value="cloud">Nuvem (OpenClaw configurado)</option>
+                  <option value="local">Local (MLX-Pilot)</option>
+                </select>
+              </label>
+
+              <label id="openclaw-cloud-picker" class="field-group">
+                <span>Modelos cloud</span>
+                <select id="openclaw-cloud-model-select" class="input"></select>
+              </label>
+
+              <label id="openclaw-local-picker" class="field-group hidden">
+                <span>Modelos locais</span>
+                <select id="openclaw-local-model-select" class="input"></select>
+              </label>
+
+              <div class="openclaw-config-actions">
+                <button id="refresh-openclaw-models" type="button" class="ghost-btn">
+                  Atualizar modelos
+                </button>
+                <button id="apply-openclaw-model" type="button" class="primary-btn">
+                  Aplicar modelo
+                </button>
+              </div>
+
+              <p id="openclaw-model-current" class="meta-note">Modelo atual: -</p>
+              <p id="openclaw-config-feedback" class="meta-note">-</p>
+            </article>
           </section>
         </section>
       </main>
