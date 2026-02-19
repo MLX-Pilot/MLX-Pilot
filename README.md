@@ -1,6 +1,11 @@
-# MLX Ollama Pilot (Fase 1)
+# MLX Pilot (Arquitetura Multi-Provider)
 
-Projeto em Rust para macOS Apple Silicon que oferece **chat com modelos de linguagem locais (MLX)** e **descoberta/download de modelos** via uma API HTTP e uma interface desktop.
+Projeto em Rust com foco em arquitetura de TCC para execução local de LLMs com **roteamento multi-provider**:
+- **MLX** (Apple Silicon)
+- **llama.cpp embutido** (cross-platform via `llama-server` gerenciado pelo daemon)
+- **Ollama** (compatibilidade)
+
+Também oferece descoberta/download de modelos e interface desktop.
 
 ---
 
@@ -16,7 +21,7 @@ Um **daemon** é um programa que fica rodando em segundo plano (sem janela), esp
 
 1. **Backend (Rust)**  
    - Um servidor HTTP (daemon) que expõe endpoints como `/health`, `/models`, `/chat`, `/catalog/...`.  
-   - Esse servidor usa um **provider** (MLX) para listar modelos em uma pasta e rodar inferência via linha de comando (`python3 -m mlx_lm.generate` ou similar).
+   - Esse servidor usa **providers plugáveis** para listar modelos e executar inferência (MLX, llama.cpp embutido e Ollama).
 
 2. **Catálogo remoto**  
    - Integração com Hugging Face: buscar modelos, ver detalhes, enfileirar downloads para uma pasta local e acompanhar o status.
@@ -50,11 +55,13 @@ O projeto é um **workspace Cargo**: várias “crates” (bibliotecas/executáv
 
 ```
 mlx-ollama-pilot/
-├── Cargo.toml              # Workspace: define crates do projeto (core, providers/mlx, daemon)
+├── Cargo.toml              # Workspace: define crates (core, providers, daemon)
 ├── crates/
 │   ├── core/               # Contratos de domínio (tipos, erros, trait do provider)
 │   ├── providers/
-│   │   └── mlx/            # Implementação do provider MLX (listar modelos, rodar inferência)
+│   │   ├── mlx/            # Provider MLX
+│   │   ├── llamacpp/       # Provider llama.cpp embutido (gerencia llama-server)
+│   │   └── ollama/         # Provider Ollama (compatibilidade)
 │   └── daemon/             # Servidor HTTP (Axum) e orquestração (chat, catálogo, etc.)
 ├── apps/
 │   └── desktop-ui/         # App desktop Tauri + frontend (HTML/JS/CSS)
@@ -66,9 +73,11 @@ mlx-ollama-pilot/
 
 | Pasta / arquivo | O que é | Para que serve |
 |-----------------|---------|----------------|
-| **`crates/core`** | Biblioteca Rust de **domínio** | Define os “contratos”: tipos de mensagens (chat), requisições/respostas, erros e a **trait** `ModelProvider`. Qualquer provider (ex.: MLX) implementa essa trait. Não tem HTTP nem I/O pesado; é o núcleo lógico. |
-| **`crates/providers/mlx`** | Implementação do **provider MLX** | Lista modelos na pasta configurada (ex.: `Models`), monta o comando de inferência e chama o binário/script (ex.: `python3 -m mlx_lm.generate`). Traduz entre o domínio (`core`) e o mundo externo (arquivos, processo Python). |
-| **`crates/daemon`** | **Servidor HTTP** (executável) | Contém o `main` do daemon. Usa Axum para rotas; mantém estado (provider MLX, serviço de catálogo). Expõe `/health`, `/models`, `/chat`, `/catalog/...` e orquestra streaming de chat. É o único executável Rust do backend. |
+| **`crates/core`** | Biblioteca Rust de **domínio** | Define contratos (tipos de chat, erros e trait `ModelProvider`) usados por qualquer backend de inferência. |
+| **`crates/providers/mlx`** | Provider **MLX** | Executa modelos MLX locais via CLI (`mlx_lm.generate`). |
+| **`crates/providers/llamacpp`** | Provider **llama.cpp embutido** | Descobre modelos `.gguf`, sobe/gerencia `llama-server` automaticamente por modelo e chama API OpenAI-compatible local (`/v1/chat/completions`). |
+| **`crates/providers/ollama`** | Provider **Ollama** | Compatibilidade/fallback cross-platform via API local Ollama. |
+| **`crates/daemon`** | **Servidor HTTP** (executável) | Expõe `/health`, `/models`, `/chat`, `/chat/stream`, `/web/brave/search`, `/openclaw/...`, `/catalog/...` e roteia dinamicamente para o provider correto. |
 | **`apps/desktop-ui`** | **App desktop** (Tauri) | `src-tauri/`: código Rust do shell Tauri (janela, permissões). `ui/`: frontend estático (HTML, JS, CSS) que chama a API do daemon em `127.0.0.1:11435`. Abas Chat e Descobrir Modelos. |
 | **`scripts/`** | Scripts de conveniência | `run-desktop.sh`: sobe o daemon e abre o app desktop. `stop-daemon.sh`: encerra o processo do daemon. Úteis para quem não quer rodar daemon e Tauri manualmente. |
 | **`target/`** | Saída do Cargo | Compilados e artefatos. Não versionar; pode ser apagado (o Cargo recria). |
@@ -138,11 +147,19 @@ cd /Users/kaike/mlx-ollama-pilot
 | Variável | Default | Descrição |
 |----------|---------|-----------|
 | `APP_BIND_ADDR` | `127.0.0.1:11435` | Endereço e porta em que o daemon escuta |
-| `APP_MODELS_DIR` | `/Users/kaike/models` | Pasta de modelos locais (MLX) |
+| `APP_LOCAL_PROVIDER` | `auto` | `auto`, `mlx`, `llamacpp` ou `ollama` |
+| `APP_MODELS_DIR` | `/Users/kaike/models` | Pasta raiz de modelos locais |
 | `APP_MLX_COMMAND` | `python3` | Comando base para inferência |
 | `APP_MLX_PREFIX_ARGS` | `-m mlx_lm.generate` | Argumentos antes do modelo/prompt |
 | `APP_MLX_SUFFIX_ARGS` | (vazio) | Argumentos após |
 | `APP_MLX_TIMEOUT_SECS` | `900` | Timeout da inferência em segundos |
+| `APP_LLAMACPP_SERVER_BINARY` | `llama-server` | Binário do servidor llama.cpp |
+| `APP_LLAMACPP_BASE_URL` | `http://127.0.0.1:11439` | URL do servidor embutido llama.cpp |
+| `APP_LLAMACPP_AUTO_START` | `true` | Sobe o `llama-server` automaticamente |
+| `APP_LLAMACPP_AUTO_INSTALL` | `true` | Tenta instalar llama.cpp automaticamente (best-effort) |
+| `APP_LLAMACPP_CONTEXT_SIZE` | `16384` | Context window do `llama-server` |
+| `APP_LLAMACPP_GPU_LAYERS` | `999` | Camadas na GPU para llama.cpp |
+| `APP_OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | URL Ollama |
 | `APP_REMOTE_DOWNLOADS_DIR` | `/Users/kaike/models` | Pasta onde os downloads do catálogo vão |
 | `APP_HF_API_BASE` | `https://huggingface.co` | Base da API Hugging Face |
 | `APP_HF_PYTHON` | (venv se existir, senão `python3`) | Python para ferramentas HF |
@@ -192,7 +209,7 @@ curl http://127.0.0.1:11435/catalog/downloads
 
 ## Resumo para o time
 
-- **O que é cada pasta:** `crates/core` = domínio; `crates/providers/mlx` = MLX; `crates/daemon` = servidor HTTP; `apps/desktop-ui` = app desktop; `scripts/` = atalhos para rodar/parar.
+- **O que é cada pasta:** `crates/core` = domínio; `crates/providers/*` = backends de inferência; `crates/daemon` = servidor HTTP; `apps/desktop-ui` = app desktop; `scripts/` = atalhos para rodar/parar.
 - **Como rodar sem executável pronto:** `cargo run -p mlx-ollama-daemon` (só API) ou `./scripts/run-desktop.sh` (API + app desktop).
 - **Parar o daemon:** `./scripts/stop-daemon.sh`.
 
