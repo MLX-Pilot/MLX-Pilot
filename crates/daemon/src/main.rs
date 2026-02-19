@@ -31,6 +31,7 @@ use openclaw::{
     OpenClawSetModelRequest, OpenClawStatusResponse,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -217,6 +218,26 @@ struct OpenClawModelRequest {
     local_model_id: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct BraveSearchRequest {
+    query: String,
+    api_key: String,
+    max_results: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct BraveSearchResultItem {
+    title: String,
+    url: String,
+    description: String,
+}
+
+#[derive(Debug, Serialize)]
+struct BraveSearchResponse {
+    query: String,
+    results: Vec<BraveSearchResultItem>,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     init_tracing();
@@ -282,6 +303,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/models", get(list_models))
         .route("/chat", post(chat))
         .route("/chat/stream", post(chat_stream))
+        .route("/web/brave/search", post(brave_web_search))
         .route("/openclaw/status", get(openclaw_status))
         .route("/openclaw/observability", get(openclaw_observability))
         .route(
@@ -393,6 +415,114 @@ async fn chat_stream(
         .map_err(|error| AppError::NotFound(format!("falha ao criar resposta: {error}")))?;
 
     Ok(response)
+}
+
+async fn brave_web_search(
+    Json(request): Json<BraveSearchRequest>,
+) -> Result<Json<BraveSearchResponse>, AppError> {
+    let query = request.query.trim();
+    let api_key = request.api_key.trim();
+    let max_results = request.max_results.unwrap_or(5).clamp(1, 10);
+
+    if query.is_empty() {
+        return Err(AppError::Provider(ProviderError::InvalidRequest {
+            details: "query nao pode ser vazio".to_string(),
+        }));
+    }
+
+    if api_key.is_empty() {
+        return Err(AppError::Provider(ProviderError::InvalidRequest {
+            details: "api_key nao pode ser vazio".to_string(),
+        }));
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(18))
+        .build()
+        .map_err(|source| {
+            AppError::Provider(ProviderError::Io {
+                context: "falha criando cliente Brave API".to_string(),
+                source: io::Error::other(source.to_string()),
+            })
+        })?;
+
+    let response = client
+        .get("https://api.search.brave.com/res/v1/web/search")
+        .query(&[
+            ("q", query),
+            ("count", &max_results.to_string()),
+            ("safesearch", "moderate"),
+        ])
+        .header("Accept", "application/json")
+        .header("X-Subscription-Token", api_key)
+        .send()
+        .await
+        .map_err(|source| {
+            AppError::Provider(ProviderError::Io {
+                context: "falha consultando Brave API".to_string(),
+                source: io::Error::other(source.to_string()),
+            })
+        })?;
+
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(AppError::Provider(ProviderError::Unavailable {
+            details: format!("Brave API retornou HTTP {status}: {}", body.trim()),
+        }));
+    }
+
+    let parsed = serde_json::from_str::<Value>(&body).map_err(|source| {
+        AppError::Provider(ProviderError::Io {
+            context: "falha parseando resposta Brave API".to_string(),
+            source: io::Error::other(source.to_string()),
+        })
+    })?;
+
+    let results = parsed
+        .pointer("/web/results")
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    let title = entry
+                        .get("title")
+                        .and_then(Value::as_str)?
+                        .trim()
+                        .to_string();
+                    let url = entry
+                        .get("url")
+                        .or_else(|| entry.get("profile").and_then(|value| value.get("url")))
+                        .and_then(Value::as_str)?
+                        .trim()
+                        .to_string();
+                    let description = entry
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .unwrap_or("")
+                        .to_string();
+
+                    if title.is_empty() || url.is_empty() {
+                        return None;
+                    }
+
+                    Some(BraveSearchResultItem {
+                        title,
+                        url,
+                        description,
+                    })
+                })
+                .take(max_results)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    Ok(Json(BraveSearchResponse {
+        query: query.to_string(),
+        results,
+    }))
 }
 
 fn spawn_provider_compat_stream(
