@@ -42,11 +42,50 @@ use tracing_subscriber::EnvFilter;
 
 #[derive(Clone)]
 struct AppState {
-    provider: Arc<dyn ModelProvider>,
-    openclaw_local_provider: Arc<dyn ModelProvider>,
+    provider_mode: LocalProviderMode,
+    mlx_provider: Arc<MlxProvider>,
+    ollama_provider: Arc<OllamaProvider>,
+    openclaw_local_provider: Arc<MlxProvider>,
     catalog: Arc<CatalogService>,
     chat_runtime: ChatRuntimeConfig,
     openclaw_runtime: Arc<OpenClawRuntime>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LocalProviderMode {
+    Auto,
+    Mlx,
+    Ollama,
+}
+
+impl LocalProviderMode {
+    fn from_env(value: &str) -> Self {
+        match value.trim().to_lowercase().as_str() {
+            "mlx" => Self::Mlx,
+            "ollama" => Self::Ollama,
+            _ => Self::Auto,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Mlx => "mlx",
+            Self::Ollama => "ollama",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RoutedProvider {
+    Mlx,
+    Ollama,
+}
+
+#[derive(Debug)]
+struct RoutedModel {
+    provider: RoutedProvider,
+    normalized_model_id: String,
 }
 
 #[derive(Debug)]
@@ -184,6 +223,7 @@ async fn main() -> anyhow::Result<()> {
 
     let cfg = AppConfig::from_env();
     info!("starting daemon on {}", cfg.bind_addr);
+    let provider_mode = LocalProviderMode::from_env(&cfg.local_provider);
 
     let mlx_provider = Arc::new(MlxProvider::new(MlxProviderConfig {
         models_dir: cfg.models_dir.clone(),
@@ -193,19 +233,15 @@ async fn main() -> anyhow::Result<()> {
         timeout: cfg.mlx_timeout,
     }));
 
-    let provider: Arc<dyn ModelProvider> = match cfg.local_provider.as_str() {
-        "mlx" => mlx_provider.clone(),
-        "ollama" => Arc::new(OllamaProvider::new(OllamaProviderConfig {
-            base_url: cfg.ollama_base_url.clone(),
-            timeout: cfg.ollama_timeout,
-        })),
-        other => {
-            warn!("unknown APP_LOCAL_PROVIDER '{other}', falling back to mlx");
-            mlx_provider.clone()
-        }
-    };
+    let ollama_provider = Arc::new(OllamaProvider::new(OllamaProviderConfig {
+        base_url: cfg.ollama_base_url.clone(),
+        timeout: cfg.ollama_timeout,
+        startup_timeout: cfg.ollama_startup_timeout,
+        auto_start: cfg.ollama_auto_start,
+        auto_install: cfg.ollama_auto_install,
+    }));
 
-    info!("chat provider selected: {}", provider.provider_id());
+    info!("chat provider mode selected: {}", provider_mode.label());
 
     let catalog = Arc::new(CatalogService::new(CatalogConfig {
         hf_api_base: cfg.hf_api_base.clone(),
@@ -216,7 +252,9 @@ async fn main() -> anyhow::Result<()> {
     })?);
 
     let state = AppState {
-        provider,
+        provider_mode,
+        mlx_provider: mlx_provider.clone(),
+        ollama_provider,
         openclaw_local_provider: mlx_provider,
         catalog,
         chat_runtime: ChatRuntimeConfig {
@@ -285,14 +323,14 @@ fn init_tracing() {
 async fn health(State(state): State<AppState>) -> Json<HealthBody> {
     Json(HealthBody {
         status: "ok",
-        provider: state.provider.provider_id(),
+        provider: state.provider_mode.label(),
     })
 }
 
 async fn list_models(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ModelDescriptor>>, AppError> {
-    let models = state.provider.list_models().await?;
+    let models = list_chat_models(&state).await?;
     Ok(Json(models))
 }
 
@@ -306,7 +344,7 @@ async fn chat(
         }));
     }
 
-    let response = state.provider.chat(request).await.map_err(|error| {
+    let response = chat_with_routing(&state, request).await.map_err(|error| {
         error!("chat request failed: {error}");
         AppError::Provider(error)
     })?;
@@ -324,10 +362,18 @@ async fn chat_stream(
         }));
     }
 
-    let receiver = if state.provider.provider_id() == "mlx" {
-        spawn_chat_stream(state.chat_runtime.clone(), request)
-    } else {
-        spawn_provider_compat_stream(state.provider.clone(), request)
+    let routed = route_model_request(&state, &request.model_id).await?;
+    let normalized_request = ChatRequest {
+        model_id: routed.normalized_model_id.clone(),
+        messages: request.messages.clone(),
+        options: request.options.clone(),
+    };
+
+    let receiver = match routed.provider {
+        RoutedProvider::Mlx => spawn_chat_stream(state.chat_runtime.clone(), normalized_request),
+        RoutedProvider::Ollama => {
+            spawn_provider_compat_stream(state.ollama_provider.clone(), normalized_request)
+        }
     };
 
     let stream = ReceiverStream::new(receiver).map(|event| {
@@ -395,6 +441,174 @@ fn spawn_provider_compat_stream(
     });
 
     rx
+}
+
+async fn list_chat_models(state: &AppState) -> Result<Vec<ModelDescriptor>, ProviderError> {
+    match state.provider_mode {
+        LocalProviderMode::Mlx => state.mlx_provider.list_models().await,
+        LocalProviderMode::Ollama => state.ollama_provider.list_models().await,
+        LocalProviderMode::Auto => {
+            let mlx_models = state.mlx_provider.list_models().await?;
+            let ollama_models = match state.ollama_provider.list_models().await {
+                Ok(models) => models,
+                Err(error) => {
+                    warn!("ollama unavailable while listing models in auto mode: {error}");
+                    Vec::new()
+                }
+            };
+
+            let mut combined = Vec::new();
+            for model in mlx_models {
+                combined.push(ModelDescriptor {
+                    id: format!("mlx::{}", model.id),
+                    name: format!("{} [MLX]", model.name),
+                    provider: model.provider,
+                    path: model.path,
+                    is_available: model.is_available,
+                });
+            }
+
+            for model in ollama_models {
+                combined.push(ModelDescriptor {
+                    id: format!("ollama::{}", model.id),
+                    name: format!("{} [Ollama]", model.name),
+                    provider: model.provider,
+                    path: model.path,
+                    is_available: model.is_available,
+                });
+            }
+
+            combined.sort_by(|left, right| {
+                let by_provider = left.provider.cmp(&right.provider);
+                if by_provider.is_eq() {
+                    return left.name.to_lowercase().cmp(&right.name.to_lowercase());
+                }
+                by_provider
+            });
+
+            Ok(combined)
+        }
+    }
+}
+
+async fn chat_with_routing(
+    state: &AppState,
+    request: ChatRequest,
+) -> Result<ChatResponse, ProviderError> {
+    let routed = route_model_request(state, &request.model_id).await?;
+    let request = ChatRequest {
+        model_id: routed.normalized_model_id,
+        messages: request.messages,
+        options: request.options,
+    };
+
+    match routed.provider {
+        RoutedProvider::Mlx => state.mlx_provider.chat(request).await,
+        RoutedProvider::Ollama => state.ollama_provider.chat(request).await,
+    }
+}
+
+async fn route_model_request(
+    state: &AppState,
+    model_id: &str,
+) -> Result<RoutedModel, ProviderError> {
+    let trimmed = model_id.trim();
+    if trimmed.is_empty() {
+        return Err(ProviderError::InvalidRequest {
+            details: "model_id cannot be empty".to_string(),
+        });
+    }
+
+    if let Some(normalized) = trimmed.strip_prefix("mlx::") {
+        return Ok(RoutedModel {
+            provider: RoutedProvider::Mlx,
+            normalized_model_id: normalized.trim().to_string(),
+        });
+    }
+
+    if let Some(normalized) = trimmed.strip_prefix("ollama::") {
+        return Ok(RoutedModel {
+            provider: RoutedProvider::Ollama,
+            normalized_model_id: normalized.trim().to_string(),
+        });
+    }
+
+    match state.provider_mode {
+        LocalProviderMode::Mlx => {
+            return Ok(RoutedModel {
+                provider: RoutedProvider::Mlx,
+                normalized_model_id: trimmed.to_string(),
+            });
+        }
+        LocalProviderMode::Ollama => {
+            return Ok(RoutedModel {
+                provider: RoutedProvider::Ollama,
+                normalized_model_id: trimmed.to_string(),
+            });
+        }
+        LocalProviderMode::Auto => {}
+    }
+
+    if looks_like_mlx_model_id(trimmed) {
+        return Ok(RoutedModel {
+            provider: RoutedProvider::Mlx,
+            normalized_model_id: trimmed.to_string(),
+        });
+    }
+
+    if looks_like_ollama_model_id(trimmed) {
+        return Ok(RoutedModel {
+            provider: RoutedProvider::Ollama,
+            normalized_model_id: trimmed.to_string(),
+        });
+    }
+
+    let mlx_models = state.mlx_provider.list_models().await?;
+    if mlx_models
+        .iter()
+        .any(|entry| entry.id == trimmed || entry.path == trimmed)
+    {
+        return Ok(RoutedModel {
+            provider: RoutedProvider::Mlx,
+            normalized_model_id: trimmed.to_string(),
+        });
+    }
+
+    match state.ollama_provider.list_models().await {
+        Ok(ollama_models) => {
+            if ollama_models
+                .iter()
+                .any(|entry| entry.id == trimmed || entry.path == trimmed)
+            {
+                return Ok(RoutedModel {
+                    provider: RoutedProvider::Ollama,
+                    normalized_model_id: trimmed.to_string(),
+                });
+            }
+        }
+        Err(error) => {
+            warn!("ollama unavailable while routing model '{trimmed}': {error}");
+        }
+    }
+
+    Ok(RoutedModel {
+        provider: RoutedProvider::Mlx,
+        normalized_model_id: trimmed.to_string(),
+    })
+}
+
+fn looks_like_mlx_model_id(model_id: &str) -> bool {
+    let value = model_id.trim();
+    value.starts_with('/')
+        || value.contains('\\')
+        || value.contains("/Users/")
+        || value.starts_with("huggingface--")
+}
+
+fn looks_like_ollama_model_id(model_id: &str) -> bool {
+    let value = model_id.trim();
+    value.starts_with("ollama/")
+        || (value.contains(':') && !value.contains('/') && !value.contains('\\'))
 }
 
 async fn catalog_sources(

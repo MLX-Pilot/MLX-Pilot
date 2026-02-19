@@ -14,6 +14,9 @@ pub struct AppConfig {
     pub mlx_timeout: Duration,
     pub ollama_base_url: String,
     pub ollama_timeout: Duration,
+    pub ollama_startup_timeout: Duration,
+    pub ollama_auto_start: bool,
+    pub ollama_auto_install: bool,
     pub remote_downloads_dir: PathBuf,
     pub hf_api_base: String,
     pub hf_token: Option<String>,
@@ -34,7 +37,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 11435),
-            local_provider: "mlx".to_string(),
+            local_provider: "auto".to_string(),
             models_dir: PathBuf::from("/Users/kaike/models"),
             mlx_command: default_mlx_command(),
             mlx_prefix_args: Vec::new(),
@@ -42,6 +45,9 @@ impl Default for AppConfig {
             mlx_timeout: Duration::from_secs(900),
             ollama_base_url: "http://127.0.0.1:11434".to_string(),
             ollama_timeout: Duration::from_secs(900),
+            ollama_startup_timeout: Duration::from_secs(30),
+            ollama_auto_start: true,
+            ollama_auto_install: true,
             remote_downloads_dir: PathBuf::from("/Users/kaike/models"),
             hf_api_base: "https://huggingface.co".to_string(),
             hf_token: None,
@@ -76,7 +82,7 @@ impl AppConfig {
 
         if let Ok(value) = env::var("APP_LOCAL_PROVIDER") {
             let normalized = value.trim().to_lowercase();
-            if matches!(normalized.as_str(), "mlx" | "ollama") {
+            if matches!(normalized.as_str(), "auto" | "mlx" | "ollama") {
                 cfg.local_provider = normalized;
             }
         }
@@ -132,6 +138,20 @@ impl AppConfig {
             if let Ok(seconds) = value.parse::<u64>() {
                 cfg.ollama_timeout = Duration::from_secs(seconds.max(1));
             }
+        }
+
+        if let Ok(value) = env::var("APP_OLLAMA_STARTUP_TIMEOUT_SECS") {
+            if let Ok(seconds) = value.parse::<u64>() {
+                cfg.ollama_startup_timeout = Duration::from_secs(seconds.max(2));
+            }
+        }
+
+        if let Ok(value) = env::var("APP_OLLAMA_AUTO_START") {
+            cfg.ollama_auto_start = parse_bool(&value, cfg.ollama_auto_start);
+        }
+
+        if let Ok(value) = env::var("APP_OLLAMA_AUTO_INSTALL") {
+            cfg.ollama_auto_install = parse_bool(&value, cfg.ollama_auto_install);
         }
 
         if let Ok(value) = env::var("APP_REMOTE_DOWNLOADS_DIR") {
@@ -286,4 +306,12 @@ fn starts_with_legacy_module(values: &[String], expected: &[&str]) -> bool {
         .iter()
         .zip(expected.iter())
         .all(|(left, right)| left == right)
+}
+
+fn parse_bool(value: &str, fallback: bool) -> bool {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => true,
+        "0" | "false" | "no" | "off" => false,
+        _ => fallback,
+    }
 }

@@ -1,4 +1,7 @@
 use std::io;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -8,11 +11,17 @@ use mlx_ollama_core::{
 };
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
+use tokio::process::Command;
+use tokio::sync::Mutex;
+use tokio::time::sleep;
 
 #[derive(Debug, Clone)]
 pub struct OllamaProviderConfig {
     pub base_url: String,
     pub timeout: Duration,
+    pub startup_timeout: Duration,
+    pub auto_start: bool,
+    pub auto_install: bool,
 }
 
 impl Default for OllamaProviderConfig {
@@ -20,6 +29,9 @@ impl Default for OllamaProviderConfig {
         Self {
             base_url: "http://127.0.0.1:11434".to_string(),
             timeout: Duration::from_secs(900),
+            startup_timeout: Duration::from_secs(30),
+            auto_start: true,
+            auto_install: true,
         }
     }
 }
@@ -28,6 +40,7 @@ impl Default for OllamaProviderConfig {
 pub struct OllamaProvider {
     cfg: OllamaProviderConfig,
     client: reqwest::Client,
+    ensure_lock: Arc<Mutex<()>>,
 }
 
 impl OllamaProvider {
@@ -37,7 +50,11 @@ impl OllamaProvider {
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
 
-        Self { cfg, client }
+        Self {
+            cfg,
+            client,
+            ensure_lock: Arc::new(Mutex::new(())),
+        }
     }
 
     fn endpoint(&self, path: &str) -> Result<String, ProviderError> {
@@ -81,6 +98,205 @@ impl OllamaProvider {
             context: "falha de rede com Ollama".to_string(),
             source: io::Error::other(error.to_string()),
         }
+    }
+
+    async fn ensure_ready(&self) -> Result<(), ProviderError> {
+        if self.ping_server().await {
+            return Ok(());
+        }
+
+        let _guard = self.ensure_lock.lock().await;
+
+        if self.ping_server().await {
+            return Ok(());
+        }
+
+        let mut binary = self.find_ollama_binary().await;
+        if binary.is_none() && self.cfg.auto_install {
+            self.install_ollama().await?;
+            binary = self.find_ollama_binary().await;
+        }
+
+        let Some(binary) = binary else {
+            return Err(ProviderError::Unavailable {
+                details: "ollama nao encontrado e instalacao automatica indisponivel".to_string(),
+            });
+        };
+
+        if self.cfg.auto_start {
+            self.start_server(&binary).await?;
+        }
+
+        self.wait_until_ready().await
+    }
+
+    async fn ping_server(&self) -> bool {
+        let endpoint = match self.endpoint("/api/version") {
+            Ok(value) => value,
+            Err(_) => return false,
+        };
+
+        let client = match reqwest::Client::builder()
+            .timeout(Duration::from_secs(2))
+            .build()
+        {
+            Ok(client) => client,
+            Err(_) => return false,
+        };
+
+        client
+            .get(endpoint)
+            .send()
+            .await
+            .map(|response| response.status().is_success())
+            .unwrap_or(false)
+    }
+
+    async fn wait_until_ready(&self) -> Result<(), ProviderError> {
+        let started = Instant::now();
+        let timeout = self.cfg.startup_timeout.max(Duration::from_secs(2));
+
+        loop {
+            if self.ping_server().await {
+                return Ok(());
+            }
+
+            if started.elapsed() >= timeout {
+                return Err(ProviderError::Unavailable {
+                    details: format!(
+                        "ollama nao respondeu em {}s apos bootstrap automatico",
+                        timeout.as_secs()
+                    ),
+                });
+            }
+
+            sleep(Duration::from_millis(450)).await;
+        }
+    }
+
+    async fn find_ollama_binary(&self) -> Option<String> {
+        if command_available("ollama").await {
+            return Some("ollama".to_string());
+        }
+
+        let mut candidates = vec![
+            "/opt/homebrew/bin/ollama",
+            "/usr/local/bin/ollama",
+            "/usr/bin/ollama",
+            "/Applications/Ollama.app/Contents/Resources/ollama",
+        ]
+        .into_iter()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+
+        if cfg!(target_os = "windows") {
+            if let Ok(localappdata) = std::env::var("LOCALAPPDATA") {
+                candidates.push(
+                    Path::new(&localappdata)
+                        .join("Programs")
+                        .join("Ollama")
+                        .join("ollama.exe"),
+                );
+            }
+        }
+
+        for candidate in candidates {
+            if !candidate.exists() {
+                continue;
+            }
+
+            let text = candidate.display().to_string();
+            if command_available(&text).await {
+                return Some(text);
+            }
+        }
+
+        None
+    }
+
+    async fn install_ollama(&self) -> Result<(), ProviderError> {
+        if cfg!(target_os = "macos") {
+            if command_available("brew").await {
+                run_command("brew", &["install", "ollama"], Duration::from_secs(1800)).await?;
+                return Ok(());
+            }
+
+            run_shell(
+                "curl -fsSL https://ollama.com/install.sh | sh",
+                Duration::from_secs(1800),
+            )
+            .await?;
+            return Ok(());
+        }
+
+        if cfg!(target_os = "linux") {
+            run_shell(
+                "curl -fsSL https://ollama.com/install.sh | sh",
+                Duration::from_secs(1800),
+            )
+            .await?;
+            return Ok(());
+        }
+
+        if cfg!(target_os = "windows") {
+            run_command(
+                "winget",
+                &["install", "--id", "Ollama.Ollama", "-e", "--silent"],
+                Duration::from_secs(1800),
+            )
+            .await?;
+            return Ok(());
+        }
+
+        Err(ProviderError::Unavailable {
+            details: "instalacao automatica do ollama nao suportada neste sistema".to_string(),
+        })
+    }
+
+    async fn start_server(&self, binary: &str) -> Result<(), ProviderError> {
+        if self.ping_server().await {
+            return Ok(());
+        }
+
+        let log_path = std::env::temp_dir().join("mlx-pilot-ollama.log");
+        let stdout_file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .ok();
+        let stderr_file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .ok();
+
+        let mut command = Command::new(binary);
+        command.arg("serve");
+
+        match stdout_file {
+            Some(file) => {
+                command.stdout(Stdio::from(file));
+            }
+            None => {
+                command.stdout(Stdio::null());
+            }
+        }
+
+        match stderr_file {
+            Some(file) => {
+                command.stderr(Stdio::from(file));
+            }
+            None => {
+                command.stderr(Stdio::null());
+            }
+        }
+
+        command.spawn().map_err(|source| ProviderError::Io {
+            context: format!("falha ao iniciar servidor Ollama com '{binary} serve'"),
+            source,
+        })?;
+
+        Ok(())
     }
 }
 
@@ -156,6 +372,8 @@ impl ModelProvider for OllamaProvider {
     }
 
     async fn list_models(&self) -> Result<Vec<ModelDescriptor>, ProviderError> {
+        self.ensure_ready().await?;
+
         let endpoint = self.endpoint("/api/tags")?;
         let response = self
             .client
@@ -216,6 +434,8 @@ impl ModelProvider for OllamaProvider {
                 details: "messages cannot be empty".to_string(),
             });
         }
+
+        self.ensure_ready().await?;
 
         let endpoint = self.endpoint("/api/chat")?;
         let started = Instant::now();
@@ -305,5 +525,60 @@ impl ModelProvider for OllamaProvider {
             latency_ms,
             raw_output,
         })
+    }
+}
+
+async fn command_available(command: &str) -> bool {
+    if command.trim().is_empty() {
+        return false;
+    }
+
+    let output = Command::new(command)
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .await;
+
+    output
+        .map(|result| result.status.success())
+        .unwrap_or(false)
+}
+
+async fn run_command(program: &str, args: &[&str], timeout: Duration) -> Result<(), ProviderError> {
+    let output = tokio::time::timeout(timeout, Command::new(program).args(args).output())
+        .await
+        .map_err(|_| ProviderError::Timeout {
+            seconds: timeout.as_secs().max(1),
+        })?
+        .map_err(|source| ProviderError::Io {
+            context: format!("falha executando '{program}'"),
+            source,
+        })?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(ProviderError::CommandFailed {
+        command: format!("{} {}", program, args.join(" ")),
+        stderr: if stderr.is_empty() {
+            "sem stderr".to_string()
+        } else {
+            stderr
+        },
+    })
+}
+
+async fn run_shell(script: &str, timeout: Duration) -> Result<(), ProviderError> {
+    #[cfg(target_os = "windows")]
+    {
+        run_command("powershell", &["-NoProfile", "-Command", script], timeout).await
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        run_command("sh", &["-lc", script], timeout).await
     }
 }
