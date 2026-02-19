@@ -8,9 +8,27 @@ USER_ID="$(id -u)"
 
 source "$HOME/.cargo/env"
 
+export APP_LOCAL_PROVIDER="${APP_LOCAL_PROVIDER:-auto}"
+export APP_LLAMACPP_AUTO_INSTALL="${APP_LLAMACPP_AUTO_INSTALL:-true}"
+export APP_LLAMACPP_AUTO_START="${APP_LLAMACPP_AUTO_START:-true}"
+
+if [ -x "$ROOT_DIR/bin/llama-server" ]; then
+  export APP_LLAMACPP_SERVER_BINARY="$ROOT_DIR/bin/llama-server"
+fi
+
 if [ -x "/Users/kaike/mlx-env/bin/mlx_lm.generate" ]; then
   export APP_MLX_COMMAND="/Users/kaike/mlx-env/bin/mlx_lm.generate"
   export PATH="/Users/kaike/mlx-env/bin:$PATH"
+fi
+
+if [ "$APP_LOCAL_PROVIDER" = "auto" ] || [ "$APP_LOCAL_PROVIDER" = "llamacpp" ]; then
+  LLAMA_BIN="${APP_LLAMACPP_SERVER_BINARY:-llama-server}"
+  if ! command -v "$LLAMA_BIN" >/dev/null 2>&1 && [ "$APP_LLAMACPP_AUTO_INSTALL" = "true" ]; then
+    if command -v brew >/dev/null 2>&1; then
+      echo "llama-server nao encontrado. Tentando instalar llama.cpp via Homebrew..."
+      brew list llama.cpp >/dev/null 2>&1 || brew install llama.cpp || true
+    fi
+  fi
 fi
 
 cd "$ROOT_DIR"
