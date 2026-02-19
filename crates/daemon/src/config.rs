@@ -29,6 +29,7 @@ pub struct AppConfig {
     pub remote_downloads_dir: PathBuf,
     pub hf_api_base: String,
     pub hf_token: Option<String>,
+    pub brave_api_key: Option<String>,
     pub catalog_search_limit: usize,
     pub catalog_download_timeout: Duration,
     pub openclaw_node_command: String,
@@ -69,6 +70,7 @@ impl Default for AppConfig {
             remote_downloads_dir: PathBuf::from("/Users/kaike/models"),
             hf_api_base: "https://huggingface.co".to_string(),
             hf_token: None,
+            brave_api_key: None,
             catalog_search_limit: 18,
             catalog_download_timeout: Duration::from_secs(21600),
             openclaw_node_command: "node".to_string(),
@@ -249,6 +251,18 @@ impl AppConfig {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
                 cfg.hf_token = Some(trimmed.to_string());
+            }
+        }
+
+        if let Ok(value) = env::var("APP_BRAVE_API_KEY") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                cfg.brave_api_key = Some(trimmed.to_string());
+            }
+        } else if let Ok(value) = env::var("BRAVE_API_KEY") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                cfg.brave_api_key = Some(trimmed.to_string());
             }
         }
 

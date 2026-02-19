@@ -50,7 +50,7 @@ echo "Iniciando daemon..."
 nohup cargo run -p mlx-ollama-daemon > "$DAEMON_LOG" 2>&1 &
 DAEMON_PID=$!
 echo "$DAEMON_PID" > /tmp/mlx-ollama-daemon.pid
-sleep 2
+sleep 1
 
 if ! kill -0 "$DAEMON_PID" >/dev/null 2>&1; then
   echo "Processo do daemon encerrou logo apos iniciar. Veja: $DAEMON_LOG"
@@ -58,8 +58,23 @@ if ! kill -0 "$DAEMON_PID" >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! curl -sSf http://127.0.0.1:11435/health >/dev/null; then
-  echo "Falha ao iniciar daemon. Veja: $DAEMON_LOG"
+READY=0
+for _ in {1..30}; do
+  if ! kill -0 "$DAEMON_PID" >/dev/null 2>&1; then
+    echo "Processo do daemon encerrou durante a inicializacao. Veja: $DAEMON_LOG"
+    tail -n 80 "$DAEMON_LOG" || true
+    exit 1
+  fi
+  if curl -sSf http://127.0.0.1:11435/health >/dev/null 2>&1; then
+    READY=1
+    break
+  fi
+  sleep 1
+done
+
+if [ "$READY" -ne 1 ]; then
+  echo "Falha ao iniciar daemon dentro do timeout (30s). Veja: $DAEMON_LOG"
+  tail -n 80 "$DAEMON_LOG" || true
   exit 1
 fi
 
