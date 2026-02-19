@@ -2,6 +2,7 @@ const STORAGE_DAEMON_URL = "mlxPilotDaemonUrl";
 const STORAGE_CHAT_THREADS = "mlxPilotChatThreadsV2";
 const STORAGE_OPENCLAW_OBSERVABILITY = "mlxPilotOpenClawObservabilityV1";
 const STORAGE_BRAVE_API_KEY = "mlxPilotBraveApiKey";
+const STORAGE_CHAT_WEBSEARCH_ENABLED = "mlxPilotWebsearchEnabled";
 
 const STREAM_CHARS_PER_TICK = 22;
 const STREAM_TICK_MS = 20;
@@ -20,8 +21,12 @@ const tabButtons = Array.from(document.querySelectorAll(".tab-btn[data-tab]"));
 const panelChat = document.getElementById("panel-chat");
 const panelDiscover = document.getElementById("panel-discover");
 const panelOpenClaw = document.getElementById("panel-openclaw");
+const chatEmptyHero = document.getElementById("chat-empty-hero");
 
 const chatModelSwitcher = document.getElementById("chat-model-switcher");
+const chatModelTrigger = document.getElementById("chat-model-trigger");
+const chatModelCurrent = document.getElementById("chat-model-current");
+const chatModelMenu = document.getElementById("chat-model-menu");
 const chatModelSelect = document.getElementById("chat-model-select");
 const refreshModelsBtn = document.getElementById("refresh-models");
 
@@ -34,6 +39,7 @@ const selectedModelLabel = document.getElementById("selected-model-label");
 const chatForm = document.getElementById("chat-form");
 const chatLog = document.getElementById("chat-log");
 const messageInput = document.getElementById("message-input");
+const chatWebsearchBtn = document.getElementById("chat-websearch-btn");
 const chatWebsearchToggle = document.getElementById("chat-websearch-toggle");
 const sendMessageBtn = chatForm.querySelector('button[type="submit"]');
 const stopGenerationBtn = document.getElementById("stop-generation");
@@ -98,8 +104,10 @@ let localModels = [];
 
 let chatThreads = [];
 let activeThreadId = null;
+let openThreadMenuId = null;
 
 let activeTab = "chat";
+let chatModelMenuOpen = false;
 let isGenerating = false;
 let activeStreamController = null;
 let streamFallbackNotified = false;
@@ -124,7 +132,9 @@ let openclawModelsCatalog = {
 };
 
 daemonInput.value = daemonBaseUrl;
-braveApiKeyInput.value = localStorage.getItem(STORAGE_BRAVE_API_KEY) || "";
+if (braveApiKeyInput) {
+  braveApiKeyInput.value = localStorage.getItem(STORAGE_BRAVE_API_KEY) || "";
+}
 
 function setStatus(text, tone = "normal") {
   statusPill.textContent = text;
@@ -224,6 +234,30 @@ function formatEpoch(epochMs) {
   }).format(date);
 }
 
+function isMeaningfulCatalogSummary(value) {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const normalized = value.trim();
+  if (!normalized) {
+    return false;
+  }
+
+  const lowered = normalized.toLowerCase();
+  const placeholders = new Set([
+    "sem descricao detalhada no catalogo.",
+    "sem descricao",
+    "sem descrição",
+    "no description",
+    "no description provided",
+    "no detailed description",
+    "n/a",
+  ]);
+
+  return !placeholders.has(lowered);
+}
+
 function threadStorageSafeParse(raw) {
   if (!raw) {
     return [];
@@ -310,6 +344,8 @@ function renameThread(threadId) {
     return;
   }
 
+  openThreadMenuId = null;
+
   const thread = chatThreads.find((entry) => entry.id === threadId);
   if (!thread) {
     return;
@@ -339,6 +375,8 @@ function deleteThread(threadId) {
     addSystemMessage("Pare a geracao atual antes de apagar uma conversa.");
     return;
   }
+
+  openThreadMenuId = null;
 
   const index = chatThreads.findIndex((entry) => entry.id === threadId);
   if (index === -1) {
@@ -392,15 +430,113 @@ function sortThreadsForView() {
   return [...chatThreads].sort((left, right) => Number(right.updatedAt) - Number(left.updatedAt));
 }
 
+function closeThreadMenu({ rerender = false } = {}) {
+  if (!openThreadMenuId) {
+    return;
+  }
+
+  openThreadMenuId = null;
+  if (rerender) {
+    renderThreadList();
+  }
+}
+
+function toggleThreadMenu(threadId) {
+  if (!threadId) {
+    return;
+  }
+
+  openThreadMenuId = openThreadMenuId === threadId ? null : threadId;
+  renderThreadList();
+}
+
 function getModelLabelById(modelId) {
   const model = localModels.find((entry) => entry.id === modelId);
   return model ? model.name : "modelo n/d";
+}
+
+function setChatModelMenuOpen(nextState) {
+  chatModelMenuOpen = Boolean(nextState);
+  if (!chatModelMenu) {
+    return;
+  }
+
+  chatModelMenu.classList.toggle("hidden", !chatModelMenuOpen);
+  if (chatModelTrigger) {
+    chatModelTrigger.setAttribute("aria-expanded", chatModelMenuOpen ? "true" : "false");
+  }
+  chatModelSwitcher.classList.toggle("menu-open", chatModelMenuOpen);
+}
+
+function updateChatModelPickerLabel() {
+  if (!chatModelCurrent) {
+    return;
+  }
+
+  if (!selectedModelId) {
+    chatModelCurrent.textContent = "Selecionar modelo";
+    return;
+  }
+
+  const activeModel = localModels.find((entry) => entry.id === selectedModelId);
+  chatModelCurrent.textContent = activeModel ? activeModel.name : "Selecionar modelo";
+}
+
+function renderChatModelPickerMenu() {
+  if (!chatModelMenu) {
+    return;
+  }
+
+  chatModelMenu.innerHTML = "";
+
+  if (!localModels.length) {
+    const empty = document.createElement("p");
+    empty.className = "model-picker-empty";
+    empty.textContent = "Nenhum modelo local disponivel.";
+    chatModelMenu.appendChild(empty);
+    updateChatModelPickerLabel();
+    return;
+  }
+
+  localModels.forEach((model) => {
+    const option = document.createElement("button");
+    option.type = "button";
+    option.className = "model-picker-item";
+    if (selectedModelId === model.id) {
+      option.classList.add("active");
+    }
+    option.setAttribute("role", "option");
+    option.setAttribute("aria-selected", selectedModelId === model.id ? "true" : "false");
+
+    const name = document.createElement("span");
+    name.className = "model-picker-item-name";
+    name.textContent = model.name;
+
+    const meta = document.createElement("span");
+    meta.className = "model-picker-item-meta";
+    meta.textContent = `${model.provider || "local"} • ${model.id}`;
+
+    option.appendChild(name);
+    option.appendChild(meta);
+    option.addEventListener("click", () => {
+      chatModelSelect.value = model.id;
+      chatModelSelect.dispatchEvent(new Event("change"));
+      setChatModelMenuOpen(false);
+    });
+
+    chatModelMenu.appendChild(option);
+  });
+
+  updateChatModelPickerLabel();
 }
 
 function renderThreadList() {
   chatHistoryList.innerHTML = "";
 
   const sorted = sortThreadsForView();
+  if (openThreadMenuId && !sorted.some((thread) => thread.id === openThreadMenuId)) {
+    openThreadMenuId = null;
+  }
   chatHistoryMeta.textContent = `${sorted.length} conversa(s)`;
 
   sorted.forEach((thread) => {
@@ -432,6 +568,7 @@ function renderThreadList() {
         addSystemMessage("Pare a geracao atual antes de trocar de conversa.");
         return;
       }
+      closeThreadMenu();
       setEditMode(null);
       activeThreadId = thread.id;
       syncModelWithActiveThread();
@@ -442,28 +579,49 @@ function renderThreadList() {
     const actions = document.createElement("div");
     actions.className = "history-item-actions";
 
-    const renameBtn = document.createElement("button");
-    renameBtn.type = "button";
-    renameBtn.className = "ghost-btn history-action-btn";
-    renameBtn.textContent = "Renomear";
-    renameBtn.addEventListener("click", (event) => {
+    const menuTrigger = document.createElement("button");
+    menuTrigger.type = "button";
+    menuTrigger.className = "history-menu-trigger";
+    menuTrigger.textContent = "⋯";
+    const isMenuOpen = openThreadMenuId === thread.id;
+    menuTrigger.setAttribute("aria-label", "Acoes da conversa");
+    menuTrigger.setAttribute("aria-expanded", isMenuOpen ? "true" : "false");
+    menuTrigger.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      renameThread(thread.id);
+      toggleThreadMenu(thread.id);
     });
 
-    const deleteBtn = document.createElement("button");
-    deleteBtn.type = "button";
-    deleteBtn.className = "ghost-btn history-action-btn danger";
-    deleteBtn.textContent = "Apagar";
-    deleteBtn.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      deleteThread(thread.id);
-    });
+    actions.appendChild(menuTrigger);
 
-    actions.appendChild(renameBtn);
-    actions.appendChild(deleteBtn);
+    if (isMenuOpen) {
+      const menu = document.createElement("div");
+      menu.className = "history-item-menu";
+
+      const renameBtn = document.createElement("button");
+      renameBtn.type = "button";
+      renameBtn.className = "history-menu-item";
+      renameBtn.textContent = "Renomear";
+      renameBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        renameThread(thread.id);
+      });
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "history-menu-item danger";
+      deleteBtn.textContent = "Apagar";
+      deleteBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        deleteThread(thread.id);
+      });
+
+      menu.appendChild(renameBtn);
+      menu.appendChild(deleteBtn);
+      actions.appendChild(menu);
+    }
 
     row.appendChild(button);
     row.appendChild(actions);
@@ -506,6 +664,7 @@ function renderChatModelSelect() {
     chatModelSelect.appendChild(option);
     chatModelSelect.disabled = true;
     selectedModelId = null;
+    renderChatModelPickerMenu();
     renderSelectedThreadMeta();
     return;
   }
@@ -534,6 +693,7 @@ function renderChatModelSelect() {
     persistThreads();
   }
 
+  renderChatModelPickerMenu();
   renderSelectedThreadMeta();
 }
 
@@ -542,16 +702,27 @@ function renderSelectedThreadMeta() {
   if (!active) {
     selectedThreadLabel.textContent = "Nova conversa";
     selectedModelLabel.textContent = "Nenhum modelo selecionado";
+    updateChatModelPickerLabel();
     return;
   }
 
   selectedThreadLabel.textContent = active.title || "Nova conversa";
   const model = localModels.find((entry) => entry.id === selectedModelId);
   selectedModelLabel.textContent = model ? `${model.name} (${model.provider})` : "Modelo nao selecionado";
+  updateChatModelPickerLabel();
+}
+
+function roleClassFromValue(role) {
+  const normalized = String(role || "").toLowerCase();
+  if (["user", "assistant", "system", "tool"].includes(normalized)) {
+    return normalized;
+  }
+  return "assistant";
 }
 
 function addSystemMessage(text) {
   const node = messageTemplate.content.firstElementChild.cloneNode(true);
+  node.classList.add("role-system");
   node.querySelector(".message-role").textContent = "system";
   node.querySelector(".message-content").textContent = text;
   const actions = node.querySelector(".message-actions");
@@ -575,6 +746,7 @@ function scrollChatToBottom(force = false) {
 
 function addMessageCard(role, content, { editable = false, messageIndex = null, forceScroll = true } = {}) {
   const node = messageTemplate.content.firstElementChild.cloneNode(true);
+  node.classList.add(`role-${roleClassFromValue(role)}`);
   node.querySelector(".message-role").textContent = role;
   node.querySelector(".message-content").textContent = content;
 
@@ -593,6 +765,15 @@ function addMessageCard(role, content, { editable = false, messageIndex = null, 
   scrollChatToBottom(forceScroll);
 }
 
+function updateChatEmptyState() {
+  const active = getActiveThread();
+  const hasMessages = Boolean(active && Array.isArray(active.messages) && active.messages.length > 0);
+  panelChat.classList.toggle("chat-empty-state", !hasMessages);
+  if (chatEmptyHero) {
+    chatEmptyHero.classList.toggle("hidden", hasMessages);
+  }
+}
+
 function rebuildChatFromThread() {
   chatLog.innerHTML = "";
   const active = getActiveThread();
@@ -600,6 +781,7 @@ function rebuildChatFromThread() {
   if (!active) {
     setEditMode(null);
     renderSelectedThreadMeta();
+    updateChatEmptyState();
     return;
   }
 
@@ -625,6 +807,7 @@ function rebuildChatFromThread() {
 
   scrollChatToBottom(true);
   renderSelectedThreadMeta();
+  updateChatEmptyState();
 }
 
 function appendMessageToActiveThread(role, content) {
@@ -643,6 +826,7 @@ function appendMessageToActiveThread(role, content) {
   persistThreads();
   renderThreadList();
   renderSelectedThreadMeta();
+  updateChatEmptyState();
 }
 
 function setGeneratingState(nextState) {
@@ -688,6 +872,7 @@ function applyEditedMessageAndTrim(messageIndex, nextContent) {
 
 function createAssistantStreamCard() {
   const node = assistantStreamTemplate.content.firstElementChild.cloneNode(true);
+  node.classList.add("role-assistant");
   const ui = {
     node,
     stateLabel: node.querySelector(".assistant-state-label"),
@@ -905,8 +1090,20 @@ function isAbortError(error) {
   );
 }
 
+function setWebsearchToggleState(nextState, { persist = true } = {}) {
+  const enabled = Boolean(nextState);
+  chatWebsearchToggle.checked = enabled;
+  if (chatWebsearchBtn) {
+    chatWebsearchBtn.classList.toggle("active", enabled);
+    chatWebsearchBtn.setAttribute("aria-pressed", enabled ? "true" : "false");
+  }
+  if (persist) {
+    localStorage.setItem(STORAGE_CHAT_WEBSEARCH_ENABLED, enabled ? "1" : "0");
+  }
+}
+
 function getBraveApiKey() {
-  return (braveApiKeyInput.value || "").trim();
+  return (braveApiKeyInput?.value || "").trim();
 }
 
 function buildWebsearchSkeletonPrompt({ apiKeyConfigured, searchSummary }) {
@@ -961,25 +1158,30 @@ async function maybeInjectWebsearchContext(messages) {
     ?.content?.trim();
 
   let searchSummary = "";
-  if (apiKey && latestUserMessage) {
+  let keyConfigured = Boolean(apiKey);
+  if (latestUserMessage) {
     try {
+      const payload = {
+        query: latestUserMessage,
+        max_results: 5,
+      };
+      if (apiKey) {
+        payload.api_key = apiKey;
+      }
       const response = await fetchJson("/web/brave/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: latestUserMessage,
-          api_key: apiKey,
-          max_results: 5,
-        }),
+        body: JSON.stringify(payload),
       });
       searchSummary = formatBraveSearchSummary(response.results);
+      keyConfigured = keyConfigured || Boolean(response?.key_source === "server");
     } catch (error) {
       addSystemMessage(`WebSearch Brave indisponivel: ${error.message}`);
     }
   }
 
   const systemPrompt = buildWebsearchSkeletonPrompt({
-    apiKeyConfigured: Boolean(apiKey),
+    apiKeyConfigured: keyConfigured,
     searchSummary,
   });
 
@@ -1277,8 +1479,12 @@ function renderCatalogModels(models) {
     node.querySelector(".remote-name").textContent = model.name;
     node.querySelector(".remote-subtitle").textContent = `${model.author} / ${model.model_id}`;
     node.querySelector(".remote-task").textContent = model.task || "task n/d";
-    node.querySelector(".remote-summary").textContent =
-      model.summary || "Sem descricao detalhada no catalogo.";
+    const summaryNode = node.querySelector(".remote-summary");
+    if (isMeaningfulCatalogSummary(model.summary)) {
+      summaryNode.textContent = String(model.summary).trim();
+    } else {
+      summaryNode.remove();
+    }
     node.querySelector(".remote-size").textContent = formatBytes(model.size_bytes);
     node.querySelector(".remote-downloads").textContent = `${formatNumber(model.downloads)} downloads`;
     node.querySelector(".remote-likes").textContent = `${formatNumber(model.likes)} likes`;
@@ -1294,9 +1500,6 @@ function renderCatalogModels(models) {
     const dateChip = document.createElement("span");
     dateChip.textContent = `updated ${formatDate(model.last_modified)}`;
     tagsContainer.appendChild(dateChip);
-
-    const link = node.querySelector(".remote-link");
-    link.href = model.model_url;
 
     const downloadBtn = node.querySelector(".remote-download-btn");
     downloadBtn.addEventListener("click", async () => {
@@ -1657,6 +1860,7 @@ async function runOpenClawRuntimeAction(action) {
 function addOpenClawChatMessage(role, content, meta = "") {
   const node = document.createElement("article");
   node.className = "message-card";
+  node.classList.add(`role-${roleClassFromValue(role)}`);
 
   const roleNode = document.createElement("header");
   roleNode.className = "message-role";
@@ -2014,6 +2218,8 @@ function switchTab(nextTab) {
 
   if (nextTab !== "chat") {
     setEditMode(null);
+    closeThreadMenu();
+    setChatModelMenuOpen(false);
   }
 
   tabButtons.forEach((button) => {
@@ -2043,7 +2249,9 @@ function switchTab(nextTab) {
 
 saveUrlBtn.addEventListener("click", () => {
   daemonBaseUrl = daemonInput.value.trim().replace(/\/$/, "");
-  localStorage.setItem(STORAGE_BRAVE_API_KEY, getBraveApiKey());
+  if (braveApiKeyInput) {
+    localStorage.setItem(STORAGE_BRAVE_API_KEY, getBraveApiKey());
+  }
   localStorage.setItem(STORAGE_DAEMON_URL, daemonBaseUrl);
   openclawStatusLoaded = false;
   openclawObservabilityLoaded = false;
@@ -2053,9 +2261,11 @@ saveUrlBtn.addEventListener("click", () => {
   void bootstrap();
 });
 
-braveApiKeyInput.addEventListener("change", () => {
-  localStorage.setItem(STORAGE_BRAVE_API_KEY, getBraveApiKey());
-});
+if (braveApiKeyInput) {
+  braveApiKeyInput.addEventListener("change", () => {
+    localStorage.setItem(STORAGE_BRAVE_API_KEY, getBraveApiKey());
+  });
+}
 
 newChatThreadBtn.addEventListener("click", () => {
   if (isGenerating) {
@@ -2063,6 +2273,7 @@ newChatThreadBtn.addEventListener("click", () => {
     return;
   }
 
+  closeThreadMenu();
   setEditMode(null);
   const thread = createThread({ modelId: selectedModelId });
   chatThreads.unshift(thread);
@@ -2074,12 +2285,24 @@ newChatThreadBtn.addEventListener("click", () => {
 });
 
 refreshModelsBtn.addEventListener("click", () => {
+  setChatModelMenuOpen(false);
   void loadModels();
 });
+
+if (chatModelTrigger) {
+  chatModelTrigger.addEventListener("click", (event) => {
+    event.preventDefault();
+    if (activeTab !== "chat") {
+      return;
+    }
+    setChatModelMenuOpen(!chatModelMenuOpen);
+  });
+}
 
 chatModelSelect.addEventListener("change", () => {
   const modelId = chatModelSelect.value;
   if (!modelId) {
+    renderChatModelPickerMenu();
     return;
   }
 
@@ -2092,6 +2315,7 @@ chatModelSelect.addEventListener("change", () => {
     renderThreadList();
   }
 
+  renderChatModelPickerMenu();
   renderSelectedThreadMeta();
 });
 
@@ -2141,6 +2365,12 @@ chatForm.addEventListener("submit", async (event) => {
   await runAssistantGeneration();
 });
 
+if (chatWebsearchBtn) {
+  chatWebsearchBtn.addEventListener("click", () => {
+    setWebsearchToggleState(!chatWebsearchToggle.checked);
+  });
+}
+
 stopGenerationBtn.addEventListener("click", () => {
   if (!activeStreamController || !isGenerating) {
     return;
@@ -2185,6 +2415,35 @@ tabButtons.forEach((button) => {
   button.addEventListener("click", () => {
     switchTab(button.dataset.tab);
   });
+});
+
+document.addEventListener("click", (event) => {
+  const target = event.target;
+  const inHistoryMenu =
+    target instanceof Element && Boolean(target.closest(".history-item-actions"));
+  if (openThreadMenuId && !inHistoryMenu) {
+    closeThreadMenu({ rerender: true });
+  }
+
+  const inModelSwitcher =
+    target instanceof Element && Boolean(target.closest("#chat-model-switcher"));
+  if (chatModelMenuOpen && !inModelSwitcher) {
+    setChatModelMenuOpen(false);
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") {
+    return;
+  }
+
+  if (chatModelMenuOpen) {
+    setChatModelMenuOpen(false);
+  }
+
+  if (openThreadMenuId) {
+    closeThreadMenu({ rerender: true });
+  }
 });
 
 refreshOpenclawStatusBtn.addEventListener("click", () => {
@@ -2251,6 +2510,10 @@ applyOpenclawModelBtn.addEventListener("click", () => {
 
 async function bootstrap() {
   try {
+    const storedWebsearch = localStorage.getItem(STORAGE_CHAT_WEBSEARCH_ENABLED);
+    setWebsearchToggleState(storedWebsearch === "1", { persist: false });
+    setChatModelMenuOpen(false);
+
     loadThreads();
     ensureActiveThread();
 

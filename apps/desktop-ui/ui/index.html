@@ -11,20 +11,28 @@
     <div class="bg-layer bg-b"></div>
 
     <div id="app-shell" class="app-shell chat-mode">
-      <aside id="chat-sidebar" class="chat-sidebar glass">
-        <div class="brand">
-          <p class="brand-eyebrow">MLX Pilot</p>
-          <h1>Local + Cloud Model Hub</h1>
-          <p class="brand-caption">Selecionar, baixar e conversar com modelos em um unico app.</p>
+      <aside id="chat-sidebar" class="chat-sidebar">
+        <div class="sidebar-head">
+          <div class="brand-row">
+            <img class="brand-wordmark" src="./assets/mlxpilot-wordmark.png" alt="MLX Pilot" />
+          </div>
+
+          <button id="new-chat-thread" class="sidebar-primary-btn">+ Nova conversa</button>
         </div>
 
-        <section class="panel-block">
+        <section class="sidebar-section history-section">
           <div class="panel-title-row">
-            <h2>Conexao</h2>
+            <h2>Seus chats</h2>
           </div>
+          <p id="chat-history-meta" class="meta-note">-</p>
+          <ul id="chat-history-list" class="history-list"></ul>
+        </section>
+
+        <details class="sidebar-section settings-section">
+          <summary>Conexao</summary>
           <label class="field-label" for="daemon-url">Daemon URL</label>
           <input id="daemon-url" class="input" value="http://127.0.0.1:11435" />
-          <label class="field-label" for="brave-api-key">Brave API Key</label>
+          <label class="field-label" for="brave-api-key">Brave API Key (opcional)</label>
           <input
             id="brave-api-key"
             class="input"
@@ -33,20 +41,11 @@
             autocomplete="off"
           />
           <button id="save-url" class="ghost-btn">Salvar</button>
-        </section>
-
-        <section class="panel-block">
-          <div class="panel-title-row">
-            <h2>Historico</h2>
-            <button id="new-chat-thread" class="ghost-btn">Nova conversa</button>
-          </div>
-          <p id="chat-history-meta" class="meta-note">-</p>
-          <ul id="chat-history-list" class="history-list"></ul>
-        </section>
+        </details>
       </aside>
 
       <main class="main-area">
-        <header class="topbar glass">
+        <header class="topbar">
           <div class="tab-list" role="tablist" aria-label="Modo">
             <button class="tab-btn active" data-tab="chat" role="tab" aria-selected="true">
               Chat
@@ -61,40 +60,69 @@
 
           <div class="topbar-right">
             <div id="chat-model-switcher" class="chat-model-switcher">
-              <label for="chat-model-select">Modelo</label>
-              <select id="chat-model-select" class="input compact-input"></select>
-              <button id="refresh-models" class="ghost-btn">Atualizar</button>
+              <button
+                id="chat-model-trigger"
+                type="button"
+                class="model-picker-trigger"
+                aria-haspopup="listbox"
+                aria-expanded="false"
+              >
+                <span id="chat-model-current" class="model-picker-current">Selecionar modelo</span>
+                <span class="model-picker-caret">▾</span>
+              </button>
+
+              <div id="chat-model-menu" class="model-picker-menu hidden" role="listbox"></div>
+
+              <select id="chat-model-select" class="input compact-input hidden" tabindex="-1"></select>
+              <button id="refresh-models" class="ghost-btn model-refresh-btn" title="Atualizar modelos">
+                Atualizar
+              </button>
             </div>
+
             <div id="status-pill" class="status-pill">pronto</div>
           </div>
         </header>
 
         <section id="panel-chat" class="main-panel active" role="tabpanel">
-          <header class="chat-header glass">
+          <header class="chat-header">
             <div>
-              <p class="chat-eyebrow">Sessao Atual</p>
+              <p class="chat-eyebrow">Conversa atual</p>
               <h2 id="selected-thread-label">Nova conversa</h2>
               <p id="selected-model-label" class="meta-note">Nenhum modelo selecionado</p>
             </div>
           </header>
 
-          <section id="chat-log" class="chat-log glass"></section>
+          <section id="chat-empty-hero" class="chat-empty-hero">
+            <div class="chat-empty-title-row">
+              <img class="chat-empty-logo" src="./assets/mlxpilot-mark.png" alt="MLX Pilot" />
+              <h2>Como posso te ajudar?</h2>
+            </div>
+          </section>
 
-          <form id="chat-form" class="chat-form glass">
+          <section id="chat-log" class="chat-log"></section>
+
+          <form id="chat-form" class="chat-form">
             <textarea
               id="message-input"
-              placeholder="Escreva seu prompt aqui..."
+              placeholder="Mensagem para MLX Pilot"
               rows="4"
               required
             ></textarea>
+
+            <input id="chat-websearch-toggle" type="checkbox" class="visually-hidden" />
+
             <div class="chat-form-actions">
-              <label class="chat-option-toggle" for="chat-websearch-toggle">
-                <input id="chat-websearch-toggle" type="checkbox" />
-                WebSearch Brave (OpenClaw skeleton)
-              </label>
-              <button id="cancel-edit" type="button" class="ghost-btn hidden">Cancelar edicao</button>
-              <button id="stop-generation" type="button" class="ghost-btn" disabled>Parar</button>
-              <button type="submit" class="primary-btn">Enviar</button>
+              <div class="chat-form-left">
+                <button id="chat-websearch-btn" type="button" class="chat-option-chip" aria-pressed="false">
+                  Pesquisar
+                </button>
+              </div>
+
+              <div class="chat-form-right">
+                <button id="cancel-edit" type="button" class="ghost-btn hidden">Cancelar edicao</button>
+                <button id="stop-generation" type="button" class="ghost-btn" disabled>Parar</button>
+                <button type="submit" class="primary-btn">Enviar</button>
+              </div>
             </div>
           </form>
         </section>
@@ -102,7 +130,7 @@
         <section id="panel-discover" class="main-panel" role="tabpanel">
           <header class="discover-header glass">
             <div>
-              <p class="chat-eyebrow">Catalogo Remoto</p>
+              <p class="chat-eyebrow">Catalogo remoto</p>
               <h2>Encontre novos modelos para baixar</h2>
             </div>
           </header>
@@ -336,7 +364,6 @@
         <div class="remote-tags"></div>
 
         <div class="remote-actions">
-          <a class="ghost-btn remote-link" target="_blank" rel="noreferrer">Abrir</a>
           <button class="primary-btn remote-download-btn">Baixar</button>
         </div>
       </article>
