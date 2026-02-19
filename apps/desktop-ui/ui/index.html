@@ -17,7 +17,9 @@
             <img class="brand-wordmark" src="./assets/mlxpilot-wordmark.png" alt="MLX Pilot" />
           </div>
 
-          <button id="new-chat-thread" class="sidebar-primary-btn">+ Nova conversa</button>
+          <button id="new-chat-thread" class="sidebar-primary-btn" data-action="new-chat">
+            + Nova conversa
+          </button>
         </div>
 
         <section class="sidebar-section history-section">
@@ -46,15 +48,26 @@
 
       <main class="main-area">
         <header class="topbar">
-          <div class="tab-list" role="tablist" aria-label="Modo">
-            <button class="tab-btn active" data-tab="chat" role="tab" aria-selected="true">
-              Chat
-            </button>
-            <button class="tab-btn" data-tab="discover" role="tab" aria-selected="false">
-              Descobrir Modelos
-            </button>
-            <button class="tab-btn" data-tab="openclaw" role="tab" aria-selected="false">
-              OpenClaw
+          <div class="topbar-left">
+            <div class="tab-list" role="tablist" aria-label="Modo">
+              <button class="tab-btn active" data-tab="chat" role="tab" aria-selected="true">
+                Chat
+              </button>
+              <button class="tab-btn" data-tab="discover" role="tab" aria-selected="false">
+                Descobrir Modelos
+              </button>
+              <button class="tab-btn" data-tab="openclaw" role="tab" aria-selected="false">
+                OpenClaw
+              </button>
+            </div>
+
+            <button
+              id="new-chat-thread-top"
+              class="ghost-btn topbar-new-chat-btn"
+              type="button"
+              data-action="new-chat"
+            >
+              + Novo chat
             </button>
           </div>
 
