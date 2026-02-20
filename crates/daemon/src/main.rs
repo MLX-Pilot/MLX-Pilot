@@ -3,14 +3,15 @@ mod chat_stream;
 mod config;
 mod openclaw;
 
-use std::io;
-use std::path::{PathBuf as FsPathBuf};
-use std::process::{Command, Output};
+use std::fs::{self, OpenOptions};
+use std::io::{self, Read, Seek, SeekFrom};
+use std::path::{Path as FsPath, PathBuf as FsPathBuf};
+use std::process::{Command, Output, Stdio};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -34,9 +35,10 @@ use openclaw::{
     OpenClawSetModelRequest, OpenClawStatusResponse,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use tokio::net::TcpListener;
-use tokio::sync::mpsc;
+use tokio::process::{Child as TokioChild, Command as TokioCommand};
+use tokio::sync::{mpsc, Mutex};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 use tower_http::cors::CorsLayer;
@@ -55,6 +57,7 @@ struct AppState {
     catalog: Arc<CatalogService>,
     chat_runtime: ChatRuntimeConfig,
     openclaw_runtime: Arc<OpenClawRuntime>,
+    nanobot_runtime: Arc<Mutex<NanoBotRuntimeManager>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -321,6 +324,7 @@ async fn main() -> anyhow::Result<()> {
             error_log: cfg.openclaw_error_log.clone(),
             sync_log: cfg.openclaw_sync_log.clone(),
         })),
+        nanobot_runtime: Arc::new(Mutex::new(NanoBotRuntimeManager::new())),
     };
 
     let app = Router::new()
@@ -344,6 +348,14 @@ async fn main() -> anyhow::Result<()> {
         .route("/nanobot/status", get(nanobot_status))
         .route("/nanobot/onboard", post(nanobot_onboard))
         .route("/nanobot/install", post(nanobot_install))
+        .route(
+            "/nanobot/runtime",
+            get(nanobot_runtime_status).post(nanobot_runtime_action),
+        )
+        .route("/nanobot/chat", post(nanobot_chat))
+        .route("/nanobot/logs", get(nanobot_logs))
+        .route("/nanobot/observability", get(nanobot_observability))
+        .route("/nanobot/model", get(nanobot_get_model).post(nanobot_set_model))
         .route("/catalog/sources", get(catalog_sources))
         .route("/catalog/models", get(catalog_models))
         .route(
@@ -903,7 +915,7 @@ async fn catalog_downloads(
 
 async fn catalog_download(
     State(state): State<AppState>,
-    Path(job_id): Path<String>,
+    AxumPath(job_id): AxumPath<String>,
 ) -> Result<Json<DownloadJob>, AppError> {
     match state.catalog.get_download(&job_id).await {
         Some(job) => Ok(Json(job)),
@@ -915,7 +927,7 @@ async fn catalog_download(
 
 async fn catalog_cancel_download(
     State(state): State<AppState>,
-    Path(job_id): Path<String>,
+    AxumPath(job_id): AxumPath<String>,
 ) -> Result<Json<DownloadJob>, AppError> {
     let cancelled = state.catalog.cancel_download(&job_id).await?;
     Ok(Json(cancelled))
@@ -1062,6 +1074,135 @@ struct NanoBotStatusResponse {
     raw_status: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+struct NanoBotRuntimeStateResponse {
+    service_status: String,
+    service_state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pid: Option<u64>,
+    rpc_ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    port_status: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    issues: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    uptime_seconds: Option<u64>,
+    log_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct NanoBotRuntimeActionRequest {
+    action: String,
+}
+
+#[derive(Debug, Serialize)]
+struct NanoBotRuntimeActionResponse {
+    action: String,
+    runtime: NanoBotRuntimeStateResponse,
+}
+
+#[derive(Debug, Deserialize)]
+struct NanoBotChatRequest {
+    message: String,
+    session_key: Option<String>,
+    timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+struct NanoBotUsage {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    input: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_read: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_write: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    total: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+struct NanoBotChatResponse {
+    run_id: Option<String>,
+    status: Option<String>,
+    summary: Option<String>,
+    reply: String,
+    payloads: Vec<String>,
+    duration_ms: Option<u64>,
+    provider: Option<String>,
+    model: Option<String>,
+    usage: Option<NanoBotUsage>,
+    skills: Vec<String>,
+    tools: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NanoBotLogQuery {
+    stream: Option<String>,
+    cursor: Option<u64>,
+    max_bytes: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct NanoBotLogChunkResponse {
+    stream: String,
+    path: String,
+    exists: bool,
+    cursor: u64,
+    next_cursor: u64,
+    file_size: u64,
+    truncated: bool,
+    content: String,
+}
+
+#[derive(Debug, Serialize)]
+struct NanoBotObservabilityResponse {
+    session_key: String,
+    provider: Option<String>,
+    model: Option<String>,
+    usage: Option<NanoBotUsage>,
+    skills: Vec<String>,
+    tools: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    updated_at: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+struct NanoBotModelResponse {
+    source: String,
+    model: String,
+    provider: String,
+    label: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct NanoBotSetModelRequest {
+    model: String,
+}
+
+#[derive(Debug)]
+struct NanoBotProcessHandle {
+    child: TokioChild,
+    pid: u32,
+    started_at: Instant,
+}
+
+#[derive(Debug)]
+struct NanoBotRuntimeManager {
+    process: Option<NanoBotProcessHandle>,
+    last_error: Option<String>,
+}
+
+impl NanoBotRuntimeManager {
+    fn new() -> Self {
+        Self {
+            process: None,
+            last_error: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct NanoBotCommandSpec {
     program: String,
@@ -1087,14 +1228,16 @@ async fn openclaw_install(
 async fn nanobot_status() -> Result<Json<NanoBotStatusResponse>, AppError> {
     let cfg = AppConfig::load_settings().apply_env();
     let spec = resolve_nanobot_command(&cfg);
+    let command_cwd = resolve_nanobot_command_cwd(&cfg);
     let config_path = nanobot_config_path();
-    let workspace_path = nanobot_workspace_path();
+    let workspace_path = resolve_nanobot_workspace_from_config()
+        .unwrap_or_else(|| nanobot_workspace_path());
 
-    let version = run_nanobot_command(&spec, &["--version"], None)
+    let version = run_nanobot_command(&spec, &["--version"], command_cwd.as_deref())
         .ok()
         .filter(|output| output.status.success())
         .map(|output| {
-            let text = decode_command_output(&output);
+            let text = decode_stdout(&output);
             text.lines()
                 .next()
                 .map(str::trim)
@@ -1103,15 +1246,23 @@ async fn nanobot_status() -> Result<Json<NanoBotStatusResponse>, AppError> {
         })
         .filter(|value| !value.is_empty());
 
-    let status_output = run_nanobot_command(&spec, &["status"], None)
+    let status_output = run_nanobot_command(&spec, &["status"], command_cwd.as_deref())
         .ok()
         .filter(|output| output.status.success())
-        .map(|output| decode_command_output(&output))
+        .map(|output| {
+            let stdout = decode_stdout(&output);
+            if stdout.is_empty() {
+                decode_command_output(&output)
+            } else {
+                stdout
+            }
+        })
         .filter(|value| !value.is_empty());
 
     let installed = version.is_some();
     let message = if installed {
-        "NanoBot detectado. Se o config ainda nao existe, inicialize com o botao onboard.".to_string()
+        "NanoBot detectado. Se o config ainda nao existe, inicialize com o botao onboard."
+            .to_string()
     } else {
         "NanoBot nao encontrado no ambiente atual. Verifique o caminho/comando e rode a instalacao."
             .to_string()
@@ -1133,6 +1284,7 @@ async fn nanobot_status() -> Result<Json<NanoBotStatusResponse>, AppError> {
 async fn nanobot_onboard() -> Result<Json<InstallResponse>, AppError> {
     let cfg = AppConfig::load_settings().apply_env();
     let spec = resolve_nanobot_command(&cfg);
+    let command_cwd = resolve_nanobot_command_cwd(&cfg);
     let config_path = nanobot_config_path();
 
     if config_path.exists() {
@@ -1144,7 +1296,8 @@ async fn nanobot_onboard() -> Result<Json<InstallResponse>, AppError> {
         }));
     }
 
-    let output = run_nanobot_command(&spec, &["onboard"], None).map_err(|error| {
+    let output = run_nanobot_command(&spec, &["onboard"], command_cwd.as_deref()).map_err(
+        |error| {
         AppError::Provider(ProviderError::Io {
             context: "Falha ao executar nanobot onboard".to_string(),
             source: error,
@@ -1238,7 +1391,47 @@ async fn nanobot_install(
         }
     }
 
-    let install_output = Command::new("python3")
+    let venv_dir = repo_dir.join(".venv");
+    if !venv_dir.join("bin").join("python").exists() {
+        let venv_output = Command::new("python3")
+            .arg("-m")
+            .arg("venv")
+            .arg(&venv_dir)
+            .output()
+            .map_err(|error| AppError::Provider(ProviderError::Io {
+                context: "Falha ao criar venv local do NanoBot".to_string(),
+                source: error,
+            }))?;
+
+        if !venv_output.status.success() {
+            return Err(AppError::Provider(ProviderError::CommandFailed {
+                command: format!("python3 -m venv {}", venv_dir.display()),
+                stderr: decode_command_output(&venv_output),
+            }));
+        }
+    }
+
+    let venv_python = venv_dir.join("bin").join("python");
+    let pip_upgrade = Command::new(&venv_python)
+        .arg("-m")
+        .arg("pip")
+        .arg("install")
+        .arg("--upgrade")
+        .arg("pip")
+        .output()
+        .map_err(|error| AppError::Provider(ProviderError::Io {
+            context: "Falha ao atualizar pip no venv do NanoBot".to_string(),
+            source: error,
+        }))?;
+
+    if !pip_upgrade.status.success() {
+        return Err(AppError::Provider(ProviderError::CommandFailed {
+            command: format!("{} -m pip install --upgrade pip", venv_python.display()),
+            stderr: decode_command_output(&pip_upgrade),
+        }));
+    }
+
+    let install_output = Command::new(&venv_python)
         .arg("-m")
         .arg("pip")
         .arg("install")
@@ -1252,17 +1445,202 @@ async fn nanobot_install(
 
     if !install_output.status.success() {
         return Err(AppError::Provider(ProviderError::CommandFailed {
-            command: format!("python3 -m pip install -e {}", repo_dir.display()),
+            command: format!("{} -m pip install -e {}", venv_python.display(), repo_dir.display()),
             stderr: decode_command_output(&install_output),
         }));
     }
 
     Ok(Json(InstallResponse {
         message: format!(
-            "NanoBot pronto. Repo: {}. Proximo passo: execute o onboard para criar ~/.nanobot/config.json.",
-            repo_dir.display()
+            "NanoBot pronto. Repo: {}. CLI ativa: {}. Proximo passo: execute o onboard para criar ~/.nanobot/config.json.",
+            repo_dir.display(),
+            repo_dir.join(".venv/bin/nanobot").display()
         ),
     }))
+}
+
+async fn nanobot_runtime_status(
+    State(state): State<AppState>,
+) -> Result<Json<NanoBotRuntimeStateResponse>, AppError> {
+    let cfg = AppConfig::load_settings().apply_env();
+    let spec = resolve_nanobot_command(&cfg);
+    let command_cwd = resolve_nanobot_command_cwd(&cfg);
+
+    let mut runtime = state.nanobot_runtime.lock().await;
+    refresh_nanobot_process_state(&mut runtime);
+    let response = build_nanobot_runtime_snapshot(&spec, command_cwd.as_deref(), &runtime);
+    Ok(Json(response))
+}
+
+async fn nanobot_runtime_action(
+    State(state): State<AppState>,
+    Json(request): Json<NanoBotRuntimeActionRequest>,
+) -> Result<Json<NanoBotRuntimeActionResponse>, AppError> {
+    let action = request.action.trim().to_lowercase();
+    if !matches!(action.as_str(), "start" | "stop" | "restart") {
+        return Err(AppError::Provider(ProviderError::InvalidRequest {
+            details: "acao invalida para runtime: use start, stop ou restart".to_string(),
+        }));
+    }
+
+    let cfg = AppConfig::load_settings().apply_env();
+    let spec = resolve_nanobot_command(&cfg);
+    let command_cwd = resolve_nanobot_command_cwd(&cfg);
+
+    let mut runtime = state.nanobot_runtime.lock().await;
+    refresh_nanobot_process_state(&mut runtime);
+
+    match action.as_str() {
+        "start" => {
+            if runtime.process.is_none() {
+                spawn_nanobot_gateway(&spec, command_cwd.as_deref(), &mut runtime).await?;
+            }
+        }
+        "stop" => {
+            stop_nanobot_gateway(&mut runtime).await?;
+        }
+        "restart" => {
+            stop_nanobot_gateway(&mut runtime).await?;
+            spawn_nanobot_gateway(&spec, command_cwd.as_deref(), &mut runtime).await?;
+        }
+        _ => {}
+    }
+
+    refresh_nanobot_process_state(&mut runtime);
+    let snapshot = build_nanobot_runtime_snapshot(&spec, command_cwd.as_deref(), &runtime);
+    Ok(Json(NanoBotRuntimeActionResponse {
+        action,
+        runtime: snapshot,
+    }))
+}
+
+async fn nanobot_chat(
+    Json(request): Json<NanoBotChatRequest>,
+) -> Result<Json<NanoBotChatResponse>, AppError> {
+    let message = request.message.trim();
+    if message.is_empty() {
+        return Err(AppError::Provider(ProviderError::InvalidRequest {
+            details: "message nao pode ser vazio".to_string(),
+        }));
+    }
+
+    let cfg = AppConfig::load_settings().apply_env();
+    let spec = resolve_nanobot_command(&cfg);
+    let command_cwd = resolve_nanobot_command_cwd(&cfg);
+    let session_key = request
+        .session_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("mlx-pilot")
+        .to_string();
+
+    let mut args = vec![
+        "agent".to_string(),
+        "--message".to_string(),
+        message.to_string(),
+        "--session".to_string(),
+        session_key.clone(),
+        "--no-markdown".to_string(),
+    ];
+
+    if request.timeout_ms.is_some() {
+        // Mantemos compatibilidade de payload sem efeito direto no CLI atual.
+        args.push("--no-logs".to_string());
+    }
+
+    let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+    let started = Instant::now();
+
+    let output = run_nanobot_command(&spec, &arg_refs, command_cwd.as_deref()).map_err(|error| {
+        AppError::Provider(ProviderError::Io {
+            context: "Falha ao executar nanobot agent".to_string(),
+            source: error,
+        })
+    })?;
+
+    if !output.status.success() {
+        return Err(AppError::Provider(ProviderError::CommandFailed {
+            command: format!("{} {}", spec.display(), arg_refs.join(" ")),
+            stderr: decode_command_output(&output),
+        }));
+    }
+
+    let stdout = decode_stdout(&output);
+    let stderr = decode_stderr(&output);
+    let reply = extract_nanobot_reply(&stdout, &stderr);
+    let observability = build_nanobot_observability_snapshot()?;
+    let mut payloads = Vec::new();
+    if !stdout.is_empty() {
+        payloads.push(stdout);
+    }
+    if !stderr.is_empty() {
+        payloads.push(stderr);
+    }
+
+    Ok(Json(NanoBotChatResponse {
+        run_id: None,
+        status: Some("completed".to_string()),
+        summary: Some(format!("session {}", session_key)),
+        reply: if reply.is_empty() {
+            "(sem resposta textual)".to_string()
+        } else {
+            reply
+        },
+        payloads,
+        duration_ms: Some(started.elapsed().as_millis() as u64),
+        provider: observability.provider,
+        model: observability.model,
+        usage: None,
+        skills: observability.skills,
+        tools: observability.tools,
+    }))
+}
+
+async fn nanobot_logs(
+    Query(query): Query<NanoBotLogQuery>,
+) -> Result<Json<NanoBotLogChunkResponse>, AppError> {
+    let stream = normalize_nanobot_log_stream(query.stream.as_deref());
+    let path = nanobot_log_path_for_stream(&stream);
+    let cursor = query.cursor.unwrap_or(0);
+    let max_bytes = query.max_bytes.unwrap_or(65536).clamp(1024, 262_144);
+    let chunk = read_nanobot_log_chunk(&stream, &path, cursor, max_bytes)?;
+    Ok(Json(chunk))
+}
+
+async fn nanobot_observability() -> Result<Json<NanoBotObservabilityResponse>, AppError> {
+    let snapshot = build_nanobot_observability_snapshot()?;
+    Ok(Json(snapshot))
+}
+
+async fn nanobot_get_model() -> Result<Json<NanoBotModelResponse>, AppError> {
+    let config = read_nanobot_config_json_optional()?;
+    Ok(Json(build_nanobot_model_response(config.as_ref())))
+}
+
+async fn nanobot_set_model(
+    Json(request): Json<NanoBotSetModelRequest>,
+) -> Result<Json<NanoBotModelResponse>, AppError> {
+    let model = request.model.trim();
+    if model.is_empty() {
+        return Err(AppError::Provider(ProviderError::InvalidRequest {
+            details: "model nao pode ser vazio".to_string(),
+        }));
+    }
+
+    let mut config = read_nanobot_config_json_optional()?.unwrap_or_else(default_nanobot_config);
+    set_json_string_at_path(&mut config, &["agents", "defaults", "model"], model.to_string());
+
+    if extract_nanobot_workspace_value(&config).is_none() {
+        set_json_string_at_path(
+            &mut config,
+            &["agents", "defaults", "workspace"],
+            nanobot_workspace_path().display().to_string(),
+        );
+    }
+
+    write_nanobot_config_json(&config)?;
+    Ok(Json(build_nanobot_model_response(Some(&config))))
 }
 
 fn resolve_nanobot_repo_dir(cfg: &AppConfig) -> Result<FsPathBuf, AppError> {
@@ -1348,17 +1726,17 @@ fn resolve_nanobot_command(cfg: &AppConfig) -> NanoBotCommandSpec {
         .and_then(|value| value.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("py"))
     {
-        if !candidate.exists() {
-            if let Some(parent) = candidate.parent() {
-                let local_venv = parent.join(".venv").join("bin").join("nanobot");
-                if local_venv.exists() {
-                    return NanoBotCommandSpec {
-                        program: local_venv.display().to_string(),
-                        args: Vec::new(),
-                    };
-                }
+        if let Some(parent) = candidate.parent() {
+            let local_venv = parent.join(".venv").join("bin").join("nanobot");
+            if local_venv.exists() {
+                return NanoBotCommandSpec {
+                    program: local_venv.display().to_string(),
+                    args: Vec::new(),
+                };
             }
+        }
 
+        if !candidate.exists() {
             return NanoBotCommandSpec {
                 program: "nanobot".to_string(),
                 args: Vec::new(),
@@ -1377,10 +1755,16 @@ fn resolve_nanobot_command(cfg: &AppConfig) -> NanoBotCommandSpec {
     }
 }
 
+fn resolve_nanobot_command_cwd(cfg: &AppConfig) -> Option<FsPathBuf> {
+    resolve_nanobot_repo_dir(cfg)
+        .ok()
+        .filter(|path| path.exists() && path.is_dir())
+}
+
 fn run_nanobot_command(
     spec: &NanoBotCommandSpec,
     extra_args: &[&str],
-    cwd: Option<&std::path::Path>,
+    cwd: Option<&FsPath>,
 ) -> io::Result<Output> {
     let mut command = Command::new(&spec.program);
     command.args(&spec.args);
@@ -1400,16 +1784,602 @@ fn decode_command_output(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
-fn nanobot_config_path() -> FsPathBuf {
+fn decode_stdout(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+fn decode_stderr(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stderr).trim().to_string()
+}
+
+fn normalize_nanobot_log_stream(stream: Option<&str>) -> String {
+    let normalized = stream
+        .map(str::trim)
+        .unwrap_or("gateway")
+        .to_lowercase();
+
+    match normalized.as_str() {
+        "gateway" | "error" | "sync" => normalized,
+        _ => "gateway".to_string(),
+    }
+}
+
+fn nanobot_data_path() -> FsPathBuf {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_else(|_| ".".to_string());
-    FsPathBuf::from(home).join(".nanobot").join("config.json")
+    FsPathBuf::from(home).join(".nanobot")
+}
+
+fn nanobot_log_path_for_stream(stream: &str) -> FsPathBuf {
+    let log_dir = nanobot_data_path().join("logs");
+    match stream {
+        "error" => log_dir.join("gateway.err.log"),
+        "sync" => log_dir.join("agent.log"),
+        _ => log_dir.join("gateway.log"),
+    }
+}
+
+fn read_nanobot_log_chunk(
+    stream: &str,
+    path: &FsPathBuf,
+    cursor: u64,
+    max_bytes: usize,
+) -> Result<NanoBotLogChunkResponse, AppError> {
+    if !path.exists() {
+        return Ok(NanoBotLogChunkResponse {
+            stream: stream.to_string(),
+            path: path.display().to_string(),
+            exists: false,
+            cursor,
+            next_cursor: cursor,
+            file_size: 0,
+            truncated: false,
+            content: String::new(),
+        });
+    }
+
+    let metadata = fs::metadata(path).map_err(|source| AppError::Provider(ProviderError::Io {
+        context: format!("falha lendo metadata do log {}", path.display()),
+        source,
+    }))?;
+    let file_size = metadata.len();
+
+    let mut effective_cursor = cursor.min(file_size);
+    let truncated = cursor > file_size;
+    if truncated {
+        effective_cursor = 0;
+    }
+
+    let mut file = fs::File::open(path).map_err(|source| AppError::Provider(ProviderError::Io {
+        context: format!("falha abrindo log {}", path.display()),
+        source,
+    }))?;
+    file.seek(SeekFrom::Start(effective_cursor))
+        .map_err(|source| AppError::Provider(ProviderError::Io {
+            context: format!("falha posicionando cursor no log {}", path.display()),
+            source,
+        }))?;
+
+    let mut buffer = vec![0_u8; max_bytes];
+    let bytes_read = file
+        .read(&mut buffer)
+        .map_err(|source| AppError::Provider(ProviderError::Io {
+            context: format!("falha lendo log {}", path.display()),
+            source,
+        }))?;
+    buffer.truncate(bytes_read);
+
+    let content = String::from_utf8_lossy(&buffer).to_string();
+    let next_cursor = effective_cursor + bytes_read as u64;
+
+    Ok(NanoBotLogChunkResponse {
+        stream: stream.to_string(),
+        path: path.display().to_string(),
+        exists: true,
+        cursor: effective_cursor,
+        next_cursor,
+        file_size,
+        truncated,
+        content,
+    })
+}
+
+fn refresh_nanobot_process_state(runtime: &mut NanoBotRuntimeManager) {
+    let Some(process) = runtime.process.as_mut() else {
+        return;
+    };
+
+    match process.child.try_wait() {
+        Ok(Some(status)) => {
+            runtime.last_error = Some(format!(
+                "gateway finalizou com status {}",
+                status
+                    .code()
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "desconhecido".to_string())
+            ));
+            runtime.process = None;
+        }
+        Ok(None) => {}
+        Err(error) => {
+            runtime.last_error = Some(format!("falha ao inspecionar processo gateway: {error}"));
+            runtime.process = None;
+        }
+    }
+}
+
+fn build_nanobot_runtime_snapshot(
+    spec: &NanoBotCommandSpec,
+    command_cwd: Option<&FsPath>,
+    runtime: &NanoBotRuntimeManager,
+) -> NanoBotRuntimeStateResponse {
+    let (service_status, service_state, pid, uptime_seconds) = if let Some(process) = runtime.process.as_ref() {
+        (
+            "running".to_string(),
+            "active".to_string(),
+            Some(process.pid as u64),
+            Some(process.started_at.elapsed().as_secs()),
+        )
+    } else {
+        (
+            "stopped".to_string(),
+            "inactive".to_string(),
+            None,
+            None,
+        )
+    };
+
+    let mut issues = Vec::new();
+    if let Some(last_error) = runtime.last_error.as_deref() {
+        issues.push(last_error.to_string());
+    }
+
+    if !nanobot_config_path().exists() {
+        issues.push("config.json ausente (execute onboard)".to_string());
+    }
+
+    let status_probe = run_nanobot_command(spec, &["status"], command_cwd);
+    let rpc_ok = status_probe
+        .as_ref()
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+
+    if !rpc_ok {
+        match status_probe {
+            Ok(output) => {
+                let summary = decode_command_output(&output);
+                if !summary.is_empty() {
+                    issues.push(summary.lines().next().unwrap_or_default().to_string());
+                }
+            }
+            Err(error) => {
+                issues.push(format!("status indisponivel: {error}"));
+            }
+        }
+    }
+
+    dedup_vec(&mut issues);
+
+    NanoBotRuntimeStateResponse {
+        service_status,
+        service_state,
+        pid,
+        rpc_ok,
+        port_status: None,
+        issues,
+        uptime_seconds,
+        log_path: nanobot_log_path_for_stream("gateway").display().to_string(),
+    }
+}
+
+async fn stop_nanobot_gateway(runtime: &mut NanoBotRuntimeManager) -> Result<(), AppError> {
+    let Some(mut process) = runtime.process.take() else {
+        return Ok(());
+    };
+
+    process
+        .child
+        .kill()
+        .await
+        .map_err(|source| AppError::Provider(ProviderError::Io {
+            context: "Falha ao finalizar processo gateway do NanoBot".to_string(),
+            source,
+        }))?;
+    let _ = process.child.wait().await;
+    Ok(())
+}
+
+async fn spawn_nanobot_gateway(
+    spec: &NanoBotCommandSpec,
+    command_cwd: Option<&FsPath>,
+    runtime: &mut NanoBotRuntimeManager,
+) -> Result<(), AppError> {
+    let log_dir = nanobot_data_path().join("logs");
+    fs::create_dir_all(&log_dir).map_err(|source| AppError::Provider(ProviderError::Io {
+        context: format!("Falha ao criar diretorio de logs do NanoBot ({})", log_dir.display()),
+        source,
+    }))?;
+
+    let gateway_log = nanobot_log_path_for_stream("gateway");
+    let gateway_err_log = nanobot_log_path_for_stream("error");
+
+    let stdout_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&gateway_log)
+        .map_err(|source| AppError::Provider(ProviderError::Io {
+            context: format!("Falha ao abrir log {}", gateway_log.display()),
+            source,
+        }))?;
+    let stderr_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&gateway_err_log)
+        .map_err(|source| AppError::Provider(ProviderError::Io {
+            context: format!("Falha ao abrir log {}", gateway_err_log.display()),
+            source,
+        }))?;
+
+    let mut command = TokioCommand::new(&spec.program);
+    command.args(&spec.args);
+    command.arg("gateway");
+    if let Some(cwd) = command_cwd {
+        command.current_dir(cwd);
+    }
+    command.stdin(Stdio::null());
+    command.stdout(Stdio::from(stdout_file));
+    command.stderr(Stdio::from(stderr_file));
+
+    let mut child = command
+        .spawn()
+        .map_err(|source| AppError::Provider(ProviderError::Io {
+            context: format!("Falha ao iniciar gateway do NanoBot via '{} gateway'", spec.display()),
+            source,
+        }))?;
+
+    tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+    if let Some(status) = child.try_wait().map_err(|source| AppError::Provider(ProviderError::Io {
+        context: "Falha ao checar processo inicial do NanoBot".to_string(),
+        source,
+    }))? {
+        let tail = read_log_tail(&gateway_err_log, 4096).or_else(|| read_log_tail(&gateway_log, 4096));
+        let details = tail.unwrap_or_else(|| "processo encerrou imediatamente sem detalhes".to_string());
+        return Err(AppError::Provider(ProviderError::Unavailable {
+            details: format!("gateway do NanoBot encerrou logo apos start (status {status}): {details}"),
+        }));
+    }
+
+    let pid = child.id().unwrap_or(0);
+    runtime.process = Some(NanoBotProcessHandle {
+        child,
+        pid,
+        started_at: Instant::now(),
+    });
+    runtime.last_error = None;
+    Ok(())
+}
+
+fn read_log_tail(path: &FsPath, max_bytes: usize) -> Option<String> {
+    if !path.exists() {
+        return None;
+    }
+
+    let mut file = fs::File::open(path).ok()?;
+    let file_size = file.metadata().ok()?.len();
+    let start = file_size.saturating_sub(max_bytes as u64);
+    if file.seek(SeekFrom::Start(start)).is_err() {
+        return None;
+    }
+
+    let mut bytes = Vec::new();
+    if file.read_to_end(&mut bytes).is_err() {
+        return None;
+    }
+
+    let text = String::from_utf8_lossy(&bytes).trim().to_string();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+fn default_nanobot_config() -> Value {
+    json!({
+        "agents": {
+            "defaults": {
+                "workspace": nanobot_workspace_path().display().to_string(),
+                "model": "anthropic/claude-opus-4-5"
+            }
+        }
+    })
+}
+
+fn read_nanobot_config_json_optional() -> Result<Option<Value>, AppError> {
+    let path = nanobot_config_path();
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let raw = fs::read_to_string(&path).map_err(|source| AppError::Provider(ProviderError::Io {
+        context: format!("Falha ao ler config NanoBot ({})", path.display()),
+        source,
+    }))?;
+
+    serde_json::from_str::<Value>(&raw).map(Some).map_err(|source| {
+        AppError::Provider(ProviderError::Io {
+            context: format!("Falha ao parsear config NanoBot ({})", path.display()),
+            source: io::Error::other(source.to_string()),
+        })
+    })
+}
+
+fn write_nanobot_config_json(config: &Value) -> Result<(), AppError> {
+    let path = nanobot_config_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|source| AppError::Provider(ProviderError::Io {
+            context: format!("Falha ao criar diretorio de config NanoBot ({})", parent.display()),
+            source,
+        }))?;
+    }
+
+    let body = serde_json::to_string_pretty(config).map_err(|source| AppError::Provider(
+        ProviderError::Io {
+            context: "Falha ao serializar config NanoBot".to_string(),
+            source: io::Error::other(source.to_string()),
+        },
+    ))?;
+
+    fs::write(&path, body).map_err(|source| AppError::Provider(ProviderError::Io {
+        context: format!("Falha ao salvar config NanoBot ({})", path.display()),
+        source,
+    }))?;
+
+    Ok(())
+}
+
+fn set_json_string_at_path(root: &mut Value, path: &[&str], value: String) {
+    if path.is_empty() {
+        return;
+    }
+
+    let mut cursor = root;
+    for (index, key) in path.iter().enumerate() {
+        let is_last = index + 1 == path.len();
+        if !cursor.is_object() {
+            *cursor = Value::Object(serde_json::Map::new());
+        }
+
+        let object = cursor.as_object_mut().expect("cursor must be object");
+        if is_last {
+            object.insert((*key).to_string(), Value::String(value.clone()));
+            return;
+        }
+
+        cursor = object
+            .entry((*key).to_string())
+            .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    }
+}
+
+fn extract_nanobot_model_value(config: &Value) -> Option<String> {
+    config
+        .pointer("/agents/defaults/model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn extract_nanobot_workspace_value(config: &Value) -> Option<FsPathBuf> {
+    config
+        .pointer("/agents/defaults/workspace")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            if let Some(rest) = value.strip_prefix("~/") {
+                return nanobot_home_dir().join(rest);
+            }
+            FsPathBuf::from(value)
+        })
+}
+
+fn resolve_nanobot_workspace_from_config() -> Option<FsPathBuf> {
+    read_nanobot_config_json_optional()
+        .ok()
+        .flatten()
+        .and_then(|config| extract_nanobot_workspace_value(&config))
+}
+
+fn build_nanobot_model_response(config: Option<&Value>) -> NanoBotModelResponse {
+    let model = config
+        .and_then(extract_nanobot_model_value)
+        .unwrap_or_default();
+    let provider = model
+        .split('/')
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("-")
+        .to_string();
+    let label = if model.is_empty() {
+        "-".to_string()
+    } else {
+        model.clone()
+    };
+
+    NanoBotModelResponse {
+        source: "config".to_string(),
+        model,
+        provider,
+        label,
+    }
+}
+
+fn build_nanobot_observability_snapshot() -> Result<NanoBotObservabilityResponse, AppError> {
+    let config = read_nanobot_config_json_optional()?;
+    let model = config.as_ref().and_then(extract_nanobot_model_value);
+    let provider = model.as_deref().and_then(|value| {
+        value
+            .split('/')
+            .next()
+            .map(str::trim)
+            .filter(|segment| !segment.is_empty())
+            .map(ToString::to_string)
+    });
+    let workspace = config
+        .as_ref()
+        .and_then(extract_nanobot_workspace_value)
+        .unwrap_or_else(nanobot_workspace_path);
+    let skills = list_nanobot_skills(&workspace);
+    let tools = list_nanobot_tools(config.as_ref());
+
+    Ok(NanoBotObservabilityResponse {
+        session_key: "nanobot:main".to_string(),
+        provider,
+        model,
+        usage: None,
+        skills,
+        tools,
+        updated_at: now_unix_ms(),
+    })
+}
+
+fn list_nanobot_skills(workspace: &FsPath) -> Vec<String> {
+    let mut skills = Vec::new();
+    let skills_dir = workspace.join("skills");
+    let entries = match fs::read_dir(&skills_dir) {
+        Ok(entries) => entries,
+        Err(_) => return skills,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = if path.is_dir() {
+            path.file_name()
+                .and_then(|value| value.to_str())
+                .map(str::to_string)
+        } else {
+            path.file_stem()
+                .and_then(|value| value.to_str())
+                .map(str::to_string)
+        };
+
+        if let Some(name) = name {
+            let normalized = name.trim();
+            if !normalized.is_empty() {
+                skills.push(normalized.to_string());
+            }
+        }
+    }
+
+    skills.sort();
+    skills.dedup();
+    skills
+}
+
+fn list_nanobot_tools(config: Option<&Value>) -> Vec<String> {
+    let mut tools = vec!["exec".to_string(), "files".to_string(), "memory".to_string()];
+
+    if let Some(config) = config {
+        if let Some(web) = config.pointer("/tools/web/search").and_then(Value::as_object) {
+            let has_api_key = web
+                .get("apiKey")
+                .or_else(|| web.get("api_key"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .is_some_and(|value| !value.is_empty());
+            if has_api_key {
+                tools.push("web.search".to_string());
+            }
+        }
+
+        let mcp_servers = config
+            .pointer("/tools/mcpServers")
+            .and_then(Value::as_object)
+            .or_else(|| config.pointer("/tools/mcp_servers").and_then(Value::as_object));
+        if let Some(mcp_servers) = mcp_servers {
+            for server_name in mcp_servers.keys() {
+                let trimmed = server_name.trim();
+                if !trimmed.is_empty() {
+                    tools.push(format!("mcp:{trimmed}"));
+                }
+            }
+        }
+
+        let restricted = config
+            .pointer("/tools/restrictToWorkspace")
+            .and_then(Value::as_bool)
+            .or_else(|| config.pointer("/tools/restrict_to_workspace").and_then(Value::as_bool))
+            .unwrap_or(false);
+        if restricted {
+            tools.push("workspace.restricted".to_string());
+        }
+    }
+
+    tools.sort();
+    tools.dedup();
+    tools
+}
+
+fn extract_nanobot_reply(stdout: &str, stderr: &str) -> String {
+    let mut lines = stdout
+        .replace('\r', "")
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| !line.starts_with('✓'))
+        .filter(|line| !line.starts_with("You:"))
+        .filter(|line| !line.starts_with("Goodbye"))
+        .filter(|line| !line.contains("nanobot is thinking"))
+        .filter(|line| !line.contains("Interactive mode"))
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+
+    if lines.is_empty() {
+        lines = stderr
+            .replace('\r', "")
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+    }
+
+    lines.join("\n").trim().to_string()
+}
+
+fn dedup_vec(values: &mut Vec<String>) {
+    values.retain(|value| !value.trim().is_empty());
+    let mut deduped = Vec::new();
+    for value in values.iter() {
+        if !deduped.iter().any(|entry: &String| entry == value) {
+            deduped.push(value.clone());
+        }
+    }
+    *values = deduped;
+}
+
+fn now_unix_ms() -> Option<u64> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_millis() as u64)
+}
+
+fn nanobot_home_dir() -> FsPathBuf {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string());
+    FsPathBuf::from(home)
+}
+
+fn nanobot_config_path() -> FsPathBuf {
+    nanobot_data_path().join("config.json")
 }
 
 fn nanobot_workspace_path() -> FsPathBuf {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| ".".to_string());
-    FsPathBuf::from(home).join(".nanobot").join("workspace")
+    nanobot_data_path().join("workspace")
 }
