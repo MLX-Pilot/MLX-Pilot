@@ -132,6 +132,9 @@ const settingOpenclawState = document.getElementById("setting-openclaw-state");
 const saveSettingsBtn = document.getElementById("save-settings-btn");
 const installOpenclawBtn = document.getElementById("install-openclaw-btn");
 const installOpenclawFeedback = document.getElementById("install-openclaw-feedback");
+const checkOpenclawStatusBtn = document.getElementById("check-openclaw-status-btn");
+const openclawInstallStatusFeedback = document.getElementById("openclaw-install-status-feedback");
+const openclawInstallStatusOutput = document.getElementById("openclaw-install-status-output");
 
 const frameworkRadios = document.querySelectorAll('input[name="agent-framework"]');
 const openclawSettingsGroup = document.getElementById("openclaw-settings-group");
@@ -174,6 +177,8 @@ let aiSceneInFlight = false;
 let aiSceneLastScript = null;
 let aiSceneAnimating = false;
 let aiSceneRequestToken = 0;
+let openclawInstallInFlight = false;
+let openclawStatusCheckInFlight = false;
 
 let openclawStatusLoaded = false;
 let openclawObservabilityLoaded = false;
@@ -357,6 +362,8 @@ function applyAgentFramework(nextFramework, { syncRadio = false, refreshPanel = 
 
   if (normalized === "nanobot") {
     void loadNanobotStatus();
+  } else {
+    void loadOpenclawInstallStatus({ showLoading: false, syncInstallFeedback: false });
   }
 
   if (refreshPanel && activeTab === "openclaw") {
@@ -3556,6 +3563,11 @@ saveSettingsBtn.addEventListener("click", async () => {
       body: JSON.stringify(payload)
     });
 
+    await loadOpenclawInstallStatus({ showLoading: false });
+    if (isNanobotActive()) {
+      await loadNanobotStatus();
+    }
+
     btn.textContent = "Salvo!";
     setTimeout(() => {
       btn.textContent = oldText;
@@ -3579,9 +3591,151 @@ async function loadConfig() {
 
     const activeFramework = cfg.active_agent_framework === "nanobot" ? "nanobot" : "openclaw";
     applyAgentFramework(activeFramework, { syncRadio: true, refreshPanel: false });
+    await loadOpenclawInstallStatus({ showLoading: false });
 
   } catch (err) {
     console.error("Failed to load config from backend", err);
+  }
+}
+
+function yesNo(value) {
+  return value ? "sim" : "nao";
+}
+
+function setOpenclawInstallButtonState({ installed = false, inFlight = false } = {}) {
+  if (!installOpenclawBtn) {
+    return;
+  }
+
+  if (inFlight) {
+    installOpenclawBtn.disabled = true;
+    installOpenclawBtn.textContent = "Instalando... isso pode demorar um pouco.";
+    return;
+  }
+
+  if (installed) {
+    installOpenclawBtn.disabled = true;
+    installOpenclawBtn.textContent = "Instalado";
+    return;
+  }
+
+  installOpenclawBtn.disabled = false;
+  installOpenclawBtn.textContent = "Instalar OpenClaw agora";
+}
+
+function renderOpenclawInstallStatus({ status = null, runtime = null, runtimeError = null } = {}) {
+  if (!openclawInstallStatusOutput) {
+    return;
+  }
+
+  if (!status) {
+    openclawInstallStatusOutput.textContent = "-";
+    return;
+  }
+
+  const healthOk = status.health?.ok ?? status.health?.result?.ok;
+  const lines = [
+    `CLI configurada: ${status.cli_path || "-"}`,
+    `CLI encontrada: ${yesNo(status.cli_exists)}`,
+    `State dir: ${status.state_dir || "-"}`,
+    `State dir existe: ${yesNo(status.state_dir_exists)}`,
+    `Disponivel: ${yesNo(status.available)}`,
+    `Health RPC: ${typeof healthOk === "boolean" ? (healthOk ? "ok" : "falha") : "-"}`,
+    `Sessao: ${status.session_key || "-"}`,
+    `Gateway log: ${status.gateway_log || "-"}`,
+    `Error log: ${status.error_log || "-"}`,
+    `Sync log: ${status.sync_log || "-"}`,
+  ];
+
+  if (status.error) {
+    lines.push(`Erro status: ${status.error}`);
+  }
+
+  if (runtime) {
+    lines.push(
+      "",
+      "Runtime gateway:",
+      `Service status: ${runtime.service_status || "-"}`,
+      `Service state: ${runtime.service_state || "-"}`,
+      `PID: ${runtime.pid || "-"}`,
+      `RPC ok: ${yesNo(runtime.rpc_ok)}`,
+      `Porta: ${runtime.port_status || "-"}`,
+      `Issues: ${Array.isArray(runtime.issues) && runtime.issues.length ? runtime.issues.join(" | ") : "-"}`
+    );
+  } else if (runtimeError) {
+    lines.push("", `Runtime: indisponivel (${runtimeError})`);
+  }
+
+  openclawInstallStatusOutput.textContent = lines.join("\n");
+}
+
+async function loadOpenclawInstallStatus({ showLoading = true, syncInstallFeedback = true } = {}) {
+  if (openclawStatusCheckInFlight) {
+    return null;
+  }
+
+  openclawStatusCheckInFlight = true;
+  if (checkOpenclawStatusBtn) {
+    checkOpenclawStatusBtn.disabled = true;
+  }
+
+  if (showLoading && openclawInstallStatusFeedback) {
+    openclawInstallStatusFeedback.textContent = "Checando status do OpenClaw...";
+  }
+
+  try {
+    const status = await fetchJson("/openclaw/status", { method: "GET" });
+    const installed = Boolean(status.cli_exists);
+    setOpenclawInstallButtonState({ installed, inFlight: openclawInstallInFlight });
+
+    let runtime = null;
+    let runtimeError = null;
+    try {
+      runtime = await fetchJson("/openclaw/runtime", { method: "GET" });
+    } catch (error) {
+      runtimeError = error.message;
+    }
+
+    renderOpenclawInstallStatus({ status, runtime, runtimeError });
+
+    if (openclawInstallStatusFeedback) {
+      if (installed) {
+        const suffix = status.available
+          ? "Gateway respondeu ao healthcheck."
+          : status.error
+            ? `Gateway indisponivel: ${status.error}`
+            : "Gateway indisponivel.";
+        openclawInstallStatusFeedback.textContent = `OpenClaw detectado. ${suffix}`;
+      } else {
+        openclawInstallStatusFeedback.textContent =
+          "OpenClaw nao detectado no caminho configurado. Ajuste o caminho ou rode a instalacao.";
+      }
+    }
+
+    if (syncInstallFeedback && installOpenclawFeedback && !openclawInstallInFlight) {
+      installOpenclawFeedback.textContent = installed
+        ? "OpenClaw ja instalado no caminho configurado."
+        : "OpenClaw nao detectado. Execute a instalacao automatizada.";
+    }
+
+    return status;
+  } catch (error) {
+    setOpenclawInstallButtonState({ installed: false, inFlight: openclawInstallInFlight });
+    if (openclawInstallStatusFeedback) {
+      openclawInstallStatusFeedback.textContent = `Falha ao consultar status: ${error.message}`;
+    }
+    if (openclawInstallStatusOutput) {
+      openclawInstallStatusOutput.textContent = "-";
+    }
+    if (syncInstallFeedback && installOpenclawFeedback && !openclawInstallInFlight) {
+      installOpenclawFeedback.textContent = `Falha ao validar instalacao: ${error.message}`;
+    }
+    return null;
+  } finally {
+    openclawStatusCheckInFlight = false;
+    if (checkOpenclawStatusBtn) {
+      checkOpenclawStatusBtn.disabled = openclawInstallInFlight;
+    }
   }
 }
 
@@ -3674,20 +3828,37 @@ frameworkRadios.forEach((radio) => {
 });
 
 installOpenclawBtn.addEventListener("click", async () => {
+  if (openclawInstallInFlight) {
+    return;
+  }
+
+  openclawInstallInFlight = true;
+  setOpenclawInstallButtonState({ inFlight: true });
+  if (checkOpenclawStatusBtn) {
+    checkOpenclawStatusBtn.disabled = true;
+  }
+
+  let installFailed = false;
   try {
-    const btn = installOpenclawBtn;
-    btn.disabled = true;
-    btn.textContent = "Instalando... isso pode demorar um pouco.";
     installOpenclawFeedback.textContent = "Baixando repositorio e dependencias...";
     installOpenclawFeedback.classList.remove("hidden");
 
     const payload = await fetchJson("/openclaw/install", { method: "POST" });
     installOpenclawFeedback.textContent = payload.message || "OpenClaw instalado com sucesso!";
-    btn.textContent = "Instalado";
   } catch (error) {
+    installFailed = true;
     installOpenclawFeedback.textContent = `Erro na instalacao: ${error.message}`;
-    installOpenclawBtn.disabled = false;
-    installOpenclawBtn.textContent = "Tentar Novamente";
+  } finally {
+    openclawInstallInFlight = false;
+    const status = await loadOpenclawInstallStatus({ showLoading: false, syncInstallFeedback: false });
+
+    if (installFailed && !(status && status.cli_exists)) {
+      installOpenclawBtn.disabled = false;
+      installOpenclawBtn.textContent = "Tentar Novamente";
+      return;
+    }
+
+    setOpenclawInstallButtonState({ installed: Boolean(status?.cli_exists), inFlight: false });
   }
 });
 
@@ -3709,6 +3880,12 @@ installNanobotBtn.addEventListener("click", async () => {
     installNanobotBtn.textContent = "Tentar Novamente";
   }
 });
+
+if (checkOpenclawStatusBtn) {
+  checkOpenclawStatusBtn.addEventListener("click", () => {
+    void loadOpenclawInstallStatus();
+  });
+}
 
 if (checkNanobotStatusBtn) {
   checkNanobotStatusBtn.addEventListener("click", () => {
