@@ -214,3 +214,112 @@ curl http://127.0.0.1:11435/catalog/downloads
 - **Parar o daemon:** `./scripts/stop-daemon.sh`.
 
 Com isso, qualquer pessoa do time consegue entender a arquitetura e rodar o projeto a partir do cÃ³digo-fonte.
+
+---
+
+## Tutorial Windows (PowerShell)
+
+Se o objetivo for rodar no Windows sem usar os scripts `.sh`, use este fluxo.
+
+### 1) Instalar toolchain e dependências
+
+No PowerShell (preferencialmente como Administrador):
+
+```powershell
+winget install -e --id Rustlang.Rustup
+winget install -e --id Microsoft.VisualStudio.2022.BuildTools
+```
+
+No instalador do Visual Studio Build Tools, marque:
+- `Desktop development with C++`
+- `MSVC v143`
+- `Windows 10/11 SDK`
+
+Feche e abra o PowerShell e valide:
+
+```powershell
+rustup --version
+cargo --version
+```
+
+Se `cargo` ainda nao estiver no `PATH`:
+
+```powershell
+$env:Path += ";$env:USERPROFILE\.cargo\bin"
+cargo --version
+```
+
+Instale a CLI do Tauri:
+
+```powershell
+cargo install tauri-cli --locked
+```
+
+### 2) Rodar em modo desenvolvimento
+
+Terminal 1 (daemon):
+
+```powershell
+cd g:\ai\mlx-ollama-pilot
+cargo run -p mlx-ollama-daemon
+```
+
+Terminal 2 (desktop):
+
+```powershell
+cd g:\ai\mlx-ollama-pilot\apps\desktop-ui\src-tauri
+cargo tauri dev
+```
+
+### 3) Gerar binarios de release
+
+Daemon:
+
+```powershell
+cd g:\ai\mlx-ollama-pilot
+cargo build -p mlx-ollama-daemon --release
+```
+
+Desktop (instalador e executavel):
+
+```powershell
+cd g:\ai\mlx-ollama-pilot\apps\desktop-ui\src-tauri
+cargo tauri build
+```
+
+Artefatos esperados:
+- Daemon: `target\release\mlx-ollama-daemon.exe`
+- Desktop bundle: `apps\desktop-ui\src-tauri\target\release\bundle\...` (ex.: `.msi`, `.exe`)
+
+---
+
+## Como distribuir para usuario final (sem exigir Rust/Cargo)
+
+Para o usuario apenas instalar e abrir:
+
+1. Gere release com `cargo tauri build` (desktop) e `cargo build --release` (daemon).
+2. Empacote os artefatos por sistema operacional (Windows `.msi/.exe`, macOS `.dmg/.app`, Linux `.deb/.AppImage`).
+3. Publique em GitHub Releases (ou outro canal) com versionamento semantico.
+4. Opcional e recomendado: assinatura de codigo do instalador para evitar alertas de seguranca.
+
+Fluxo recomendado de produto:
+- O app desktop inicia o daemon automaticamente (processo filho/sidecar) para o usuario nao precisar abrir dois programas.
+- O instalador inclui tudo necessario para execucao local, exceto dependencias grandes opcionais (modelos).
+- Atualizacoes podem ser feitas por nova release (manual) ou updater do Tauri (automatico).
+
+---
+
+## Nota importante para Developer Command Prompt (cmd)
+
+Se voce estiver no `Developer Command Prompt for VS 2022` (cmd), use `cd /d` para trocar de unidade e pasta.
+No `cmd`, `cd g:\...` pode nao trocar de drive.
+
+```cmd
+cd /d g:\ai\mlx-ollama-pilot
+cargo run -p mlx-ollama-daemon
+```
+
+```cmd
+cd /d g:\ai\mlx-ollama-pilot\apps\desktop-ui\src-tauri
+cargo tauri dev
+```

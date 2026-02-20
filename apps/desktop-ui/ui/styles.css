@@ -1524,3 +1524,137 @@ textarea:focus {
     grid-template-columns: 1fr;
   }
 }
+
+/* --- UI REDESIGN & ENHANCEMENTS --- */
+
+/* Textarea auto-resize support */
+textarea {
+  resize: none;
+  overflow-y: hidden;
+  min-height: 42px;
+  max-height: 200px;
+  height: 42px;
+}
+
+/* Splash Screen Animation */
+.splash-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background-color: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.6s ease-out, visibility 0.6s ease-out;
+}
+.splash-screen.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.splash-logo {
+  width: 120px;
+  height: 120px;
+  animation: logo-pulse 2s infinite ease-in-out;
+}
+@keyframes logo-pulse {
+  0% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.1); opacity: 1; filter: drop-shadow(0 0 15px rgba(58, 130, 255, 0.4)); }
+  100% { transform: scale(1); opacity: 0.8; }
+}
+
+/* Chat Centralization & AI Chat Standard */
+.main-area h2 {
+  font-weight: 600;
+}
+.chat-header {
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
+  border: none !important;
+  background: transparent !important;
+  padding: 10px 0 !important;
+}
+.chat-empty-hero {
+  max-width: 800px;
+  margin: 0 auto;
+}
+.chat-log {
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
+  border: none !important;
+  background: transparent !important;
+  padding: 0 10px 20px 10px !important;
+}
+.chat-form {
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
+  border-radius: 20px !important;
+  background: var(--bg-elev) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  padding: 12px 16px !important;
+  position: relative;
+  z-index: 10;
+}
+#message-input, #openclaw-message-input {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0;
+  margin-bottom: 8px;
+  color: var(--text);
+  font-family: inherit;
+}
+#message-input:focus, #openclaw-message-input:focus {
+  outline: none;
+  box-shadow: none !important;
+}
+
+/* Sidebar Toggle logic for mobile */
+.mobile-menu-btn {
+  display: none;
+}
+@media (max-width: 760px) {
+  .mobile-menu-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px;
+    margin-right: 8px;
+  }
+  .app-shell.chat-mode.sidebar-open .chat-sidebar {
+    display: grid !important;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 280px;
+    z-index: 9999;
+    box-shadow: 4px 0 24px rgba(0,0,0,0.5);
+  }
+  .app-shell.sidebar-open::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 9998;
+  }
+}
+
+/* Micro-interactions (hover states, premium dark mode) */
+.primary-btn {
+  transition: all 0.2s ease;
+}
+.primary-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(47, 109, 246, 0.3);
+}
+.ghost-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+.message-card {
+  transition: transform 0.2s ease;
+}

@@ -250,7 +250,7 @@ struct BraveSearchResponse {
 async fn main() -> anyhow::Result<()> {
     init_tracing();
 
-    let cfg = AppConfig::from_env();
+    let cfg = AppConfig::load_settings().apply_env();
     info!("starting daemon on {}", cfg.bind_addr);
     let provider_mode = LocalProviderMode::from_env(&cfg.local_provider);
 
@@ -322,6 +322,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let app = Router::new()
+        .route("/config", get(get_config).post(update_config))
         .route("/health", get(health))
         .route("/models", get(list_models))
         .route("/chat", post(chat))
@@ -337,6 +338,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/openclaw/logs", get(openclaw_logs))
         .route("/openclaw/model", post(openclaw_set_model))
         .route("/openclaw/chat", post(openclaw_chat))
+        .route("/openclaw/install", post(openclaw_install))
         .route("/catalog/sources", get(catalog_sources))
         .route("/catalog/models", get(catalog_models))
         .route(
@@ -370,6 +372,16 @@ async fn health(State(state): State<AppState>) -> Json<HealthBody> {
         status: "ok",
         provider: state.provider_mode.label(),
     })
+}
+
+async fn get_config() -> Result<Json<AppConfig>, AppError> {
+    let cfg = AppConfig::load_settings().apply_env();
+    Ok(Json(cfg))
+}
+
+async fn update_config(Json(new_config): Json<AppConfig>) -> Result<Json<AppConfig>, AppError> {
+    new_config.save_settings().map_err(|e| AppError::NotFound(format!("Falha ao salvar config: {}", e)))?;
+    Ok(Json(new_config))
 }
 
 async fn list_models(

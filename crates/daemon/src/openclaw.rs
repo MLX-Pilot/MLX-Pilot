@@ -126,6 +126,66 @@ impl OpenClawRuntime {
         response
     }
 
+    pub async fn install(&self) -> Result<String, OpenClawError> {
+        let parent_dir = self
+            .cfg
+            .cli_path
+            .parent()
+            .ok_or_else(|| OpenClawError::BadRequest("caminho openclaw_cli_path invalido".to_string()))?;
+
+        if !parent_dir.exists() {
+            tokio::fs::create_dir_all(parent_dir)
+                .await
+                .map_err(|e| OpenClawError::Io {
+                    context: "falha criando diretorio pai do openclaw".to_string(),
+                    source: e,
+                })?;
+        }
+
+        // 1. git clone se nao existir o .git
+        let git_dir = parent_dir.join(".git");
+        if !git_dir.exists() {
+            let output = Command::new("git")
+                .arg("clone")
+                .arg("https://github.com/kaike/openclaw.git")
+                .arg(parent_dir)
+                .output()
+                .await
+                .map_err(|e| OpenClawError::Io {
+                    context: "falha rodando git clone".to_string(),
+                    source: e,
+                })?;
+
+            if !output.status.success() {
+                return Err(OpenClawError::CommandFailed {
+                    command: "git clone".to_string(),
+                    stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+                });
+            }
+        }
+
+        // 2. npm install
+        let output = Command::new(&self.cfg.node_command)
+            .arg(npm_command_name())
+            .arg("install")
+            .current_dir(parent_dir)
+            .output()
+            .await
+            .map_err(|e| OpenClawError::Io {
+                context: "falha rodando npm install".to_string(),
+                source: e,
+            })?;
+
+        if !output.status.success() {
+            return Err(OpenClawError::CommandFailed {
+                command: "npm install".to_string(),
+                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            });
+        }
+
+        Ok("OpenClaw instalado com sucesso!".to_string())
+    }
+
     pub async fn models_state(&self) -> Result<OpenClawModelsStateResponse, OpenClawError> {
         let _ = self.ensure_runtime_compatibility().await;
         let alias_map = self.load_alias_map().await?;
@@ -791,10 +851,16 @@ impl OpenClawRuntime {
                 );
             }
         }
-
         Ok(aliases)
     }
 
+fn npm_command_name() -> &'static str {
+    if cfg!(windows) {
+        "npm.cmd"
+    } else {
+        "npm"
+    }
+}
     async fn list_configured_cloud_models(
         &self,
         alias_map: &BTreeMap<String, String>,

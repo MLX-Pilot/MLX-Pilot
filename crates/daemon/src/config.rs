@@ -1,9 +1,12 @@
 use std::env;
+use std::fs;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-#[derive(Debug, Clone)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub bind_addr: SocketAddr,
     pub local_provider: String,
@@ -91,12 +94,37 @@ impl Default for AppConfig {
 }
 
 impl AppConfig {
-    pub fn from_env() -> Self {
-        let mut cfg = Self::default();
+    pub fn get_settings_path() -> PathBuf {
+        let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+        path.push("mlx-ollama-pilot");
+        let _ = fs::create_dir_all(&path);
+        path.push("settings.json");
+        path
+    }
 
+    pub fn load_settings() -> Self {
+        let path = Self::get_settings_path();
+        if path.exists() {
+            if let Ok(content) = fs::read_to_string(&path) {
+                if let Ok(config) = serde_json::from_str::<AppConfig>(&content) {
+                    return config;
+                }
+            }
+        }
+        Self::default()
+    }
+
+    pub fn save_settings(&self) -> Result<(), std::io::Error> {
+        let path = Self::get_settings_path();
+        let content = serde_json::to_string_pretty(self)?;
+        fs::write(path, content)?;
+        Ok(())
+    }
+
+    pub fn apply_env(mut self) -> Self {
         if let Ok(value) = env::var("APP_BIND_ADDR") {
             if let Ok(addr) = value.parse() {
-                cfg.bind_addr = addr;
+                self.bind_addr = addr;
             }
         }
 
@@ -340,9 +368,9 @@ impl AppConfig {
             }
         }
 
-        normalize_mlx_command(&mut cfg);
+        normalize_mlx_command(&mut self);
 
-        cfg
+        self
     }
 }
 

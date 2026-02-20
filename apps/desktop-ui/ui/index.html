@@ -1,408 +1,438 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MLX Pilot</title>
-    <link rel="stylesheet" href="./styles.css" />
-  </head>
-  <body>
-    <div class="bg-layer bg-a"></div>
-    <div class="bg-layer bg-b"></div>
 
-    <div id="app-shell" class="app-shell chat-mode">
-      <aside id="chat-sidebar" class="chat-sidebar">
-        <div class="sidebar-head">
-          <div class="brand-row">
-            <img class="brand-wordmark" src="./assets/mlxpilot-wordmark.png" alt="MLX Pilot" />
-          </div>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MLX Pilot</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
 
-          <button id="new-chat-thread" class="sidebar-primary-btn" data-action="new-chat">
-            + Nova conversa
-          </button>
+<body>
+  <div id="splash-screen" class="splash-screen">
+    <img src="./assets/mlxpilot-mark.png" alt="MLX Pilot Logo" class="splash-logo" />
+  </div>
+
+  <div class="bg-layer bg-a"></div>
+  <div class="bg-layer bg-b"></div>
+
+  <div id="app-shell" class="app-shell chat-mode">
+    <aside id="chat-sidebar" class="chat-sidebar">
+      <div class="sidebar-head">
+        <div class="brand-row">
+          <img class="brand-wordmark" src="./assets/mlxpilot-wordmark.png" alt="MLX Pilot" />
         </div>
 
-        <section class="sidebar-section history-section">
-          <div class="panel-title-row">
-            <h2>Seus chats</h2>
-          </div>
-          <p id="chat-history-meta" class="meta-note">-</p>
-          <ul id="chat-history-list" class="history-list"></ul>
-        </section>
+        <button id="new-chat-thread" class="sidebar-primary-btn" data-action="new-chat">
+          + Nova conversa
+        </button>
+      </div>
 
-        <details class="sidebar-section settings-section">
-          <summary>Conexao</summary>
-          <label class="field-label" for="daemon-url">Daemon URL</label>
-          <input id="daemon-url" class="input" value="http://127.0.0.1:11435" />
-          <label class="field-label" for="brave-api-key">Brave API Key (opcional)</label>
-          <input
-            id="brave-api-key"
-            class="input"
-            type="password"
-            placeholder="BSA..."
-            autocomplete="off"
-          />
-          <button id="save-url" class="ghost-btn">Salvar</button>
-        </details>
-      </aside>
+      <section class="sidebar-section history-section">
+        <div class="panel-title-row">
+          <h2>Seus chats</h2>
+        </div>
+        <p id="chat-history-meta" class="meta-note">-</p>
+        <ul id="chat-history-list" class="history-list"></ul>
+      </section>
 
-      <main class="main-area">
-        <header class="topbar">
-          <div class="topbar-left">
-            <div class="tab-list" role="tablist" aria-label="Modo">
-              <button class="tab-btn active" data-tab="chat" role="tab" aria-selected="true">
-                Chat
-              </button>
-              <button class="tab-btn" data-tab="discover" role="tab" aria-selected="false">
-                Descobrir Modelos
-              </button>
-              <button class="tab-btn" data-tab="openclaw" role="tab" aria-selected="false">
-                OpenClaw
-              </button>
-            </div>
+      <details class="sidebar-section settings-section">
+        <summary>Conexao</summary>
+        <label class="field-label" for="daemon-url">Daemon URL</label>
+        <input id="daemon-url" class="input" value="http://127.0.0.1:11435" />
+        <label class="field-label" for="brave-api-key">Brave API Key (opcional)</label>
+        <input id="brave-api-key" class="input" type="password" placeholder="BSA..." autocomplete="off" />
+        <button id="save-url" class="ghost-btn">Salvar</button>
+      </details>
+    </aside>
 
-            <button
-              id="new-chat-thread-top"
-              class="ghost-btn topbar-new-chat-btn"
-              type="button"
-              data-action="new-chat"
-            >
-              + Novo chat
+    <main class="main-area">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button id="mobile-menu-btn" class="ghost-btn mobile-menu-btn" aria-label="Menu" type="button">
+            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"
+              stroke-linecap="round" stroke-linejoin="round">
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+          </button>
+          <div class="tab-list" role="tablist" aria-label="Modo">
+            <button class="tab-btn active" data-tab="chat" role="tab" aria-selected="true">
+              Chat
+            </button>
+            <button class="tab-btn" data-tab="discover" role="tab" aria-selected="false">
+              Descobrir Modelos
+            </button>
+            <button class="tab-btn" data-tab="openclaw" role="tab" aria-selected="false">
+              OpenClaw
+            </button>
+            <button class="tab-btn" data-tab="settings" role="tab" aria-selected="false">
+              Configuracoes
             </button>
           </div>
 
-          <div class="topbar-right">
-            <div id="chat-model-switcher" class="chat-model-switcher">
-              <button
-                id="chat-model-trigger"
-                type="button"
-                class="model-picker-trigger"
-                aria-haspopup="listbox"
-                aria-expanded="false"
-              >
-                <span id="chat-model-current" class="model-picker-current">Selecionar modelo</span>
-                <span class="model-picker-caret">▾</span>
-              </button>
+          <button id="new-chat-thread-top" class="ghost-btn topbar-new-chat-btn" type="button" data-action="new-chat">
+            + Novo chat
+          </button>
+        </div>
 
-              <div id="chat-model-menu" class="model-picker-menu hidden" role="listbox"></div>
+        <div class="topbar-right">
+          <div id="chat-model-switcher" class="chat-model-switcher">
+            <button id="chat-model-trigger" type="button" class="model-picker-trigger" aria-haspopup="listbox"
+              aria-expanded="false">
+              <span id="chat-model-current" class="model-picker-current">Selecionar modelo</span>
+              <span class="model-picker-caret">▾</span>
+            </button>
 
-              <select id="chat-model-select" class="input compact-input hidden" tabindex="-1"></select>
-              <button id="refresh-models" class="ghost-btn model-refresh-btn" title="Atualizar modelos">
-                Atualizar
-              </button>
-            </div>
+            <div id="chat-model-menu" class="model-picker-menu hidden" role="listbox"></div>
 
-            <div id="status-pill" class="status-pill">pronto</div>
+            <select id="chat-model-select" class="input compact-input hidden" tabindex="-1"></select>
+            <button id="refresh-models" class="ghost-btn model-refresh-btn" title="Atualizar modelos">
+              Atualizar
+            </button>
+          </div>
+
+          <div id="status-pill" class="status-pill">pronto</div>
+        </div>
+      </header>
+
+      <section id="panel-chat" class="main-panel active" role="tabpanel">
+        <header class="chat-header">
+          <div>
+            <p class="chat-eyebrow">Conversa atual</p>
+            <h2 id="selected-thread-label">Nova conversa</h2>
+            <p id="selected-model-label" class="meta-note">Nenhum modelo selecionado</p>
           </div>
         </header>
 
-        <section id="panel-chat" class="main-panel active" role="tabpanel">
-          <header class="chat-header">
-            <div>
-              <p class="chat-eyebrow">Conversa atual</p>
-              <h2 id="selected-thread-label">Nova conversa</h2>
-              <p id="selected-model-label" class="meta-note">Nenhum modelo selecionado</p>
-            </div>
-          </header>
-
-          <section id="chat-empty-hero" class="chat-empty-hero">
-            <div class="chat-empty-title-row">
-              <img class="chat-empty-logo" src="./assets/mlxpilot-mark.png" alt="MLX Pilot" />
-              <h2>Como posso te ajudar?</h2>
-            </div>
-          </section>
-
-          <section id="chat-log" class="chat-log"></section>
-
-          <form id="chat-form" class="chat-form">
-            <textarea
-              id="message-input"
-              placeholder="Mensagem para MLX Pilot"
-              rows="4"
-              required
-            ></textarea>
-
-            <input id="chat-websearch-toggle" type="checkbox" class="visually-hidden" />
-
-            <div class="chat-form-actions">
-              <div class="chat-form-left">
-                <button id="chat-websearch-btn" type="button" class="chat-option-chip" aria-pressed="false">
-                  Pesquisar
-                </button>
-              </div>
-
-              <div class="chat-form-right">
-                <button id="cancel-edit" type="button" class="ghost-btn hidden">Cancelar edicao</button>
-                <button id="stop-generation" type="button" class="ghost-btn" disabled>Parar</button>
-                <button type="submit" class="primary-btn">Enviar</button>
-              </div>
-            </div>
-          </form>
+        <section id="chat-empty-hero" class="chat-empty-hero">
+          <div class="chat-empty-title-row">
+            <img class="chat-empty-logo" src="./assets/mlxpilot-mark.png" alt="MLX Pilot" />
+            <h2>Como posso te ajudar?</h2>
+          </div>
         </section>
 
-        <section id="panel-discover" class="main-panel" role="tabpanel">
-          <header class="discover-header glass">
-            <div>
-              <p class="chat-eyebrow">Catalogo remoto</p>
-              <h2>Encontre novos modelos para baixar</h2>
+        <section id="chat-log" class="chat-log"></section>
+
+        <form id="chat-form" class="chat-form">
+          <textarea id="message-input" placeholder="Mensagem para MLX Pilot" rows="1" required></textarea>
+
+          <input id="chat-websearch-toggle" type="checkbox" class="visually-hidden" />
+
+          <div class="chat-form-actions">
+            <div class="chat-form-left">
+              <button id="chat-websearch-btn" type="button" class="chat-option-chip" aria-pressed="false">
+                Pesquisar
+              </button>
             </div>
-          </header>
 
-          <section class="discover-controls glass">
-            <label class="field-group">
-              <span>Fonte</span>
-              <select id="catalog-source" class="input"></select>
-            </label>
+            <div class="chat-form-right">
+              <button id="cancel-edit" type="button" class="ghost-btn hidden">Cancelar edicao</button>
+              <button id="stop-generation" type="button" class="ghost-btn" disabled>Parar</button>
+              <button type="submit" class="primary-btn">Enviar</button>
+            </div>
+          </div>
+        </form>
+      </section>
 
-            <label class="field-group field-grow">
-              <span>Busca</span>
-              <input
-                id="catalog-query"
-                class="input"
-                placeholder="Ex: mlx-community qwen coder"
-              />
-            </label>
+      <section id="panel-discover" class="main-panel" role="tabpanel">
+        <header class="discover-header glass">
+          <div>
+            <p class="chat-eyebrow">Catalogo remoto</p>
+            <h2>Encontre novos modelos para baixar</h2>
+          </div>
+        </header>
 
-            <button id="catalog-search-btn" class="primary-btn">Buscar</button>
-          </section>
+        <section class="discover-controls glass">
+          <label class="field-group">
+            <span>Fonte</span>
+            <select id="catalog-source" class="input"></select>
+          </label>
 
-          <p id="catalog-meta" class="meta-note">Carregando catalogo...</p>
-          <section id="remote-results" class="remote-grid"></section>
+          <label class="field-group field-grow">
+            <span>Busca</span>
+            <input id="catalog-query" class="input" placeholder="Ex: mlx-community qwen coder" />
+          </label>
 
-          <section class="downloads-panel glass">
+          <button id="catalog-search-btn" class="primary-btn">Buscar</button>
+        </section>
+
+        <p id="catalog-meta" class="meta-note">Carregando catalogo...</p>
+        <section id="remote-results" class="remote-grid"></section>
+
+        <section class="downloads-panel glass">
+          <div class="panel-title-row">
+            <h3>Downloads</h3>
+            <button id="refresh-downloads" class="ghost-btn">Atualizar</button>
+          </div>
+          <ul id="download-list" class="download-list"></ul>
+        </section>
+      </section>
+
+      <section id="panel-openclaw" class="main-panel" role="tabpanel">
+        <header class="openclaw-header glass">
+          <div>
+            <p class="chat-eyebrow">OpenClaw Integration</p>
+            <h2>Chat, observabilidade e configuracao</h2>
+            <p id="openclaw-status-text" class="meta-note">status: verificando...</p>
+            <p id="openclaw-runtime-meta" class="meta-note">runtime: verificando...</p>
+          </div>
+          <div class="openclaw-header-actions">
+            <div class="openclaw-runtime-actions">
+              <button id="openclaw-start-btn" type="button" class="ghost-btn">Play</button>
+              <button id="openclaw-stop-btn" type="button" class="ghost-btn">Stop</button>
+              <button id="openclaw-restart-btn" type="button" class="ghost-btn">Restart</button>
+            </div>
+            <button id="refresh-openclaw-status" class="ghost-btn">Atualizar status</button>
+          </div>
+        </header>
+
+        <section class="openclaw-controls glass">
+          <div class="openclaw-subtabs" role="tablist" aria-label="OpenClaw visualizacao">
+            <button class="tab-btn openclaw-view-btn active" data-openclaw-view="chat">Chat</button>
+            <button class="tab-btn openclaw-view-btn" data-openclaw-view="logs">Logs</button>
+            <button class="tab-btn openclaw-view-btn" data-openclaw-view="observability">Skills e Tools</button>
+            <button class="tab-btn openclaw-view-btn" data-openclaw-view="config">Configuracao</button>
+          </div>
+
+          <label class="openclaw-multi-toggle">
+            <input id="openclaw-multi-view" type="checkbox" />
+            Mostrar mais de um painel ao mesmo tempo
+          </label>
+        </section>
+
+        <section id="openclaw-panels" class="openclaw-panels single-mode">
+          <article id="openclaw-panel-chat" class="openclaw-panel openclaw-chat-panel glass active">
             <div class="panel-title-row">
-              <h3>Downloads</h3>
-              <button id="refresh-downloads" class="ghost-btn">Atualizar</button>
-            </div>
-            <ul id="download-list" class="download-list"></ul>
-          </section>
-        </section>
-
-        <section id="panel-openclaw" class="main-panel" role="tabpanel">
-          <header class="openclaw-header glass">
-            <div>
-              <p class="chat-eyebrow">OpenClaw Integration</p>
-              <h2>Chat, observabilidade e configuracao</h2>
-              <p id="openclaw-status-text" class="meta-note">status: verificando...</p>
-              <p id="openclaw-runtime-meta" class="meta-note">runtime: verificando...</p>
-            </div>
-            <div class="openclaw-header-actions">
-              <div class="openclaw-runtime-actions">
-                <button id="openclaw-start-btn" type="button" class="ghost-btn">Play</button>
-                <button id="openclaw-stop-btn" type="button" class="ghost-btn">Stop</button>
-                <button id="openclaw-restart-btn" type="button" class="ghost-btn">Restart</button>
-              </div>
-              <button id="refresh-openclaw-status" class="ghost-btn">Atualizar status</button>
-            </div>
-          </header>
-
-          <section class="openclaw-controls glass">
-            <div class="openclaw-subtabs" role="tablist" aria-label="OpenClaw visualizacao">
-              <button class="tab-btn openclaw-view-btn active" data-openclaw-view="chat">Chat</button>
-              <button class="tab-btn openclaw-view-btn" data-openclaw-view="logs">Logs</button>
-              <button class="tab-btn openclaw-view-btn" data-openclaw-view="observability">Skills e Tools</button>
-              <button class="tab-btn openclaw-view-btn" data-openclaw-view="config">Configuracao</button>
+              <h3>Chat com OpenClaw</h3>
             </div>
 
-            <label class="openclaw-multi-toggle">
-              <input id="openclaw-multi-view" type="checkbox" />
-              Mostrar mais de um painel ao mesmo tempo
-            </label>
-          </section>
+            <section id="openclaw-chat-log" class="openclaw-chat-log"></section>
 
-          <section id="openclaw-panels" class="openclaw-panels single-mode">
-            <article id="openclaw-panel-chat" class="openclaw-panel openclaw-chat-panel glass active">
-              <div class="panel-title-row">
-                <h3>Chat com OpenClaw</h3>
+            <form id="openclaw-chat-form" class="openclaw-chat-form">
+              <textarea id="openclaw-message-input" rows="1" placeholder="Converse com o OpenClaw aqui..."
+                required></textarea>
+              <div class="chat-form-actions">
+                <button type="submit" class="primary-btn">Enviar para OpenClaw</button>
               </div>
+            </form>
+          </article>
 
-              <section id="openclaw-chat-log" class="openclaw-chat-log"></section>
+          <article id="openclaw-panel-logs" class="openclaw-panel openclaw-log-panel glass">
+            <div class="panel-title-row">
+              <h3>Logs em tempo real</h3>
+              <button id="clear-openclaw-log" class="ghost-btn">Limpar</button>
+            </div>
 
-              <form id="openclaw-chat-form" class="openclaw-chat-form">
-                <textarea
-                  id="openclaw-message-input"
-                  rows="4"
-                  placeholder="Converse com o OpenClaw aqui..."
-                  required
-                ></textarea>
-                <div class="chat-form-actions">
-                  <button type="submit" class="primary-btn">Enviar para OpenClaw</button>
-                </div>
-              </form>
-            </article>
-
-            <article id="openclaw-panel-logs" class="openclaw-panel openclaw-log-panel glass">
-              <div class="panel-title-row">
-                <h3>Logs em tempo real</h3>
-                <button id="clear-openclaw-log" class="ghost-btn">Limpar</button>
-              </div>
-
-              <div class="openclaw-log-controls">
-                <label class="field-group">
-                  <span>Stream</span>
-                  <select id="openclaw-log-stream" class="input">
-                    <option value="gateway">gateway.log</option>
-                    <option value="error">gateway.err.log</option>
-                    <option value="sync">openclaw-mlx-sync.log</option>
-                  </select>
-                </label>
-
-                <button id="refresh-openclaw-log" class="ghost-btn">Atualizar</button>
-              </div>
-
-              <p id="openclaw-log-meta" class="meta-note">-</p>
-              <pre id="openclaw-log-viewer" class="openclaw-log-viewer"></pre>
-            </article>
-
-            <article id="openclaw-panel-observability" class="openclaw-panel openclaw-meta-panel glass">
-              <h3>Skills e Tools da ultima resposta</h3>
-
-              <div class="openclaw-meta-block">
-                <p class="openclaw-meta-label">Modelo</p>
-                <p id="openclaw-provider-model" class="openclaw-meta-value">-</p>
-              </div>
-
-              <div class="openclaw-meta-block">
-                <p class="openclaw-meta-label">Uso de tokens</p>
-                <p id="openclaw-usage" class="openclaw-meta-value">-</p>
-              </div>
-
-              <div class="openclaw-meta-block">
-                <p class="openclaw-meta-label">Skills carregadas</p>
-                <ul id="openclaw-skills" class="chip-list"></ul>
-              </div>
-
-              <div class="openclaw-meta-block">
-                <p class="openclaw-meta-label">Tools disponiveis</p>
-                <ul id="openclaw-tools" class="chip-list"></ul>
-              </div>
-            </article>
-
-            <article id="openclaw-panel-config" class="openclaw-panel openclaw-config-panel glass">
-              <h3>Configuracao de modelo OpenClaw</h3>
-
+            <div class="openclaw-log-controls">
               <label class="field-group">
-                <span>Origem do modelo</span>
-                <select id="openclaw-model-source" class="input">
-                  <option value="cloud">Nuvem (OpenClaw configurado)</option>
-                  <option value="local">Local (MLX-Pilot)</option>
+                <span>Stream</span>
+                <select id="openclaw-log-stream" class="input">
+                  <option value="gateway">gateway.log</option>
+                  <option value="error">gateway.err.log</option>
+                  <option value="sync">openclaw-mlx-sync.log</option>
                 </select>
               </label>
 
-              <label id="openclaw-cloud-picker" class="field-group">
-                <span>Modelos cloud</span>
-                <select id="openclaw-cloud-model-select" class="input"></select>
-              </label>
+              <button id="refresh-openclaw-log" class="ghost-btn">Atualizar</button>
+            </div>
 
-              <label id="openclaw-local-picker" class="field-group hidden">
-                <span>Modelos locais</span>
-                <select id="openclaw-local-model-select" class="input"></select>
-              </label>
+            <p id="openclaw-log-meta" class="meta-note">-</p>
+            <pre id="openclaw-log-viewer" class="openclaw-log-viewer"></pre>
+          </article>
 
-              <div class="openclaw-config-actions">
-                <button id="refresh-openclaw-models" type="button" class="ghost-btn">
-                  Atualizar modelos
-                </button>
-                <button id="apply-openclaw-model" type="button" class="primary-btn">
-                  Aplicar modelo
-                </button>
-              </div>
+          <article id="openclaw-panel-observability" class="openclaw-panel openclaw-meta-panel glass">
+            <h3>Skills e Tools da ultima resposta</h3>
 
-              <p id="openclaw-model-current" class="meta-note">Modelo atual: -</p>
-              <p id="openclaw-config-feedback" class="meta-note">-</p>
-            </article>
-          </section>
+            <div class="openclaw-meta-block">
+              <p class="openclaw-meta-label">Modelo</p>
+              <p id="openclaw-provider-model" class="openclaw-meta-value">-</p>
+            </div>
+
+            <div class="openclaw-meta-block">
+              <p class="openclaw-meta-label">Uso de tokens</p>
+              <p id="openclaw-usage" class="openclaw-meta-value">-</p>
+            </div>
+
+            <div class="openclaw-meta-block">
+              <p class="openclaw-meta-label">Skills carregadas</p>
+              <ul id="openclaw-skills" class="chip-list"></ul>
+            </div>
+
+            <div class="openclaw-meta-block">
+              <p class="openclaw-meta-label">Tools disponiveis</p>
+              <ul id="openclaw-tools" class="chip-list"></ul>
+            </div>
+          </article>
+
+          <article id="openclaw-panel-config" class="openclaw-panel openclaw-config-panel glass">
+            <h3>Configuracao de modelo OpenClaw</h3>
+
+            <label class="field-group">
+              <span>Origem do modelo</span>
+              <select id="openclaw-model-source" class="input">
+                <option value="cloud">Nuvem (OpenClaw configurado)</option>
+                <option value="local">Local (MLX-Pilot)</option>
+              </select>
+            </label>
+
+            <label id="openclaw-cloud-picker" class="field-group">
+              <span>Modelos cloud</span>
+              <select id="openclaw-cloud-model-select" class="input"></select>
+            </label>
+
+            <label id="openclaw-local-picker" class="field-group hidden">
+              <span>Modelos locais</span>
+              <select id="openclaw-local-model-select" class="input"></select>
+            </label>
+
+            <div class="openclaw-config-actions">
+              <button id="refresh-openclaw-models" type="button" class="ghost-btn">
+                Atualizar modelos
+              </button>
+              <button id="apply-openclaw-model" type="button" class="primary-btn">
+                Aplicar modelo
+              </button>
+            </div>
+
+            <p id="openclaw-model-current" class="meta-note">Modelo atual: -</p>
+            <p id="openclaw-config-feedback" class="meta-note">-</p>
+          </article>
         </section>
-      </main>
-    </div>
+      </section>
 
-    <template id="message-template">
-      <article class="message-card">
-        <header class="message-role"></header>
-        <div class="message-content"></div>
-        <div class="message-actions hidden">
-          <button class="ghost-btn edit-message-btn" type="button">Editar e regenerar</button>
-        </div>
-      </article>
-    </template>
-
-    <template id="assistant-stream-template">
-      <article class="message-card assistant-stream-card">
-        <header class="message-role">assistant</header>
-
-        <div class="assistant-state-row">
-          <span class="assistant-state-label">aguardando</span>
-          <div class="typing-indicator">
-            <span></span>
-            <span></span>
-            <span></span>
-          </div>
-        </div>
-
-        <section class="assistant-thinking hidden">
-          <h4>thinking</h4>
-          <pre class="assistant-thinking-text"></pre>
-        </section>
-
-        <section class="assistant-answer hidden">
-          <h4>resposta</h4>
-          <pre class="assistant-answer-text"></pre>
-        </section>
-
-        <section class="assistant-metrics hidden">
-          <h4>metricas</h4>
-          <pre class="assistant-metrics-text"></pre>
-        </section>
-      </article>
-    </template>
-
-    <template id="remote-card-template">
-      <article class="remote-card glass">
-        <div class="remote-head">
+      <section id="panel-settings" class="main-panel" role="tabpanel">
+        <header class="settings-header glass">
           <div>
-            <h3 class="remote-name"></h3>
-            <p class="remote-subtitle"></p>
+            <p class="chat-eyebrow">Preferencias do Sistema</p>
+            <h2>Configuracoes do MLX Pilot</h2>
           </div>
-          <span class="remote-task"></span>
-        </div>
+          <button id="save-settings-btn" class="primary-btn">Salvar Configuracoes</button>
+        </header>
 
-        <p class="remote-summary"></p>
+        <section class="settings-controls glass">
+          <h3>Caminhos do Sistema</h3>
+          <p class="meta-note" style="margin-bottom: 12px;">Defina os diretorios onde os modelos serao armazenados e
+            onde o OpenClaw esta localizado.</p>
 
-        <div class="remote-stats">
-          <span class="remote-size"></span>
-          <span class="remote-downloads"></span>
-          <span class="remote-likes"></span>
-        </div>
+          <label class="field-group">
+            <span>Diretorio de Modelos (Models Path)</span>
+            <input id="setting-models-dir" class="input" placeholder="Ex: /Users/kaike/models" />
+          </label>
 
-        <div class="remote-tags"></div>
+          <label class="field-group">
+            <span>OpenClaw CLI (Caminho do script de CLI)</span>
+            <input id="setting-openclaw-cli" class="input" placeholder="Ex: /Users/kaike/prod/openclaw/openclaw.mjs" />
+          </label>
 
-        <div class="remote-actions">
-          <button class="primary-btn remote-download-btn">Baixar</button>
-        </div>
-      </article>
-    </template>
+          <label class="field-group">
+            <span>OpenClaw State Dir (Diretorio de deploy)</span>
+            <input id="setting-openclaw-state" class="input" placeholder="Ex: /Users/kaike/prod/openclaw/deploy/data" />
+          </label>
+        </section>
 
-    <template id="download-item-template">
-      <li class="download-item">
-        <div class="download-main">
-          <p class="download-model"></p>
-          <p class="download-destination"></p>
-
-          <div class="download-progress-track">
-            <div class="download-progress-fill"></div>
+        <section class="settings-controls glass" style="margin-top: 16px;">
+          <h3>Instalacao do OpenClaw</h3>
+          <p class="meta-note">Se o OpenClaw nao estiver instalado, voce pode iniciar o processo automatizado aqui. Isso
+            requer Node.js (npm).</p>
+          <div style="margin-top: 12px;">
+            <button id="install-openclaw-btn" type="button" class="ghost-btn">Instalar OpenClaw agora</button>
+            <p id="install-openclaw-feedback" class="meta-note mt-2" style="margin-top: 8px;">-</p>
           </div>
+        </section>
+      </section>
+    </main>
+  </div>
 
-          <p class="download-progress-label"></p>
+  <template id="message-template">
+    <article class="message-card">
+      <header class="message-role"></header>
+      <div class="message-content"></div>
+      <div class="message-actions hidden">
+        <button class="ghost-btn edit-message-btn" type="button">Editar e regenerar</button>
+      </div>
+    </article>
+  </template>
+
+  <template id="assistant-stream-template">
+    <article class="message-card assistant-stream-card">
+      <header class="message-role">assistant</header>
+
+      <div class="assistant-state-row">
+        <span class="assistant-state-label">aguardando</span>
+        <div class="typing-indicator">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+      </div>
+
+      <section class="assistant-thinking hidden">
+        <h4>thinking</h4>
+        <pre class="assistant-thinking-text"></pre>
+      </section>
+
+      <section class="assistant-answer hidden">
+        <h4>resposta</h4>
+        <pre class="assistant-answer-text"></pre>
+      </section>
+
+      <section class="assistant-metrics hidden">
+        <h4>metricas</h4>
+        <pre class="assistant-metrics-text"></pre>
+      </section>
+    </article>
+  </template>
+
+  <template id="remote-card-template">
+    <article class="remote-card glass">
+      <div class="remote-head">
+        <div>
+          <h3 class="remote-name"></h3>
+          <p class="remote-subtitle"></p>
+        </div>
+        <span class="remote-task"></span>
+      </div>
+
+      <p class="remote-summary"></p>
+
+      <div class="remote-stats">
+        <span class="remote-size"></span>
+        <span class="remote-downloads"></span>
+        <span class="remote-likes"></span>
+      </div>
+
+      <div class="remote-tags"></div>
+
+      <div class="remote-actions">
+        <button class="primary-btn remote-download-btn">Baixar</button>
+      </div>
+    </article>
+  </template>
+
+  <template id="download-item-template">
+    <li class="download-item">
+      <div class="download-main">
+        <p class="download-model"></p>
+        <p class="download-destination"></p>
+
+        <div class="download-progress-track">
+          <div class="download-progress-fill"></div>
         </div>
 
-        <div class="download-meta">
-          <span class="download-status"></span>
-          <p class="download-time"></p>
-          <button class="ghost-btn download-cancel-btn">Cancelar</button>
-        </div>
-      </li>
-    </template>
+        <p class="download-progress-label"></p>
+      </div>
 
-    <script type="module" src="./app.js"></script>
-  </body>
+      <div class="download-meta">
+        <span class="download-status"></span>
+        <p class="download-time"></p>
+        <button class="ghost-btn download-cancel-btn">Cancelar</button>
+      </div>
+    </li>
+  </template>
+
+  <script type="module" src="./app.js"></script>
+</body>
+
 </html>

@@ -11,6 +11,9 @@ const OPENCLAW_LOG_POLL_MS = 1500;
 const OPENCLAW_LOG_MAX_CHARS = 120000;
 
 const appShell = document.getElementById("app-shell");
+const splashScreen = document.getElementById("splash-screen");
+const mobileMenuBtn = document.getElementById("mobile-menu-btn");
+const chatSidebar = document.getElementById("chat-sidebar");
 const statusPill = document.getElementById("status-pill");
 
 const daemonInput = document.getElementById("daemon-url");
@@ -98,6 +101,13 @@ const refreshOpenclawModelsBtn = document.getElementById("refresh-openclaw-model
 const applyOpenclawModelBtn = document.getElementById("apply-openclaw-model");
 const openclawModelCurrent = document.getElementById("openclaw-model-current");
 const openclawConfigFeedback = document.getElementById("openclaw-config-feedback");
+
+const settingModelsDir = document.getElementById("setting-models-dir");
+const settingOpenclawCli = document.getElementById("setting-openclaw-cli");
+const settingOpenclawState = document.getElementById("setting-openclaw-state");
+const saveSettingsBtn = document.getElementById("save-settings-btn");
+const installOpenclawBtn = document.getElementById("install-openclaw-btn");
+const installOpenclawFeedback = document.getElementById("install-openclaw-feedback");
 
 let daemonBaseUrl = localStorage.getItem(STORAGE_DAEMON_URL) || "http://127.0.0.1:11435";
 let selectedModelId = null;
@@ -275,8 +285,8 @@ function threadStorageSafeParse(raw) {
       .map((entry) => {
         const messages = Array.isArray(entry.messages)
           ? entry.messages
-              .filter((item) => item && typeof item.role === "string" && typeof item.content === "string")
-              .map((item) => ({ role: item.role, content: item.content }))
+            .filter((item) => item && typeof item.role === "string" && typeof item.content === "string")
+            .map((item) => ({ role: item.role, content: item.content }))
           : [];
 
         return {
@@ -1726,13 +1736,13 @@ function renderOpenClawUsage(usage) {
 function normalizeOpenClawObservability(response = {}) {
   const skills = Array.isArray(response.skills)
     ? response.skills
-        .map((value) => String(value || "").trim())
-        .filter(Boolean)
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
     : [];
   const tools = Array.isArray(response.tools)
     ? response.tools
-        .map((value) => String(value || "").trim())
-        .filter(Boolean)
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
     : [];
 
   return {
@@ -2425,6 +2435,24 @@ tabButtons.forEach((button) => {
   });
 });
 
+if (mobileMenuBtn) {
+  mobileMenuBtn.addEventListener("click", () => {
+    appShell.classList.toggle("sidebar-open");
+  });
+}
+
+function autoResizeTextarea(el) {
+  el.style.height = "auto";
+  el.style.height = el.scrollHeight + "px";
+}
+
+if (messageInput) {
+  messageInput.addEventListener("input", () => autoResizeTextarea(messageInput));
+}
+if (openclawMessageInput) {
+  openclawMessageInput.addEventListener("input", () => autoResizeTextarea(openclawMessageInput));
+}
+
 document.addEventListener("click", (event) => {
   const target = event.target;
   const inHistoryMenu =
@@ -2516,6 +2544,65 @@ applyOpenclawModelBtn.addEventListener("click", () => {
   void applyOpenClawModelSelection();
 });
 
+saveSettingsBtn.addEventListener("click", async () => {
+  try {
+    const btn = saveSettingsBtn;
+    const oldText = btn.textContent;
+    btn.textContent = "Salvando...";
+    btn.disabled = true;
+
+    const payload = await fetchJson("/config", { method: "GET" });
+    payload.models_dir = settingModelsDir.value;
+    payload.openclaw_cli_path = settingOpenclawCli.value;
+    payload.openclaw_state_dir = settingOpenclawState.value;
+
+    await fetchJson("/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    btn.textContent = "Salvo!";
+    setTimeout(() => {
+      btn.textContent = oldText;
+      btn.disabled = false;
+    }, 2000);
+  } catch (error) {
+    alert(`Erro ao salvar configuracoes: ${error.message}`);
+    saveSettingsBtn.textContent = "Salvar Configuracoes";
+    saveSettingsBtn.disabled = false;
+  }
+});
+
+async function loadConfig() {
+  try {
+    const cfg = await fetchJson("/config", { method: "GET" });
+    if (settingModelsDir) settingModelsDir.value = cfg.models_dir || "";
+    if (settingOpenclawCli) settingOpenclawCli.value = cfg.openclaw_cli_path || "";
+    if (settingOpenclawState) settingOpenclawState.value = cfg.openclaw_state_dir || "";
+  } catch (err) {
+    console.error("Failed to load config from backend", err);
+  }
+}
+
+installOpenclawBtn.addEventListener("click", async () => {
+  try {
+    const btn = installOpenclawBtn;
+    btn.disabled = true;
+    btn.textContent = "Instalando... isso pode demorar um pouco.";
+    installOpenclawFeedback.textContent = "Baixando repositorio e dependencias...";
+    installOpenclawFeedback.classList.remove("hidden");
+
+    const payload = await fetchJson("/openclaw/install", { method: "POST" });
+    installOpenclawFeedback.textContent = payload.message || "OpenClaw instalado com sucesso!";
+    btn.textContent = "Instalado";
+  } catch (error) {
+    installOpenclawFeedback.textContent = `Erro na instalacao: ${error.message}`;
+    installOpenclawBtn.disabled = false;
+    installOpenclawBtn.textContent = "Tentar Novamente";
+  }
+});
+
 async function bootstrap() {
   try {
     const storedWebsearch = localStorage.getItem(STORAGE_CHAT_WEBSEARCH_ENABLED);
@@ -2539,6 +2626,7 @@ async function bootstrap() {
     await loadModels();
     await loadCatalogSources();
     await searchCatalogModels();
+    await loadConfig();
     await loadDownloads();
 
     if (downloadsTimer) {
@@ -2551,6 +2639,12 @@ async function bootstrap() {
 
     switchTab(activeTab);
     setStatus("pronto");
+
+    if (splashScreen) {
+      setTimeout(() => {
+        splashScreen.classList.add("hidden");
+      }, 1000);
+    }
   } catch (error) {
     setStatus("erro inicial", "error");
     addSystemMessage(`Falha na inicializacao: ${error.message}`);
