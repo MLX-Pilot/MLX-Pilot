@@ -2,7 +2,7 @@ import { ParticleSystem } from "./particles.js";
 
 const STORAGE_DAEMON_URL = "mlxPilotDaemonUrl";
 const STORAGE_CHAT_THREADS = "mlxPilotChatThreadsV2";
-const STORAGE_OPENCLAW_OBSERVABILITY = "mlxPilotOpenClawObservabilityV1";
+const STORAGE_AGENT_OBSERVABILITY_PREFIX = "mlxPilotAgentObservabilityV2";
 const STORAGE_BRAVE_API_KEY = "mlxPilotBraveApiKey";
 const STORAGE_CHAT_WEBSEARCH_ENABLED = "mlxPilotWebsearchEnabled";
 
@@ -23,6 +23,7 @@ const braveApiKeyInput = document.getElementById("brave-api-key");
 const saveUrlBtn = document.getElementById("save-url");
 
 const tabButtons = Array.from(document.querySelectorAll(".tab-btn[data-tab]"));
+const agentTabLabel = document.getElementById("agent-tab-label");
 const panelChat = document.getElementById("panel-chat");
 const panelDiscover = document.getElementById("panel-discover");
 const panelOpenClaw = document.getElementById("panel-openclaw");
@@ -71,6 +72,16 @@ const refreshOpenclawStatusBtn = document.getElementById("refresh-openclaw-statu
 const openclawStartBtn = document.getElementById("openclaw-start-btn");
 const openclawStopBtn = document.getElementById("openclaw-stop-btn");
 const openclawRestartBtn = document.getElementById("openclaw-restart-btn");
+const agentPanelEyebrow = document.getElementById("agent-panel-eyebrow");
+const agentPanelTitle = document.getElementById("agent-panel-title");
+const agentSubtabsLabel = document.getElementById("agent-subtabs-label");
+const agentChatTitle = document.getElementById("agent-chat-title");
+const agentLogsTitle = document.getElementById("agent-logs-title");
+const agentObservabilityTitle = document.getElementById("agent-observability-title");
+const agentConfigTitle = document.getElementById("agent-config-title");
+const agentLogOptionGateway = document.getElementById("agent-log-option-gateway");
+const agentLogOptionError = document.getElementById("agent-log-option-error");
+const agentLogOptionSync = document.getElementById("agent-log-option-sync");
 
 const openclawViewButtons = Array.from(document.querySelectorAll(".openclaw-view-btn"));
 const openclawMultiViewToggle = document.getElementById("openclaw-multi-view");
@@ -99,12 +110,19 @@ const openclawTools = document.getElementById("openclaw-tools");
 const openclawModelSource = document.getElementById("openclaw-model-source");
 const openclawCloudPicker = document.getElementById("openclaw-cloud-picker");
 const openclawLocalPicker = document.getElementById("openclaw-local-picker");
+const nanobotModelPicker = document.getElementById("nanobot-model-picker");
+const nanobotModelInput = document.getElementById("nanobot-model-input");
 const openclawCloudModelSelect = document.getElementById("openclaw-cloud-model-select");
 const openclawLocalModelSelect = document.getElementById("openclaw-local-model-select");
 const refreshOpenclawModelsBtn = document.getElementById("refresh-openclaw-models");
 const applyOpenclawModelBtn = document.getElementById("apply-openclaw-model");
 const openclawModelCurrent = document.getElementById("openclaw-model-current");
 const openclawConfigFeedback = document.getElementById("openclaw-config-feedback");
+const openclawModelSourceLabel = document.getElementById("openclaw-model-source-label");
+const openclawModelSourceCloudOption = document.getElementById("openclaw-model-source-cloud-option");
+const openclawModelSourceLocalOption = document.getElementById("openclaw-model-source-local-option");
+const openclawCloudLabel = document.getElementById("openclaw-cloud-label");
+const openclawLocalLabel = document.getElementById("openclaw-local-label");
 
 const settingModelsDir = document.getElementById("setting-models-dir");
 const discoverModelsDir = document.getElementById("discover-models-dir");
@@ -135,6 +153,7 @@ let activeThreadId = null;
 let openThreadMenuId = null;
 
 let activeTab = "chat";
+let activeAgentFramework = "openclaw";
 let chatModelMenuOpen = false;
 let isGenerating = false;
 let activeStreamController = null;
@@ -207,6 +226,133 @@ async function fetchJson(path, options = {}) {
   }
 
   return response.json();
+}
+
+function isNanobotActive() {
+  return activeAgentFramework === "nanobot";
+}
+
+function activeAgentLabel() {
+  return isNanobotActive() ? "NanoBot" : "OpenClaw";
+}
+
+function activeAgentEndpoint(path) {
+  const normalized = String(path || "").replace(/^\/+/, "");
+  const prefix = isNanobotActive() ? "/nanobot" : "/openclaw";
+  return `${prefix}/${normalized}`;
+}
+
+function observabilityStorageKey() {
+  return `${STORAGE_AGENT_OBSERVABILITY_PREFIX}:${activeAgentFramework}`;
+}
+
+function applyFrameworkGroupsVisibility() {
+  openclawSettingsGroup.classList.toggle("hidden", isNanobotActive());
+  nanobotSettingsGroup.classList.toggle("hidden", !isNanobotActive());
+}
+
+function applyAgentPanelCopy() {
+  const label = activeAgentLabel();
+  const isNanobot = isNanobotActive();
+
+  if (agentTabLabel) {
+    agentTabLabel.textContent = label;
+  }
+  if (agentPanelEyebrow) {
+    agentPanelEyebrow.textContent = `${label} Integration`;
+  }
+  if (agentPanelTitle) {
+    agentPanelTitle.textContent = isNanobot
+      ? "Chat, runtime e configuracao do NanoBot"
+      : "Chat, observabilidade e configuracao";
+  }
+  if (agentSubtabsLabel) {
+    agentSubtabsLabel.setAttribute("aria-label", `${label} visualizacao`);
+  }
+  if (agentChatTitle) {
+    agentChatTitle.textContent = `Chat com ${label}`;
+  }
+  if (agentLogsTitle) {
+    agentLogsTitle.textContent = `Logs em tempo real (${label})`;
+  }
+  if (agentObservabilityTitle) {
+    agentObservabilityTitle.textContent = `Skills e Tools da ultima resposta (${label})`;
+  }
+  if (agentConfigTitle) {
+    agentConfigTitle.textContent = isNanobot
+      ? "Configuracao de modelo NanoBot"
+      : "Configuracao de modelo OpenClaw";
+  }
+  if (openclawMessageInput) {
+    openclawMessageInput.placeholder = `Converse com o ${label} aqui...`;
+  }
+  if (openclawSendBtn) {
+    openclawSendBtn.textContent = `Enviar para ${label}`;
+  }
+  if (refreshOpenclawStatusBtn) {
+    refreshOpenclawStatusBtn.textContent = isNanobot ? "Atualizar status NanoBot" : "Atualizar status";
+  }
+  if (agentLogOptionGateway) {
+    agentLogOptionGateway.textContent = "gateway.log";
+  }
+  if (agentLogOptionError) {
+    agentLogOptionError.textContent = "gateway.err.log";
+  }
+  if (agentLogOptionSync) {
+    agentLogOptionSync.textContent = isNanobot ? "agent.log" : "openclaw-mlx-sync.log";
+  }
+  if (openclawModelSourceLabel) {
+    openclawModelSourceLabel.textContent = "Origem do modelo";
+  }
+  if (openclawModelSourceCloudOption) {
+    openclawModelSourceCloudOption.textContent = "Nuvem (OpenClaw configurado)";
+  }
+  if (openclawModelSourceLocalOption) {
+    openclawModelSourceLocalOption.textContent = "Local (MLX-Pilot)";
+  }
+  if (openclawCloudLabel) {
+    openclawCloudLabel.textContent = "Modelos cloud";
+  }
+  if (openclawLocalLabel) {
+    openclawLocalLabel.textContent = "Modelos locais";
+  }
+  if (refreshOpenclawModelsBtn) {
+    refreshOpenclawModelsBtn.textContent = isNanobot ? "Carregar modelo atual" : "Atualizar modelos";
+  }
+  if (applyOpenclawModelBtn) {
+    applyOpenclawModelBtn.textContent = isNanobot ? "Aplicar modelo NanoBot" : "Aplicar modelo";
+  }
+}
+
+function applyAgentFramework(nextFramework, { syncRadio = false, refreshPanel = false } = {}) {
+  const normalized = nextFramework === "nanobot" ? "nanobot" : "openclaw";
+  const changed = normalized !== activeAgentFramework;
+  activeAgentFramework = normalized;
+
+  if (syncRadio) {
+    frameworkRadios.forEach((radio) => {
+      radio.checked = radio.value === normalized;
+    });
+  }
+
+  applyFrameworkGroupsVisibility();
+  applyAgentPanelCopy();
+  toggleOpenClawSourceFields();
+
+  if (changed) {
+    openclawStatusLoaded = false;
+    openclawObservabilityLoaded = false;
+    resetOpenClawLogState();
+    openclawRuntimeMeta.textContent = "runtime: verificando...";
+  }
+
+  if (normalized === "nanobot") {
+    void loadNanobotStatus();
+  }
+
+  if (refreshPanel && activeTab === "openclaw") {
+    onOpenClawTabSelected();
+  }
 }
 
 function formatNumber(value) {
@@ -1807,7 +1953,7 @@ function normalizeOpenClawObservability(response = {}) {
 }
 
 function persistOpenClawObservability(snapshot) {
-  localStorage.setItem(STORAGE_OPENCLAW_OBSERVABILITY, JSON.stringify(snapshot));
+  localStorage.setItem(observabilityStorageKey(), JSON.stringify(snapshot));
 }
 
 function applyOpenClawObservability(snapshot, { persist = true } = {}) {
@@ -1827,7 +1973,10 @@ function applyOpenClawObservability(snapshot, { persist = true } = {}) {
 
 function restoreOpenClawObservabilityFromStorage() {
   try {
-    const raw = localStorage.getItem(STORAGE_OPENCLAW_OBSERVABILITY);
+    let raw = localStorage.getItem(observabilityStorageKey());
+    if (!raw && !isNanobotActive()) {
+      raw = localStorage.getItem("mlxPilotOpenClawObservabilityV1");
+    }
     if (!raw) {
       return false;
     }
@@ -1850,7 +1999,7 @@ function updateOpenClawObservability(response) {
 
 async function loadOpenClawObservability() {
   try {
-    const payload = await fetchJson("/openclaw/observability");
+    const payload = await fetchJson(activeAgentEndpoint("observability"));
     applyOpenClawObservability(payload);
     openclawObservabilityLoaded = true;
   } catch (error) {
@@ -1897,7 +2046,7 @@ function renderOpenClawRuntimeState(runtime) {
 
 async function loadOpenClawRuntimeStatus() {
   try {
-    const runtime = await fetchJson("/openclaw/runtime");
+    const runtime = await fetchJson(activeAgentEndpoint("runtime"));
     renderOpenClawRuntimeState(runtime);
   } catch (error) {
     openclawRuntimeMeta.textContent = `runtime indisponivel • ${error.message}`;
@@ -1910,12 +2059,13 @@ async function runOpenClawRuntimeAction(action) {
     return;
   }
 
+  const agentLabel = activeAgentLabel().toLowerCase();
   openclawRuntimeActionInFlight = true;
   setOpenClawRuntimeButtons("");
-  setStatus(`openclaw ${action}`, "running");
+  setStatus(`${agentLabel} ${action}`, "running");
 
   try {
-    const payload = await fetchJson("/openclaw/runtime", {
+    const payload = await fetchJson(activeAgentEndpoint("runtime"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action }),
@@ -1924,9 +2074,9 @@ async function runOpenClawRuntimeAction(action) {
     renderOpenClawRuntimeState(payload.runtime);
     await loadOpenClawStatus();
     await loadOpenClawObservability();
-    setStatus(`openclaw ${action} ok`);
+    setStatus(`${agentLabel} ${action} ok`);
   } catch (error) {
-    setStatus(`erro openclaw ${action}`, "error");
+    setStatus(`erro ${agentLabel} ${action}`, "error");
     openclawRuntimeMeta.textContent = `falha ${action} • ${error.message}`;
   } finally {
     openclawRuntimeActionInFlight = false;
@@ -1969,8 +2119,18 @@ function setOpenClawSendingState(nextState) {
 
 async function loadOpenClawStatus() {
   try {
-    const status = await fetchJson("/openclaw/status");
+    const status = await fetchJson(activeAgentEndpoint("status"));
     openclawStatusLoaded = true;
+
+    if (isNanobotActive()) {
+      if (status.installed) {
+        const configBadge = status.config_exists ? "config ok" : "sem config";
+        openclawStatusText.textContent = `online • ${configBadge} • ${status.version || "versao n/d"}`;
+      } else {
+        openclawStatusText.textContent = status.message || "offline";
+      }
+      return;
+    }
 
     if (status.available) {
       openclawStatusText.textContent = `online • session ${status.session_key}`;
@@ -2017,7 +2177,7 @@ async function pollOpenClawLogs({ reset = false } = {}) {
   });
 
   try {
-    const chunk = await fetchJson(`/openclaw/logs?${params.toString()}`);
+    const chunk = await fetchJson(`${activeAgentEndpoint("logs")}?${params.toString()}`);
 
     if (!chunk.exists) {
       openclawLogMeta.textContent = `arquivo nao encontrado: ${chunk.path}`;
@@ -2066,10 +2226,10 @@ async function sendOpenClawMessage() {
   openclawMessageInput.value = "";
   addOpenClawChatMessage("user", message);
   setOpenClawSendingState(true);
-  setStatus("consultando openclaw", "running");
+  setStatus(`consultando ${activeAgentLabel().toLowerCase()}`, "running");
 
   try {
-    const response = await fetchJson("/openclaw/chat", {
+    const response = await fetchJson(activeAgentEndpoint("chat"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message }),
@@ -2087,10 +2247,10 @@ async function sendOpenClawMessage() {
 
     addOpenClawChatMessage("assistant", reply, meta);
     updateOpenClawObservability(response);
-    setStatus("openclaw respondeu");
+    setStatus(`${activeAgentLabel().toLowerCase()} respondeu`);
   } catch (error) {
-    addOpenClawChatMessage("system", `Erro no OpenClaw: ${error.message}`);
-    setStatus("erro openclaw", "error");
+    addOpenClawChatMessage("system", `Erro no ${activeAgentLabel()}: ${error.message}`);
+    setStatus(`erro ${activeAgentLabel().toLowerCase()}`, "error");
   } finally {
     setOpenClawSendingState(false);
     openclawMessageInput.focus();
@@ -2098,6 +2258,19 @@ async function sendOpenClawMessage() {
 }
 
 function renderOpenClawModelSelectors() {
+  if (isNanobotActive()) {
+    const current = openclawModelsCatalog.current || null;
+    const model = (current?.model || "").trim();
+    if (nanobotModelInput) {
+      nanobotModelInput.value = model;
+    }
+    openclawModelCurrent.textContent = model
+      ? `Modelo atual: ${current.label || model}`
+      : "Modelo atual: -";
+    toggleOpenClawSourceFields();
+    return;
+  }
+
   const cloud = Array.isArray(openclawModelsCatalog.cloud_models)
     ? openclawModelsCatalog.cloud_models
     : [];
@@ -2166,14 +2339,46 @@ function renderOpenClawModelSelectors() {
 }
 
 function toggleOpenClawSourceFields() {
+  const isNanobot = isNanobotActive();
+  if (openclawModelSource?.parentElement) {
+    openclawModelSource.parentElement.classList.toggle("hidden", isNanobot);
+  }
+  if (nanobotModelPicker) {
+    nanobotModelPicker.classList.toggle("hidden", !isNanobot);
+  }
+
+  if (isNanobot) {
+    openclawCloudPicker.classList.add("hidden");
+    openclawLocalPicker.classList.add("hidden");
+    return;
+  }
+
   const source = openclawModelSource.value || "cloud";
   openclawCloudPicker.classList.toggle("hidden", source !== "cloud");
   openclawLocalPicker.classList.toggle("hidden", source !== "local");
 }
 
 async function loadOpenClawModelCatalog() {
+  if (isNanobotActive()) {
+    try {
+      const current = await fetchJson(activeAgentEndpoint("model"));
+      openclawModelsCatalog = {
+        cloud_models: [],
+        local_models: [],
+        current: current || null,
+      };
+      renderOpenClawModelSelectors();
+      openclawConfigFeedback.textContent = current?.model
+        ? "Modelo NanoBot carregado."
+        : "Nenhum modelo NanoBot definido.";
+    } catch (error) {
+      openclawConfigFeedback.textContent = `Erro ao carregar modelo NanoBot: ${error.message}`;
+    }
+    return;
+  }
+
   try {
-    const payload = await fetchJson("/openclaw/models");
+    const payload = await fetchJson(activeAgentEndpoint("models"));
     openclawModelsCatalog = {
       cloud_models: Array.isArray(payload.cloud_models) ? payload.cloud_models : [],
       local_models: Array.isArray(payload.local_models) ? payload.local_models : [],
@@ -2188,6 +2393,33 @@ async function loadOpenClawModelCatalog() {
 }
 
 async function applyOpenClawModelSelection() {
+  if (isNanobotActive()) {
+    const model = (nanobotModelInput?.value || "").trim();
+    if (!model) {
+      openclawConfigFeedback.textContent = "Informe o modelo do NanoBot.";
+      return;
+    }
+
+    openclawConfigFeedback.textContent = "Aplicando modelo NanoBot...";
+    setStatus("aplicando modelo nanobot", "running");
+
+    try {
+      const current = await fetchJson(activeAgentEndpoint("model"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model }),
+      });
+      openclawModelsCatalog.current = current;
+      renderOpenClawModelSelectors();
+      openclawConfigFeedback.textContent = `Modelo aplicado: ${current.label || current.model || model}`;
+      setStatus("modelo nanobot atualizado");
+    } catch (error) {
+      openclawConfigFeedback.textContent = `Falha ao aplicar modelo: ${error.message}`;
+      setStatus("erro modelo nanobot", "error");
+    }
+    return;
+  }
+
   const source = openclawModelSource.value || "cloud";
   openclawConfigFeedback.textContent = "Aplicando modelo...";
   setStatus("aplicando modelo openclaw", "running");
@@ -2213,7 +2445,7 @@ async function applyOpenClawModelSelection() {
   }
 
   try {
-    const current = await fetchJson("/openclaw/model", {
+    const current = await fetchJson(activeAgentEndpoint("model"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -2679,19 +2911,8 @@ async function loadConfig() {
     if (settingOpenclawState) settingOpenclawState.value = cfg.openclaw_state_dir || "";
     if (settingNanobotCli) settingNanobotCli.value = cfg.nanobot_cli_path || "";
 
-    // Also set the correct framework radio if backend has preference (for future-proofing, defaulting to openclaw if not)
-    const activeFramework = cfg.active_agent_framework || "openclaw";
-    frameworkRadios.forEach(radio => {
-      radio.checked = (radio.value === activeFramework);
-      if (radio.checked) {
-        openclawSettingsGroup.classList.toggle("hidden", radio.value !== "openclaw");
-        nanobotSettingsGroup.classList.toggle("hidden", radio.value !== "nanobot");
-      }
-    });
-
-    if (activeFramework === "nanobot") {
-      void loadNanobotStatus();
-    }
+    const activeFramework = cfg.active_agent_framework === "nanobot" ? "nanobot" : "openclaw";
+    applyAgentFramework(activeFramework, { syncRadio: true, refreshPanel: false });
 
   } catch (err) {
     console.error("Failed to load config from backend", err);
@@ -2779,13 +3000,10 @@ if (discoverModelsDir) {
   });
 }
 
-frameworkRadios.forEach(radio => {
-  radio.addEventListener('change', (e) => {
-    openclawSettingsGroup.classList.toggle("hidden", e.target.value !== "openclaw");
-    nanobotSettingsGroup.classList.toggle("hidden", e.target.value !== "nanobot");
-    if (e.target.value === "nanobot") {
-      void loadNanobotStatus();
-    }
+frameworkRadios.forEach((radio) => {
+  radio.addEventListener("change", (event) => {
+    const nextFramework = event.target.value === "nanobot" ? "nanobot" : "openclaw";
+    applyAgentFramework(nextFramework, { syncRadio: false, refreshPanel: true });
   });
 });
 
@@ -2848,10 +3066,6 @@ async function bootstrap() {
     ensureActiveThread();
 
     renderOpenClawViews();
-    if (!restoreOpenClawObservabilityFromStorage()) {
-      clearChipList(openclawSkills, "Nenhuma skill reportada");
-      clearChipList(openclawTools, "Nenhuma tool reportada");
-    }
     setOpenClawRuntimeButtons("");
 
     renderThreadList();
@@ -2862,6 +3076,10 @@ async function bootstrap() {
     await loadCatalogSources();
     await searchCatalogModels();
     await loadConfig();
+    if (!restoreOpenClawObservabilityFromStorage()) {
+      clearChipList(openclawSkills, "Nenhuma skill reportada");
+      clearChipList(openclawTools, "Nenhuma tool reportada");
+    }
     await loadDownloads();
 
     if (downloadsTimer) {

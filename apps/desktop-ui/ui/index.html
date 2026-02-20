@@ -73,7 +73,7 @@
               Descobrir Modelos
             </button>
             <button class="tab-btn" data-tab="openclaw" role="tab" aria-selected="false">
-              OpenClaw
+              <span id="agent-tab-label">OpenClaw</span>
             </button>
             <button class="tab-btn" data-tab="ai-interaction" role="tab" aria-selected="false">
               Interacao IA
@@ -197,8 +197,8 @@
       <section id="panel-openclaw" class="main-panel" role="tabpanel">
         <header class="openclaw-header glass">
           <div>
-            <p class="chat-eyebrow">OpenClaw Integration</p>
-            <h2>Chat, observabilidade e configuracao</h2>
+            <p id="agent-panel-eyebrow" class="chat-eyebrow">OpenClaw Integration</p>
+            <h2 id="agent-panel-title">Chat, observabilidade e configuracao</h2>
             <p id="openclaw-status-text" class="meta-note">status: verificando...</p>
             <p id="openclaw-runtime-meta" class="meta-note">runtime: verificando...</p>
           </div>
@@ -213,7 +213,7 @@
         </header>
 
         <section class="openclaw-controls glass">
-          <div class="openclaw-subtabs" role="tablist" aria-label="OpenClaw visualizacao">
+          <div id="agent-subtabs-label" class="openclaw-subtabs" role="tablist" aria-label="OpenClaw visualizacao">
             <button class="tab-btn openclaw-view-btn active" data-openclaw-view="chat">Chat</button>
             <button class="tab-btn openclaw-view-btn" data-openclaw-view="logs">Logs</button>
             <button class="tab-btn openclaw-view-btn" data-openclaw-view="observability">Skills e Tools</button>
@@ -229,13 +229,13 @@
         <section id="openclaw-panels" class="openclaw-panels single-mode">
           <article id="openclaw-panel-chat" class="openclaw-panel openclaw-chat-panel glass active">
             <div class="panel-title-row">
-              <h3>Chat com OpenClaw</h3>
+              <h3 id="agent-chat-title">Chat com OpenClaw</h3>
             </div>
 
             <section id="openclaw-chat-log" class="openclaw-chat-log"></section>
 
             <form id="openclaw-chat-form" class="openclaw-chat-form">
-              <textarea id="openclaw-message-input" rows="1" placeholder="Converse com o OpenClaw aqui..."
+              <textarea id="openclaw-message-input" rows="1" placeholder="Converse com o agente aqui..."
                 required></textarea>
               <div class="chat-form-actions">
                 <button type="submit" class="primary-btn">Enviar para OpenClaw</button>
@@ -245,7 +245,7 @@
 
           <article id="openclaw-panel-logs" class="openclaw-panel openclaw-log-panel glass">
             <div class="panel-title-row">
-              <h3>Logs em tempo real</h3>
+              <h3 id="agent-logs-title">Logs em tempo real</h3>
               <button id="clear-openclaw-log" class="ghost-btn">Limpar</button>
             </div>
 
@@ -253,9 +253,9 @@
               <label class="field-group">
                 <span>Stream</span>
                 <select id="openclaw-log-stream" class="input">
-                  <option value="gateway">gateway.log</option>
-                  <option value="error">gateway.err.log</option>
-                  <option value="sync">openclaw-mlx-sync.log</option>
+                  <option id="agent-log-option-gateway" value="gateway">gateway.log</option>
+                  <option id="agent-log-option-error" value="error">gateway.err.log</option>
+                  <option id="agent-log-option-sync" value="sync">openclaw-mlx-sync.log</option>
                 </select>
               </label>
 
@@ -267,7 +267,7 @@
           </article>
 
           <article id="openclaw-panel-observability" class="openclaw-panel openclaw-meta-panel glass">
-            <h3>Skills e Tools da ultima resposta</h3>
+            <h3 id="agent-observability-title">Skills e Tools da ultima resposta</h3>
 
             <div class="openclaw-meta-block">
               <p class="openclaw-meta-label">Modelo</p>
@@ -291,24 +291,29 @@
           </article>
 
           <article id="openclaw-panel-config" class="openclaw-panel openclaw-config-panel glass">
-            <h3>Configuracao de modelo OpenClaw</h3>
+            <h3 id="agent-config-title">Configuracao de modelo OpenClaw</h3>
 
             <label class="field-group">
-              <span>Origem do modelo</span>
+              <span id="openclaw-model-source-label">Origem do modelo</span>
               <select id="openclaw-model-source" class="input">
-                <option value="cloud">Nuvem (OpenClaw configurado)</option>
-                <option value="local">Local (MLX-Pilot)</option>
+                <option id="openclaw-model-source-cloud-option" value="cloud">Nuvem (OpenClaw configurado)</option>
+                <option id="openclaw-model-source-local-option" value="local">Local (MLX-Pilot)</option>
               </select>
             </label>
 
             <label id="openclaw-cloud-picker" class="field-group">
-              <span>Modelos cloud</span>
+              <span id="openclaw-cloud-label">Modelos cloud</span>
               <select id="openclaw-cloud-model-select" class="input"></select>
             </label>
 
             <label id="openclaw-local-picker" class="field-group hidden">
-              <span>Modelos locais</span>
+              <span id="openclaw-local-label">Modelos locais</span>
               <select id="openclaw-local-model-select" class="input"></select>
+            </label>
+
+            <label id="nanobot-model-picker" class="field-group hidden">
+              <span id="nanobot-model-label">Modelo NanoBot</span>
+              <input id="nanobot-model-input" class="input" placeholder="Ex: openai-codex/gpt-5.1-codex" />
             </label>
 
             <div class="openclaw-config-actions">
