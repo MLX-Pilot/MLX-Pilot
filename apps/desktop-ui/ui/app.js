@@ -121,6 +121,10 @@ const nanobotSettingsGroup = document.getElementById("nanobot-settings-group");
 const settingNanobotCli = document.getElementById("setting-nanobot-cli");
 const installNanobotBtn = document.getElementById("install-nanobot-btn");
 const installNanobotFeedback = document.getElementById("install-nanobot-feedback");
+const checkNanobotStatusBtn = document.getElementById("check-nanobot-status-btn");
+const initNanobotBtn = document.getElementById("init-nanobot-btn");
+const nanobotStatusFeedback = document.getElementById("nanobot-status-feedback");
+const nanobotStatusOutput = document.getElementById("nanobot-status-output");
 
 let daemonBaseUrl = localStorage.getItem(STORAGE_DAEMON_URL) || "http://127.0.0.1:11435";
 let selectedModelId = null;
@@ -2293,8 +2297,7 @@ function switchTab(nextTab) {
     if (nextTab === "ai-interaction") {
       window.particleSystem.setParticleState('neutral');
     } else {
-      // We only want the particles visible/active in the AI interaction tab now
-      window.particleSystem.setParticleState('none'); // We can treat non-active tabs differently if needed, or simply let it run in background since we localized the canvas via CSS
+      window.particleSystem.setParticleState('none');
     }
   }
 
@@ -2626,8 +2629,65 @@ async function loadConfig() {
       }
     });
 
+    if (activeFramework === "nanobot") {
+      void loadNanobotStatus();
+    }
+
   } catch (err) {
     console.error("Failed to load config from backend", err);
+  }
+}
+
+function renderNanobotStatus(payload) {
+  if (!nanobotStatusOutput) {
+    return;
+  }
+
+  const lines = [
+    `Comando: ${payload.command || "-"}`,
+    `Instalado: ${payload.installed ? "sim" : "nao"}`,
+    `Versao: ${payload.version || "-"}`,
+    `Config: ${payload.config_path || "-"} (${payload.config_exists ? "ok" : "faltando"})`,
+    `Workspace: ${payload.workspace_path || "-"} (${payload.workspace_exists ? "ok" : "faltando"})`,
+  ];
+
+  if (payload.raw_status) {
+    lines.push("", "Saida do comando status:", payload.raw_status);
+  }
+
+  nanobotStatusOutput.textContent = lines.join("\n");
+}
+
+async function loadNanobotStatus() {
+  if (!nanobotStatusFeedback) {
+    return;
+  }
+
+  nanobotStatusFeedback.textContent = "Checando status do NanoBot...";
+  try {
+    const payload = await fetchJson("/nanobot/status", { method: "GET" });
+    nanobotStatusFeedback.textContent = payload.message || "Status carregado.";
+    renderNanobotStatus(payload);
+  } catch (error) {
+    nanobotStatusFeedback.textContent = `Falha ao consultar status: ${error.message}`;
+    if (nanobotStatusOutput) {
+      nanobotStatusOutput.textContent = "-";
+    }
+  }
+}
+
+async function runNanobotOnboard() {
+  if (!nanobotStatusFeedback) {
+    return;
+  }
+
+  nanobotStatusFeedback.textContent = "Executando onboard do NanoBot...";
+  try {
+    const payload = await fetchJson("/nanobot/onboard", { method: "POST" });
+    nanobotStatusFeedback.textContent = payload.message || "Onboard executado.";
+    await loadNanobotStatus();
+  } catch (error) {
+    nanobotStatusFeedback.textContent = `Falha no onboard: ${error.message}`;
   }
 }
 
@@ -2663,6 +2723,9 @@ frameworkRadios.forEach(radio => {
   radio.addEventListener('change', (e) => {
     openclawSettingsGroup.classList.toggle("hidden", e.target.value !== "openclaw");
     nanobotSettingsGroup.classList.toggle("hidden", e.target.value !== "nanobot");
+    if (e.target.value === "nanobot") {
+      void loadNanobotStatus();
+    }
   });
 });
 
@@ -2689,18 +2752,31 @@ installNanobotBtn.addEventListener("click", async () => {
     const btn = installNanobotBtn;
     btn.disabled = true;
     btn.textContent = "Instalando Nanobot...";
-    installNanobotFeedback.textContent = "Clonando repositorio (isso pode demorar).";
+    installNanobotFeedback.textContent = "Executando clone/pull e instalacao pip (isso pode demorar).";
     installNanobotFeedback.classList.remove("hidden");
 
     const payload = await fetchJson("/nanobot/install", { method: "POST" });
     installNanobotFeedback.textContent = payload.message || "Nanobot instalado com sucesso!";
     btn.textContent = "Instalado";
+    await loadNanobotStatus();
   } catch (error) {
     installNanobotFeedback.textContent = `Erro na instalacao: ${error.message}`;
     installNanobotBtn.disabled = false;
     installNanobotBtn.textContent = "Tentar Novamente";
   }
 });
+
+if (checkNanobotStatusBtn) {
+  checkNanobotStatusBtn.addEventListener("click", () => {
+    void loadNanobotStatus();
+  });
+}
+
+if (initNanobotBtn) {
+  initNanobotBtn.addEventListener("click", () => {
+    void runNanobotOnboard();
+  });
+}
 
 async function bootstrap() {
   try {

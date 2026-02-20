@@ -427,19 +427,30 @@
               <p class="meta-note" style="margin-bottom: 12px;">Defina os diretorios onde o NanoBot esta localizado.</p>
 
               <label class="field-group">
-                <span>NanoBot CLI (Caminho principal)</span>
-                <input id="setting-nanobot-cli" class="input" placeholder="Ex: /Users/kaike/prod/nanobot/run.py" />
+                <span>NanoBot CLI (comando, binario ou pasta do repo)</span>
+                <input id="setting-nanobot-cli" class="input"
+                  placeholder="Ex: nanobot ou /Users/kaike/prod/nanobot" />
               </label>
             </section>
 
             <section class="settings-controls glass" style="margin-top: 16px;">
               <h3>Instalacao do NanoBot</h3>
-              <p class="meta-note">Se o NanoBot nao estiver instalado, voce pode iniciar o processo automatizado
-                aqui (git clone).</p>
+              <p class="meta-note">Fluxo automatizado: clone/pull do repositorio + pip install -e.</p>
               <div style="margin-top: 12px;">
                 <button id="install-nanobot-btn" type="button" class="ghost-btn">Instalar NanoBot agora</button>
                 <p id="install-nanobot-feedback" class="meta-note mt-2" style="margin-top: 8px;">-</p>
               </div>
+            </section>
+
+            <section class="settings-controls glass" style="margin-top: 16px;">
+              <h3>Diagnostico e Bootstrap</h3>
+              <p class="meta-note">Valide instalacao/versao e inicialize o config em ~/.nanobot/config.json.</p>
+              <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+                <button id="check-nanobot-status-btn" type="button" class="ghost-btn">Checar status NanoBot</button>
+                <button id="init-nanobot-btn" type="button" class="ghost-btn">Inicializar (onboard)</button>
+              </div>
+              <p id="nanobot-status-feedback" class="meta-note mt-2" style="margin-top: 8px;">-</p>
+              <pre id="nanobot-status-output" class="openclaw-log-viewer" style="max-height: 220px; margin-top: 8px;">-</pre>
             </section>
           </div>
         </div>
