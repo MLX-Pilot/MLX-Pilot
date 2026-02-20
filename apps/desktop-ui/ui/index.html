@@ -6,6 +6,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MLX Pilot</title>
   <link rel="stylesheet" href="./styles.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
 </head>
 
 <body>
@@ -66,6 +74,9 @@
             </button>
             <button class="tab-btn" data-tab="openclaw" role="tab" aria-selected="false">
               OpenClaw
+            </button>
+            <button class="tab-btn" data-tab="ai-interaction" role="tab" aria-selected="false">
+              Interacao IA
             </button>
             <button class="tab-btn" data-tab="settings" role="tab" aria-selected="false">
               Configuracoes
@@ -145,17 +156,30 @@
         </header>
 
         <section class="discover-controls glass">
-          <label class="field-group">
-            <span>Fonte</span>
-            <select id="catalog-source" class="input"></select>
-          </label>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <label class="field-group">
+              <span>Fonte</span>
+              <select id="catalog-source" class="input"></select>
+            </label>
 
-          <label class="field-group field-grow">
-            <span>Busca</span>
-            <input id="catalog-query" class="input" placeholder="Ex: mlx-community qwen coder" />
-          </label>
+            <label class="field-group field-grow">
+              <span>Busca</span>
+              <input id="catalog-query" class="input" placeholder="Ex: mlx-community qwen coder" />
+            </label>
 
-          <button id="catalog-search-btn" class="primary-btn">Buscar</button>
+            <button id="catalog-search-btn" class="primary-btn">Buscar</button>
+          </div>
+
+          <div style="margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px;">
+            <label class="field-group">
+              <span style="display: flex; justify-content: space-between;">
+                Diretorio de Instalacao (Models Path)
+                <span id="discover-models-feedback" class="meta-note"
+                  style="color: var(--ok); opacity: 0; transition: opacity 0.3s;">Salvo!</span>
+              </span>
+              <input id="discover-models-dir" class="input" placeholder="Ex: /Users/kaike/models" />
+            </label>
+          </div>
         </section>
 
         <p id="catalog-meta" class="meta-note">Carregando catalogo...</p>
@@ -311,37 +335,132 @@
           <button id="save-settings-btn" class="primary-btn">Salvar Configuracoes</button>
         </header>
 
-        <section class="settings-controls glass">
-          <h3>Caminhos do Sistema</h3>
-          <p class="meta-note" style="margin-bottom: 12px;">Defina os diretorios onde os modelos serao armazenados e
-            onde o OpenClaw esta localizado.</p>
+        <div class="settings-wrapper">
+          <section class="settings-controls glass" style="margin-bottom: 24px;">
+            <h3>Framework de Agente Ativo</h3>
+            <p class="meta-note" style="margin-bottom: 16px;">Escolha qual esqueleto de agente gerenciar.</p>
+            <div class="agent-selector-container" style="display: flex; gap: 16px; margin-bottom: 8px;">
+              <label class="agent-radio-card"
+                style="flex: 1; cursor: pointer; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 16px; background: rgba(0,0,0,0.2); transition: all 0.2s ease; position: relative; overflow: hidden;">
+                <input type="radio" name="agent-framework" value="openclaw" checked
+                  style="position: absolute; opacity: 0;">
+                <div class="card-content" style="display: flex; flex-direction: column; gap: 4px;">
+                  <span style="font-weight: 600; font-size: 1rem; color: #fff;">OpenClaw</span>
+                  <span style="font-size: 0.8rem; color: var(--muted);">Infraestrutura local</span>
+                </div>
+              </label>
+              <label class="agent-radio-card"
+                style="flex: 1; cursor: pointer; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 16px; background: rgba(0,0,0,0.2); transition: all 0.2s ease; position: relative; overflow: hidden;">
+                <input type="radio" name="agent-framework" value="nanobot" style="position: absolute; opacity: 0;">
+                <div class="card-content" style="display: flex; flex-direction: column; gap: 4px;">
+                  <span style="font-weight: 600; font-size: 1rem; color: #fff;">NanoBot</span>
+                  <span style="font-size: 0.8rem; color: var(--muted);">Agentes leves</span>
+                </div>
+              </label>
+            </div>
+            <style>
+              .agent-radio-card:has(input:checked) {
+                border-color: var(--accent);
+                background: rgba(59, 130, 246, 0.1) !important;
+                box-shadow: 0 0 0 1px var(--accent);
+              }
 
-          <label class="field-group">
-            <span>Diretorio de Modelos (Models Path)</span>
-            <input id="setting-models-dir" class="input" placeholder="Ex: /Users/kaike/models" />
-          </label>
+              .agent-radio-card:hover {
+                background: rgba(255, 255, 255, 0.05);
+                border-color: rgba(255, 255, 255, 0.2);
+              }
+            </style>
+          </section>
 
-          <label class="field-group">
-            <span>OpenClaw CLI (Caminho do script de CLI)</span>
-            <input id="setting-openclaw-cli" class="input" placeholder="Ex: /Users/kaike/prod/openclaw/openclaw.mjs" />
-          </label>
+          <div id="openclaw-settings-group">
+            <section class="settings-controls glass">
+              <h3 style="display: flex; justify-content: space-between; align-items: center;">
+                Caminhos do Sistema (OpenClaw)
+                <span style="font-size: 0.8rem; font-weight: normal; display: flex; gap: 8px;">
+                  <a href="https://github.com/openclaw/openclaw" target="_blank"
+                    style="color: var(--accent);">GitHub</a>
+                  <a href="https://openclaw.ai/" target="_blank" style="color: var(--accent);">Site Oficial</a>
+                </span>
+              </h3>
+              <p class="meta-note" style="margin-bottom: 12px;">Defina os diretorios onde os modelos serao armazenados e
+                onde o OpenClaw esta localizado.</p>
 
-          <label class="field-group">
-            <span>OpenClaw State Dir (Diretorio de deploy)</span>
-            <input id="setting-openclaw-state" class="input" placeholder="Ex: /Users/kaike/prod/openclaw/deploy/data" />
-          </label>
-        </section>
+              <label class="field-group">
+                <span>Diretorio de Modelos (Models Path)</span>
+                <input id="setting-models-dir" class="input" placeholder="Ex: /Users/kaike/models" />
+              </label>
 
-        <section class="settings-controls glass" style="margin-top: 16px;">
-          <h3>Instalacao do OpenClaw</h3>
-          <p class="meta-note">Se o OpenClaw nao estiver instalado, voce pode iniciar o processo automatizado aqui. Isso
-            requer Node.js (npm).</p>
-          <div style="margin-top: 12px;">
-            <button id="install-openclaw-btn" type="button" class="ghost-btn">Instalar OpenClaw agora</button>
-            <p id="install-openclaw-feedback" class="meta-note mt-2" style="margin-top: 8px;">-</p>
+              <label class="field-group">
+                <span>OpenClaw CLI (Caminho do script de CLI)</span>
+                <input id="setting-openclaw-cli" class="input"
+                  placeholder="Ex: /Users/kaike/prod/openclaw/openclaw.mjs" />
+              </label>
+
+              <label class="field-group">
+                <span>OpenClaw State Dir (Diretorio de deploy)</span>
+                <input id="setting-openclaw-state" class="input"
+                  placeholder="Ex: /Users/kaike/prod/openclaw/deploy/data" />
+              </label>
+            </section>
+
+            <section class="settings-controls glass" style="margin-top: 16px;">
+              <h3>Instalacao do OpenClaw</h3>
+              <p class="meta-note">Se o OpenClaw nao estiver instalado, voce pode iniciar o processo automatizado aqui.
+                Isso
+                requer Node.js (npm).</p>
+              <div style="margin-top: 12px;">
+                <button id="install-openclaw-btn" type="button" class="ghost-btn">Instalar OpenClaw agora</button>
+                <p id="install-openclaw-feedback" class="meta-note mt-2" style="margin-top: 8px;">-</p>
+              </div>
+            </section>
           </div>
-        </section>
+
+          <div id="nanobot-settings-group" class="hidden">
+            <section class="settings-controls glass">
+              <h3 style="display: flex; justify-content: space-between; align-items: center;">
+                Caminhos do Sistema (NanoBot)
+                <span style="font-size: 0.8rem; font-weight: normal; display: flex; gap: 8px;">
+                  <a href="https://github.com/HKUDS/nanobot" target="_blank" style="color: var(--accent);">GitHub</a>
+                  <a href="https://www.nanobot.ai/" target="_blank" style="color: var(--accent);">Site Oficial</a>
+                </span>
+              </h3>
+              <p class="meta-note" style="margin-bottom: 12px;">Defina os diretorios onde o NanoBot esta localizado.</p>
+
+              <label class="field-group">
+                <span>NanoBot CLI (Caminho principal)</span>
+                <input id="setting-nanobot-cli" class="input" placeholder="Ex: /Users/kaike/prod/nanobot/run.py" />
+              </label>
+            </section>
+
+            <section class="settings-controls glass" style="margin-top: 16px;">
+              <h3>Instalacao do NanoBot</h3>
+              <p class="meta-note">Se o NanoBot nao estiver instalado, voce pode iniciar o processo automatizado
+                aqui (git clone).</p>
+              <div style="margin-top: 12px;">
+                <button id="install-nanobot-btn" type="button" class="ghost-btn">Instalar NanoBot agora</button>
+                <p id="install-nanobot-feedback" class="meta-note mt-2" style="margin-top: 8px;">-</p>
+              </div>
+            </section>
+          </div>
+        </div>
       </section>
+
+      <section id="panel-ai-interaction" class="main-panel" role="tabpanel">
+        <div id="grain"></div>
+        <div id="bg-canvas"></div>
+
+        <div class="ai-interaction-ui glass">
+          <p class="chat-eyebrow">Playground</p>
+          <h2>Particulas Dinamicas</h2>
+          <p class="meta-note">Digite um texto abaixo para a IA montar visualmente nas particulas flutuantes.</p>
+          <div style="display: flex; gap: 8px; margin-top: 16px;">
+            <input id="ai-particle-input" class="input" placeholder="Ex: HELLO" maxlength="10"
+              style="text-transform: uppercase;">
+            <button id="ai-particle-btn" class="primary-btn">Enviar</button>
+          </div>
+        </div>
+      </section>
+
     </main>
   </div>
 

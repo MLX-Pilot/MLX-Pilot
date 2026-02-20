@@ -1,3 +1,5 @@
+import { ParticleSystem } from "./particles.js";
+
 const STORAGE_DAEMON_URL = "mlxPilotDaemonUrl";
 const STORAGE_CHAT_THREADS = "mlxPilotChatThreadsV2";
 const STORAGE_OPENCLAW_OBSERVABILITY = "mlxPilotOpenClawObservabilityV1";
@@ -24,6 +26,8 @@ const tabButtons = Array.from(document.querySelectorAll(".tab-btn[data-tab]"));
 const panelChat = document.getElementById("panel-chat");
 const panelDiscover = document.getElementById("panel-discover");
 const panelOpenClaw = document.getElementById("panel-openclaw");
+const panelSettings = document.getElementById("panel-settings");
+const panelAiInteraction = document.getElementById("panel-ai-interaction");
 const chatEmptyHero = document.getElementById("chat-empty-hero");
 
 const chatModelSwitcher = document.getElementById("chat-model-switcher");
@@ -103,11 +107,20 @@ const openclawModelCurrent = document.getElementById("openclaw-model-current");
 const openclawConfigFeedback = document.getElementById("openclaw-config-feedback");
 
 const settingModelsDir = document.getElementById("setting-models-dir");
+const discoverModelsDir = document.getElementById("discover-models-dir");
+const discoverModelsFeedback = document.getElementById("discover-models-feedback");
 const settingOpenclawCli = document.getElementById("setting-openclaw-cli");
 const settingOpenclawState = document.getElementById("setting-openclaw-state");
 const saveSettingsBtn = document.getElementById("save-settings-btn");
 const installOpenclawBtn = document.getElementById("install-openclaw-btn");
 const installOpenclawFeedback = document.getElementById("install-openclaw-feedback");
+
+const frameworkRadios = document.querySelectorAll('input[name="agent-framework"]');
+const openclawSettingsGroup = document.getElementById("openclaw-settings-group");
+const nanobotSettingsGroup = document.getElementById("nanobot-settings-group");
+const settingNanobotCli = document.getElementById("setting-nanobot-cli");
+const installNanobotBtn = document.getElementById("install-nanobot-btn");
+const installNanobotFeedback = document.getElementById("install-nanobot-feedback");
 
 let daemonBaseUrl = localStorage.getItem(STORAGE_DAEMON_URL) || "http://127.0.0.1:11435";
 let selectedModelId = null;
@@ -126,6 +139,9 @@ let pendingEditMessageIndex = null;
 
 let lastDownloadsFingerprint = "";
 let downloadsTimer = null;
+
+const aiParticleInput = document.getElementById("ai-particle-input");
+const aiParticleBtn = document.getElementById("ai-particle-btn");
 
 let openclawStatusLoaded = false;
 let openclawObservabilityLoaded = false;
@@ -2259,6 +2275,8 @@ function switchTab(nextTab) {
   panelChat.classList.toggle("active", nextTab === "chat");
   panelDiscover.classList.toggle("active", nextTab === "discover");
   panelOpenClaw.classList.toggle("active", nextTab === "openclaw");
+  panelSettings.classList.toggle("active", nextTab === "settings");
+  if (panelAiInteraction) panelAiInteraction.classList.toggle("active", nextTab === "ai-interaction");
 
   appShell.classList.toggle("chat-mode", nextTab === "chat");
   chatModelSwitcher.classList.toggle("hidden", nextTab !== "chat");
@@ -2269,6 +2287,15 @@ function switchTab(nextTab) {
   if (nextTab === "discover") {
     void searchCatalogModels();
     void loadDownloads();
+  }
+
+  if (window.particleSystem) {
+    if (nextTab === "ai-interaction") {
+      window.particleSystem.setParticleState('neutral');
+    } else {
+      // We only want the particles visible/active in the AI interaction tab now
+      window.particleSystem.setParticleState('none'); // We can treat non-active tabs differently if needed, or simply let it run in background since we localized the canvas via CSS
+    }
   }
 
   if (nextTab === "openclaw") {
@@ -2555,6 +2582,12 @@ saveSettingsBtn.addEventListener("click", async () => {
     payload.models_dir = settingModelsDir.value;
     payload.openclaw_cli_path = settingOpenclawCli.value;
     payload.openclaw_state_dir = settingOpenclawState.value;
+    payload.nanobot_cli_path = settingNanobotCli.value;
+
+    const checkedFramework = document.querySelector('input[name="agent-framework"]:checked');
+    if (checkedFramework) {
+      payload.active_agent_framework = checkedFramework.value;
+    }
 
     await fetchJson("/config", {
       method: "POST",
@@ -2578,12 +2611,60 @@ async function loadConfig() {
   try {
     const cfg = await fetchJson("/config", { method: "GET" });
     if (settingModelsDir) settingModelsDir.value = cfg.models_dir || "";
+    if (discoverModelsDir) discoverModelsDir.value = cfg.models_dir || "";
     if (settingOpenclawCli) settingOpenclawCli.value = cfg.openclaw_cli_path || "";
     if (settingOpenclawState) settingOpenclawState.value = cfg.openclaw_state_dir || "";
+    if (settingNanobotCli) settingNanobotCli.value = cfg.nanobot_cli_path || "";
+
+    // Also set the correct framework radio if backend has preference (for future-proofing, defaulting to openclaw if not)
+    const activeFramework = cfg.active_agent_framework || "openclaw";
+    frameworkRadios.forEach(radio => {
+      radio.checked = (radio.value === activeFramework);
+      if (radio.checked) {
+        openclawSettingsGroup.classList.toggle("hidden", radio.value !== "openclaw");
+        nanobotSettingsGroup.classList.toggle("hidden", radio.value !== "nanobot");
+      }
+    });
+
   } catch (err) {
     console.error("Failed to load config from backend", err);
   }
 }
+
+if (discoverModelsDir) {
+  discoverModelsDir.addEventListener("blur", async () => {
+    try {
+      const payload = await fetchJson("/config", { method: "GET" });
+      payload.models_dir = discoverModelsDir.value;
+
+      await fetchJson("/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (settingModelsDir) {
+        settingModelsDir.value = discoverModelsDir.value;
+      }
+
+      if (discoverModelsFeedback) {
+        discoverModelsFeedback.style.opacity = "1";
+        setTimeout(() => {
+          discoverModelsFeedback.style.opacity = "0";
+        }, 2000);
+      }
+    } catch (error) {
+      console.error("Erro ao salvar diretorio de modelos", error);
+    }
+  });
+}
+
+frameworkRadios.forEach(radio => {
+  radio.addEventListener('change', (e) => {
+    openclawSettingsGroup.classList.toggle("hidden", e.target.value !== "openclaw");
+    nanobotSettingsGroup.classList.toggle("hidden", e.target.value !== "nanobot");
+  });
+});
 
 installOpenclawBtn.addEventListener("click", async () => {
   try {
@@ -2600,6 +2681,24 @@ installOpenclawBtn.addEventListener("click", async () => {
     installOpenclawFeedback.textContent = `Erro na instalacao: ${error.message}`;
     installOpenclawBtn.disabled = false;
     installOpenclawBtn.textContent = "Tentar Novamente";
+  }
+});
+
+installNanobotBtn.addEventListener("click", async () => {
+  try {
+    const btn = installNanobotBtn;
+    btn.disabled = true;
+    btn.textContent = "Instalando Nanobot...";
+    installNanobotFeedback.textContent = "Clonando repositorio (isso pode demorar).";
+    installNanobotFeedback.classList.remove("hidden");
+
+    const payload = await fetchJson("/nanobot/install", { method: "POST" });
+    installNanobotFeedback.textContent = payload.message || "Nanobot instalado com sucesso!";
+    btn.textContent = "Instalado";
+  } catch (error) {
+    installNanobotFeedback.textContent = `Erro na instalacao: ${error.message}`;
+    installNanobotBtn.disabled = false;
+    installNanobotBtn.textContent = "Tentar Novamente";
   }
 });
 
@@ -2631,6 +2730,12 @@ async function bootstrap() {
 
     if (downloadsTimer) {
       window.clearInterval(downloadsTimer);
+    }
+
+    try {
+      window.particleSystem = new ParticleSystem("bg-canvas");
+    } catch (e) {
+      console.error("Failed to initialize Particle System:", e);
     }
 
     downloadsTimer = window.setInterval(() => {
