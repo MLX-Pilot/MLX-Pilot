@@ -1,7 +1,7 @@
 use std::env;
 use std::fs;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -44,6 +44,8 @@ pub struct AppConfig {
     pub openclaw_gateway_log: PathBuf,
     pub openclaw_error_log: PathBuf,
     pub openclaw_sync_log: PathBuf,
+    pub nanobot_cli_path: PathBuf,
+    pub active_agent_framework: String,
 }
 
 impl Default for AppConfig {
@@ -89,13 +91,23 @@ impl Default for AppConfig {
                 "/Users/kaike/prod/openclaw/deploy/data/logs/gateway.err.log",
             ),
             openclaw_sync_log: PathBuf::from("/Users/kaike/openclaw-mlx-sync.log"),
+            nanobot_cli_path: PathBuf::from("/Users/kaike/prod/nanobot/run.py"),
+            active_agent_framework: "openclaw".to_string(),
         }
     }
 }
 
 impl AppConfig {
     pub fn get_settings_path() -> PathBuf {
-        let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+        // Use home dir via env instead of the `dirs` crate
+        let base = if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
+            PathBuf::from(home).join(".config")
+        } else if let Ok(app_data) = std::env::var("APPDATA") {
+            PathBuf::from(app_data)
+        } else {
+            PathBuf::from(".")
+        };
+        let mut path = base;
         path.push("mlx-ollama-pilot");
         let _ = fs::create_dir_all(&path);
         path.push("settings.json");
@@ -135,25 +147,25 @@ impl AppConfig {
                 _ => normalized,
             };
             if matches!(normalized.as_str(), "auto" | "mlx" | "llamacpp" | "ollama") {
-                cfg.local_provider = normalized;
+                self.local_provider = normalized;
             }
         }
 
         if let Ok(value) = env::var("APP_MODELS_DIR") {
-            cfg.models_dir = PathBuf::from(value);
+            self.models_dir = PathBuf::from(value);
         }
 
-        cfg.remote_downloads_dir = cfg.models_dir.clone();
+        self.remote_downloads_dir = self.models_dir.clone();
 
         if let Ok(value) = env::var("APP_MLX_COMMAND") {
             if !value.trim().is_empty() {
-                cfg.mlx_command = value;
+                self.mlx_command = value;
             }
         }
 
         if let Ok(value) = env::var("APP_MLX_PREFIX_ARGS") {
             if !value.trim().is_empty() {
-                cfg.mlx_prefix_args = parse_shell_args(&value).unwrap_or_else(|| {
+                self.mlx_prefix_args = parse_shell_args(&value).unwrap_or_else(|| {
                     value
                         .split_whitespace()
                         .map(ToString::to_string)
@@ -164,7 +176,7 @@ impl AppConfig {
 
         if let Ok(value) = env::var("APP_MLX_SUFFIX_ARGS") {
             if !value.trim().is_empty() {
-                cfg.mlx_suffix_args = parse_shell_args(&value).unwrap_or_else(|| {
+                self.mlx_suffix_args = parse_shell_args(&value).unwrap_or_else(|| {
                     value
                         .split_whitespace()
                         .map(ToString::to_string)
@@ -175,59 +187,59 @@ impl AppConfig {
 
         if let Ok(value) = env::var("APP_MLX_TIMEOUT_SECS") {
             if let Ok(seconds) = value.parse::<u64>() {
-                cfg.mlx_timeout = Duration::from_secs(seconds.max(1));
+                self.mlx_timeout = Duration::from_secs(seconds.max(1));
             }
         }
 
         if let Ok(value) = env::var("APP_LLAMACPP_SERVER_BINARY") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
-                cfg.llamacpp_server_binary = trimmed.to_string();
+                self.llamacpp_server_binary = trimmed.to_string();
             }
         }
 
         if let Ok(value) = env::var("APP_LLAMACPP_BASE_URL") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
-                cfg.llamacpp_base_url = trimmed.to_string();
+                self.llamacpp_base_url = trimmed.to_string();
             }
         }
 
         if let Ok(value) = env::var("APP_LLAMACPP_TIMEOUT_SECS") {
             if let Ok(seconds) = value.parse::<u64>() {
-                cfg.llamacpp_timeout = Duration::from_secs(seconds.max(1));
+                self.llamacpp_timeout = Duration::from_secs(seconds.max(1));
             }
         }
 
         if let Ok(value) = env::var("APP_LLAMACPP_STARTUP_TIMEOUT_SECS") {
             if let Ok(seconds) = value.parse::<u64>() {
-                cfg.llamacpp_startup_timeout = Duration::from_secs(seconds.max(2));
+                self.llamacpp_startup_timeout = Duration::from_secs(seconds.max(2));
             }
         }
 
         if let Ok(value) = env::var("APP_LLAMACPP_AUTO_START") {
-            cfg.llamacpp_auto_start = parse_bool(&value, cfg.llamacpp_auto_start);
+            self.llamacpp_auto_start = parse_bool(&value, self.llamacpp_auto_start);
         }
 
         if let Ok(value) = env::var("APP_LLAMACPP_AUTO_INSTALL") {
-            cfg.llamacpp_auto_install = parse_bool(&value, cfg.llamacpp_auto_install);
+            self.llamacpp_auto_install = parse_bool(&value, self.llamacpp_auto_install);
         }
 
         if let Ok(value) = env::var("APP_LLAMACPP_CONTEXT_SIZE") {
             if let Ok(parsed) = value.parse::<u32>() {
-                cfg.llamacpp_context_size = parsed.max(1024);
+                self.llamacpp_context_size = parsed.max(1024);
             }
         }
 
         if let Ok(value) = env::var("APP_LLAMACPP_GPU_LAYERS") {
             if let Ok(parsed) = value.parse::<i32>() {
-                cfg.llamacpp_gpu_layers = parsed.max(-1);
+                self.llamacpp_gpu_layers = parsed.max(-1);
             }
         }
 
         if let Ok(value) = env::var("APP_LLAMACPP_EXTRA_ARGS") {
             if !value.trim().is_empty() {
-                cfg.llamacpp_extra_args = parse_shell_args(&value).unwrap_or_else(|| {
+                self.llamacpp_extra_args = parse_shell_args(&value).unwrap_or_else(|| {
                     value
                         .split_whitespace()
                         .map(ToString::to_string)
@@ -239,132 +251,132 @@ impl AppConfig {
         if let Ok(value) = env::var("APP_OLLAMA_BASE_URL") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
-                cfg.ollama_base_url = trimmed.to_string();
+                self.ollama_base_url = trimmed.to_string();
             }
         }
 
         if let Ok(value) = env::var("APP_OLLAMA_TIMEOUT_SECS") {
             if let Ok(seconds) = value.parse::<u64>() {
-                cfg.ollama_timeout = Duration::from_secs(seconds.max(1));
+                self.ollama_timeout = Duration::from_secs(seconds.max(1));
             }
         }
 
         if let Ok(value) = env::var("APP_OLLAMA_STARTUP_TIMEOUT_SECS") {
             if let Ok(seconds) = value.parse::<u64>() {
-                cfg.ollama_startup_timeout = Duration::from_secs(seconds.max(2));
+                self.ollama_startup_timeout = Duration::from_secs(seconds.max(2));
             }
         }
 
         if let Ok(value) = env::var("APP_OLLAMA_AUTO_START") {
-            cfg.ollama_auto_start = parse_bool(&value, cfg.ollama_auto_start);
+            self.ollama_auto_start = parse_bool(&value, self.ollama_auto_start);
         }
 
         if let Ok(value) = env::var("APP_OLLAMA_AUTO_INSTALL") {
-            cfg.ollama_auto_install = parse_bool(&value, cfg.ollama_auto_install);
+            self.ollama_auto_install = parse_bool(&value, self.ollama_auto_install);
         }
 
         if let Ok(value) = env::var("APP_REMOTE_DOWNLOADS_DIR") {
             if !value.trim().is_empty() {
-                cfg.remote_downloads_dir = PathBuf::from(value);
+                self.remote_downloads_dir = PathBuf::from(value);
             }
         }
 
         if let Ok(value) = env::var("APP_HF_API_BASE") {
             if !value.trim().is_empty() {
-                cfg.hf_api_base = value;
+                self.hf_api_base = value;
             }
         }
 
         if let Ok(value) = env::var("APP_HF_TOKEN") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
-                cfg.hf_token = Some(trimmed.to_string());
+                self.hf_token = Some(trimmed.to_string());
             }
         }
 
         if let Ok(value) = env::var("APP_BRAVE_API_KEY") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
-                cfg.brave_api_key = Some(trimmed.to_string());
+                self.brave_api_key = Some(trimmed.to_string());
             }
         } else if let Ok(value) = env::var("BRAVE_API_KEY") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
-                cfg.brave_api_key = Some(trimmed.to_string());
+                self.brave_api_key = Some(trimmed.to_string());
             }
         }
 
         if let Ok(value) = env::var("APP_CATALOG_SEARCH_LIMIT") {
             if let Ok(parsed) = value.parse::<usize>() {
-                cfg.catalog_search_limit = parsed.clamp(1, 40);
+                self.catalog_search_limit = parsed.clamp(1, 40);
             }
         }
 
         if let Ok(value) = env::var("APP_CATALOG_DOWNLOAD_TIMEOUT_SECS") {
             if let Ok(seconds) = value.parse::<u64>() {
-                cfg.catalog_download_timeout = Duration::from_secs(seconds.max(30));
+                self.catalog_download_timeout = Duration::from_secs(seconds.max(30));
             }
         }
 
         if let Ok(value) = env::var("APP_OPENCLAW_NODE_COMMAND") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
-                cfg.openclaw_node_command = trimmed.to_string();
+                self.openclaw_node_command = trimmed.to_string();
             }
         }
 
         if let Ok(value) = env::var("APP_OPENCLAW_CLI_PATH") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
-                cfg.openclaw_cli_path = PathBuf::from(trimmed);
+                self.openclaw_cli_path = PathBuf::from(trimmed);
             }
         }
 
         if let Ok(value) = env::var("APP_OPENCLAW_STATE_DIR") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
-                cfg.openclaw_state_dir = PathBuf::from(trimmed);
+                self.openclaw_state_dir = PathBuf::from(trimmed);
             }
         }
 
         if let Ok(value) = env::var("APP_OPENCLAW_GATEWAY_TOKEN") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
-                cfg.openclaw_gateway_token = trimmed.to_string();
+                self.openclaw_gateway_token = trimmed.to_string();
             }
         }
 
         if let Ok(value) = env::var("APP_OPENCLAW_SESSION_KEY") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
-                cfg.openclaw_session_key = trimmed.to_string();
+                self.openclaw_session_key = trimmed.to_string();
             }
         }
 
         if let Ok(value) = env::var("APP_OPENCLAW_TIMEOUT_SECS") {
             if let Ok(seconds) = value.parse::<u64>() {
-                cfg.openclaw_timeout = Duration::from_secs(seconds.max(5));
+                self.openclaw_timeout = Duration::from_secs(seconds.max(5));
             }
         }
 
         if let Ok(value) = env::var("APP_OPENCLAW_GATEWAY_LOG") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
-                cfg.openclaw_gateway_log = PathBuf::from(trimmed);
+                self.openclaw_gateway_log = PathBuf::from(trimmed);
             }
         }
 
         if let Ok(value) = env::var("APP_OPENCLAW_ERROR_LOG") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
-                cfg.openclaw_error_log = PathBuf::from(trimmed);
+                self.openclaw_error_log = PathBuf::from(trimmed);
             }
         }
 
         if let Ok(value) = env::var("APP_OPENCLAW_SYNC_LOG") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
-                cfg.openclaw_sync_log = PathBuf::from(trimmed);
+                self.openclaw_sync_log = PathBuf::from(trimmed);
             }
         }
 
