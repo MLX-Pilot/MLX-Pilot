@@ -2775,6 +2775,184 @@ function addOpenClawChatMessage(role, content, meta = "") {
   openclawChatLog.scrollTop = openclawChatLog.scrollHeight;
 }
 
+function createOpenClawAssistantStreamCard() {
+  const node = assistantStreamTemplate.content.firstElementChild.cloneNode(true);
+  node.classList.add("role-assistant");
+
+  const ui = {
+    node,
+    stateLabel: node.querySelector(".assistant-state-label"),
+    typingIndicator: node.querySelector(".typing-indicator"),
+    thinkingSection: node.querySelector(".assistant-thinking"),
+    thinkingText: node.querySelector(".assistant-thinking-text"),
+    answerSection: node.querySelector(".assistant-answer"),
+    answerText: node.querySelector(".assistant-answer-text"),
+    metricsSection: node.querySelector(".assistant-metrics"),
+    metricsText: node.querySelector(".assistant-metrics-text"),
+    finalAnswer: "",
+    thinkingQueue: "",
+    answerQueue: "",
+    flushTimer: null,
+  };
+
+  openclawChatLog.appendChild(node);
+  openclawChatLog.scrollTop = openclawChatLog.scrollHeight;
+  return ui;
+}
+
+function setOpenClawAssistantState(ui, status) {
+  const labels = {
+    waiting: "aguardando modelo",
+    thinking: "thinking",
+    answering: "respondendo",
+    completed: "finalizado",
+    error: "erro",
+  };
+  ui.stateLabel.textContent = labels[status] || status;
+  ui.typingIndicator.classList.toggle("hidden", status !== "waiting");
+  if (status === "thinking") {
+    ui.thinkingSection.classList.remove("hidden");
+  }
+  if (status === "answering" || status === "completed") {
+    ui.answerSection.classList.remove("hidden");
+  }
+}
+
+function flushOpenClawAssistantQueues(ui) {
+  let changed = false;
+
+  if (ui.thinkingQueue.length) {
+    const chunk = ui.thinkingQueue.slice(0, STREAM_CHARS_PER_TICK);
+    ui.thinkingQueue = ui.thinkingQueue.slice(chunk.length);
+    ui.thinkingSection.classList.remove("hidden");
+    ui.thinkingText.textContent += chunk;
+    changed = true;
+  }
+
+  if (ui.answerQueue.length) {
+    const chunk = ui.answerQueue.slice(0, STREAM_CHARS_PER_TICK);
+    ui.answerQueue = ui.answerQueue.slice(chunk.length);
+    ui.answerSection.classList.remove("hidden");
+    ui.answerText.textContent += chunk;
+    ui.finalAnswer = ui.answerText.textContent;
+    changed = true;
+  }
+
+  if (changed) {
+    openclawChatLog.scrollTop = openclawChatLog.scrollHeight;
+  }
+
+  if (!ui.thinkingQueue.length && !ui.answerQueue.length && ui.flushTimer !== null) {
+    window.clearInterval(ui.flushTimer);
+    ui.flushTimer = null;
+  }
+}
+
+function scheduleOpenClawAssistantFlush(ui) {
+  if (ui.flushTimer !== null) {
+    return;
+  }
+  ui.flushTimer = window.setInterval(() => {
+    flushOpenClawAssistantQueues(ui);
+  }, STREAM_TICK_MS);
+}
+
+async function waitForOpenClawAssistantFlush(ui) {
+  if (!ui.thinkingQueue.length && !ui.answerQueue.length && ui.flushTimer === null) {
+    return;
+  }
+  await new Promise((resolve) => {
+    const pollTimer = window.setInterval(() => {
+      if (!ui.thinkingQueue.length && !ui.answerQueue.length && ui.flushTimer === null) {
+        window.clearInterval(pollTimer);
+        resolve();
+      }
+    }, STREAM_TICK_MS);
+  });
+}
+
+function appendOpenClawThinking(ui, delta) {
+  if (!delta) {
+    return;
+  }
+  ui.thinkingQueue += delta;
+  scheduleOpenClawAssistantFlush(ui);
+}
+
+function appendOpenClawAnswer(ui, delta) {
+  if (!delta) {
+    return;
+  }
+  ui.answerQueue += delta;
+  scheduleOpenClawAssistantFlush(ui);
+}
+
+function sanitizeAgentReplyText(rawReply) {
+  const text = String(rawReply || "").replace(/\r/g, "");
+  const filtered = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .filter((line) => !/^={4,}$/.test(line))
+    .filter((line) => !/^Prompt:\s/i.test(line))
+    .filter((line) => !/^Generation:\s/i.test(line))
+    .filter((line) => !/^Peak memory:\s/i.test(line))
+    .filter((line) => !/^completed\s*•/i.test(line))
+    .filter((line) => !/tokens-per-sec/i.test(line));
+  return filtered.join("\n").trim();
+}
+
+function normalizeAgentReplySplit(split) {
+  const thinking = String(split?.thinking || "").trim();
+  const answer = String(split?.answer || "").trim();
+  if (!answer && thinking) {
+    return { thinking: "", answer: thinking };
+  }
+  return { thinking, answer };
+}
+
+function renderOpenClawAssistantMeta(ui, response) {
+  const lines = [];
+  if (response?.status) {
+    lines.push(`Status: ${response.status}`);
+  }
+  if (response?.summary) {
+    lines.push(response.summary);
+  }
+  if (response?.duration_ms != null) {
+    lines.push(`Latencia: ${response.duration_ms} ms`);
+  }
+  if (response?.run_id) {
+    lines.push(`Run: ${response.run_id}`);
+  }
+  if (response?.provider || response?.model) {
+    lines.push(`Modelo: ${response.provider || "-"} • ${response.model || "-"}`);
+  }
+
+  const usage = response?.usage || {};
+  const promptTokens = usage.prompt ?? usage.prompt_tokens ?? usage.input;
+  const completionTokens = usage.completion ?? usage.completion_tokens ?? usage.output;
+  const totalTokens = usage.total ?? usage.total_tokens;
+  const usageLine = [
+    promptTokens != null ? `Prompt ${promptTokens}` : "",
+    completionTokens != null ? `Generation ${completionTokens}` : "",
+    totalTokens != null ? `Total ${totalTokens}` : "",
+  ]
+    .filter(Boolean)
+    .join(" • ");
+  if (usageLine) {
+    lines.push(usageLine);
+  }
+
+  if (!lines.length) {
+    return;
+  }
+
+  ui.metricsSection.classList.remove("hidden");
+  ui.metricsText.textContent = lines.join("\n");
+  openclawChatLog.scrollTop = openclawChatLog.scrollHeight;
+}
+
 function setOpenClawSendingState(nextState) {
   openclawChatInFlight = nextState;
   openclawSendBtn.disabled = nextState;
@@ -2899,17 +3077,29 @@ async function sendOpenClawMessage() {
       body: JSON.stringify({ message }),
     });
 
-    const reply = response.reply?.trim() || "(sem resposta textual)";
-    const meta = [
-      response.status || "",
-      response.summary || "",
-      response.duration_ms != null ? `${response.duration_ms} ms` : "",
-      response.run_id ? `run ${response.run_id}` : "",
-    ]
-      .filter(Boolean)
-      .join(" • ");
+    const streamUi = createOpenClawAssistantStreamCard();
+    setOpenClawAssistantState(streamUi, "waiting");
+    const sanitizedReply = sanitizeAgentReplyText(response.reply || "");
+    const split = normalizeAgentReplySplit(splitThinkingAndAnswer(sanitizedReply));
 
-    addOpenClawChatMessage("assistant", reply, meta);
+    if (split.thinking) {
+      setOpenClawAssistantState(streamUi, "thinking");
+      appendOpenClawThinking(streamUi, split.thinking);
+    }
+
+    if (split.answer) {
+      setOpenClawAssistantState(streamUi, "answering");
+      appendOpenClawAnswer(streamUi, split.answer);
+    }
+
+    if (!split.thinking && !split.answer) {
+      setOpenClawAssistantState(streamUi, "answering");
+      appendOpenClawAnswer(streamUi, "(sem resposta textual)");
+    }
+
+    await waitForOpenClawAssistantFlush(streamUi);
+    setOpenClawAssistantState(streamUi, "completed");
+    renderOpenClawAssistantMeta(streamUi, response);
     updateOpenClawObservability(response);
     setStatus(`${activeAgentLabel().toLowerCase()} respondeu`);
   } catch (error) {
