@@ -466,14 +466,28 @@
         <div id="bg-canvas"></div>
 
         <div class="ai-interaction-ui glass">
-          <p class="chat-eyebrow">Playground</p>
-          <h2>Particulas Dinamicas</h2>
-          <p class="meta-note">Digite um texto abaixo para a IA montar visualmente nas particulas flutuantes.</p>
-          <div style="display: flex; gap: 8px; margin-top: 16px;">
-            <input id="ai-particle-input" class="input" placeholder="Ex: HELLO" maxlength="10"
-              style="text-transform: uppercase;">
-            <button id="ai-particle-btn" class="primary-btn">Enviar</button>
+          <p class="chat-eyebrow">Interacao Visual</p>
+          <h2>IA em Particulas</h2>
+          <p class="meta-note">Pergunte normalmente. A resposta vira animacao por setas, numeros, formas e etapas.</p>
+
+          <textarea id="ai-particle-input" class="input ai-scene-input" rows="2"
+            placeholder="Ex: Voce sabe como se faz o calculo de baskara?"></textarea>
+
+          <div class="ai-scene-actions">
+            <button id="ai-particle-btn" class="primary-btn">Animar resposta</button>
+            <button id="ai-particle-stop-btn" class="ghost-btn" type="button">Parar cena</button>
           </div>
+
+          <p id="ai-scene-status" class="meta-note">Pronto para montar uma cena.</p>
+
+          <div class="ai-scene-examples">
+            <button type="button" class="ghost-btn ai-scene-example-btn"
+              data-prompt="Voce sabe como se faz o calculo de baskara?">Exemplo Baskara</button>
+            <button type="button" class="ghost-btn ai-scene-example-btn"
+              data-prompt="Consegue me mostrar como voce imagina a expansao de Satoru Gojo?">Exemplo Gojo</button>
+          </div>
+
+          <ul id="ai-scene-steps" class="ai-scene-steps"></ul>
         </div>
       </section>
 
