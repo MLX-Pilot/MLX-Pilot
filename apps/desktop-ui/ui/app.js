@@ -146,6 +146,12 @@ const checkNanobotStatusBtn = document.getElementById("check-nanobot-status-btn"
 const initNanobotBtn = document.getElementById("init-nanobot-btn");
 const nanobotStatusFeedback = document.getElementById("nanobot-status-feedback");
 const nanobotStatusOutput = document.getElementById("nanobot-status-output");
+const refreshOpenclawEnvBtn = document.getElementById("refresh-openclaw-env-btn");
+const saveOpenclawEnvBtn = document.getElementById("save-openclaw-env-btn");
+const revealOpenclawEnvToggle = document.getElementById("reveal-openclaw-env");
+const openclawEnvFeedback = document.getElementById("openclaw-env-feedback");
+const openclawEnvPath = document.getElementById("openclaw-env-path");
+const openclawEnvList = document.getElementById("openclaw-env-list");
 
 let daemonBaseUrl = localStorage.getItem(STORAGE_DAEMON_URL) || "http://127.0.0.1:11435";
 let selectedModelId = null;
@@ -189,6 +195,7 @@ let openclawLogCursor = 0;
 let openclawRuntimeActionInFlight = false;
 let openclawSelectedViews = new Set(["chat"]);
 let openclawMultiView = false;
+let openclawEnvironmentInFlight = false;
 let openclawModelsCatalog = {
   cloud_models: [],
   local_models: [],
@@ -3553,6 +3560,7 @@ async function loadConfig() {
     const activeFramework = cfg.active_agent_framework === "nanobot" ? "nanobot" : "openclaw";
     applyAgentFramework(activeFramework, { syncRadio: true, refreshPanel: false });
     await loadOpenclawInstallStatus({ showLoading: false });
+    await loadOpenclawEnvironment({ showLoading: false });
 
   } catch (err) {
     console.error("Failed to load config from backend", err);
@@ -3697,6 +3705,186 @@ async function loadOpenclawInstallStatus({ showLoading = true, syncInstallFeedba
     if (checkOpenclawStatusBtn) {
       checkOpenclawStatusBtn.disabled = openclawInstallInFlight;
     }
+  }
+}
+
+function formatOpenclawEnvironmentSource(source) {
+  if (source === "env_file") {
+    return "arquivo";
+  }
+  if (source === "process_env") {
+    return "processo";
+  }
+  if (source === "env_example") {
+    return "exemplo";
+  }
+  return "catalogo";
+}
+
+function setOpenclawEnvironmentButtonsDisabled(disabled) {
+  if (refreshOpenclawEnvBtn) {
+    refreshOpenclawEnvBtn.disabled = disabled;
+  }
+  if (saveOpenclawEnvBtn) {
+    saveOpenclawEnvBtn.disabled = disabled;
+  }
+}
+
+function setOpenclawEnvironmentInputVisibility() {
+  if (!openclawEnvList) {
+    return;
+  }
+  const reveal = revealOpenclawEnvToggle?.checked ?? true;
+  openclawEnvList.querySelectorAll("input[data-env-key]").forEach((input) => {
+    input.type = reveal ? "text" : "password";
+  });
+}
+
+function renderOpenclawEnvironment(payload) {
+  if (!openclawEnvList) {
+    return;
+  }
+
+  const variables = Array.isArray(payload?.variables) ? payload.variables : [];
+  if (openclawEnvPath) {
+    const path = payload?.env_path || "-";
+    const envBadge = payload?.env_exists ? "ok" : "faltando";
+    const examplePath = payload?.env_example_path || "-";
+    const exampleBadge = payload?.env_example_exists ? "ok" : "faltando";
+    openclawEnvPath.textContent = `env: ${path} (${envBadge}) • exemplo: ${examplePath} (${exampleBadge})`;
+  }
+
+  openclawEnvList.innerHTML = "";
+  if (!variables.length) {
+    const empty = document.createElement("p");
+    empty.className = "meta-note";
+    empty.textContent = "Nenhuma variavel de API encontrada.";
+    openclawEnvList.appendChild(empty);
+    return;
+  }
+
+  variables.forEach((entry) => {
+    const item = document.createElement("article");
+    item.className = "openclaw-env-item";
+
+    const head = document.createElement("div");
+    head.className = "openclaw-env-head";
+
+    const keyNode = document.createElement("p");
+    keyNode.className = "openclaw-env-key";
+    keyNode.textContent = entry.key || "-";
+
+    const sourceNode = document.createElement("span");
+    sourceNode.className = "openclaw-env-source";
+    sourceNode.textContent = formatOpenclawEnvironmentSource(entry.source);
+
+    head.appendChild(keyNode);
+    head.appendChild(sourceNode);
+    item.appendChild(head);
+
+    const input = document.createElement("input");
+    input.className = "input";
+    input.dataset.envKey = entry.key || "";
+    input.value = entry.value || "";
+    input.placeholder = entry.masked && entry.masked !== "-" ? entry.masked : "";
+    input.type = (revealOpenclawEnvToggle?.checked ?? true) ? "text" : "password";
+    input.autocomplete = "off";
+    item.appendChild(input);
+
+    const meta = document.createElement("p");
+    meta.className = "openclaw-env-meta";
+    const status = entry.present ? "configurado" : "vazio";
+    meta.textContent = `${entry.label || entry.key || "-"} • ${status}`;
+    item.appendChild(meta);
+
+    openclawEnvList.appendChild(item);
+  });
+}
+
+async function loadOpenclawEnvironment({ showLoading = true } = {}) {
+  if (!openclawEnvList || openclawEnvironmentInFlight) {
+    return null;
+  }
+
+  openclawEnvironmentInFlight = true;
+  setOpenclawEnvironmentButtonsDisabled(true);
+
+  if (showLoading && openclawEnvFeedback) {
+    openclawEnvFeedback.textContent = "Carregando environment...";
+  }
+
+  try {
+    const payload = await fetchJson("/openclaw/environment?reveal=true", { method: "GET" });
+    renderOpenclawEnvironment(payload);
+    if (openclawEnvFeedback) {
+      const count = Array.isArray(payload?.variables) ? payload.variables.length : 0;
+      openclawEnvFeedback.textContent = `Environment carregado (${count} variaveis).`;
+    }
+    setOpenclawEnvironmentInputVisibility();
+    return payload;
+  } catch (error) {
+    if (openclawEnvFeedback) {
+      openclawEnvFeedback.textContent = `Falha ao carregar environment: ${error.message}`;
+    }
+    return null;
+  } finally {
+    openclawEnvironmentInFlight = false;
+    setOpenclawEnvironmentButtonsDisabled(false);
+  }
+}
+
+function collectOpenclawEnvironmentValues() {
+  const values = {};
+  if (!openclawEnvList) {
+    return values;
+  }
+
+  openclawEnvList.querySelectorAll("input[data-env-key]").forEach((input) => {
+    const key = (input.dataset.envKey || "").trim();
+    if (!key) {
+      return;
+    }
+    values[key] = input.value || "";
+  });
+  return values;
+}
+
+async function saveOpenclawEnvironment() {
+  if (!openclawEnvList || openclawEnvironmentInFlight) {
+    return;
+  }
+
+  const values = collectOpenclawEnvironmentValues();
+  if (!Object.keys(values).length) {
+    if (openclawEnvFeedback) {
+      openclawEnvFeedback.textContent = "Nenhuma variavel disponivel para salvar.";
+    }
+    return;
+  }
+
+  openclawEnvironmentInFlight = true;
+  setOpenclawEnvironmentButtonsDisabled(true);
+  if (openclawEnvFeedback) {
+    openclawEnvFeedback.textContent = "Salvando environment...";
+  }
+
+  try {
+    await fetchJson("/openclaw/environment", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values }),
+    });
+    if (openclawEnvFeedback) {
+      openclawEnvFeedback.textContent = "Environment salvo e sincronizado com o NanoBot.";
+    }
+    await loadOpenclawEnvironment({ showLoading: false });
+  } catch (error) {
+    if (openclawEnvFeedback) {
+      openclawEnvFeedback.textContent = `Falha ao salvar environment: ${error.message}`;
+    }
+  } finally {
+    openclawEnvironmentInFlight = false;
+    setOpenclawEnvironmentButtonsDisabled(false);
   }
 }
 
@@ -3857,6 +4045,24 @@ if (checkNanobotStatusBtn) {
 if (initNanobotBtn) {
   initNanobotBtn.addEventListener("click", () => {
     void runNanobotOnboard();
+  });
+}
+
+if (refreshOpenclawEnvBtn) {
+  refreshOpenclawEnvBtn.addEventListener("click", () => {
+    void loadOpenclawEnvironment();
+  });
+}
+
+if (saveOpenclawEnvBtn) {
+  saveOpenclawEnvBtn.addEventListener("click", () => {
+    void saveOpenclawEnvironment();
+  });
+}
+
+if (revealOpenclawEnvToggle) {
+  revealOpenclawEnvToggle.addEventListener("change", () => {
+    setOpenclawEnvironmentInputVisibility();
   });
 }
 

@@ -468,6 +468,22 @@
               <pre id="nanobot-status-output" class="openclaw-log-viewer" style="max-height: 220px; margin-top: 8px;">-</pre>
             </section>
           </div>
+
+          <section id="environment-settings-group" class="settings-controls glass">
+            <h3>Environment e Secrets (OpenClaw + NanoBot)</h3>
+            <p class="meta-note">Gerencie chaves e tokens usados pelo OpenClaw e sincronizados com o NanoBot cloud.</p>
+            <div class="openclaw-config-actions" style="margin-top: 12px;">
+              <button id="refresh-openclaw-env-btn" type="button" class="ghost-btn">Atualizar environment</button>
+              <button id="save-openclaw-env-btn" type="button" class="primary-btn">Salvar environment</button>
+              <label class="openclaw-multi-toggle">
+                <input id="reveal-openclaw-env" type="checkbox" checked />
+                Mostrar valores reais
+              </label>
+            </div>
+            <p id="openclaw-env-feedback" class="meta-note mt-2" style="margin-top: 8px;">-</p>
+            <p id="openclaw-env-path" class="meta-note mt-2" style="margin-top: 8px;">-</p>
+            <div id="openclaw-env-list" class="openclaw-env-grid"></div>
+          </section>
         </div>
       </section>
 
