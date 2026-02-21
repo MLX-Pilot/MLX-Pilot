@@ -108,11 +108,58 @@ img {
   z-index: 10;
   padding: 32px;
   border-radius: var(--radius-xl);
-  max-width: 500px;
+  max-width: 720px;
   width: 100%;
-  text-align: center;
+  text-align: left;
   margin-top: auto;
   margin-bottom: 24px;
+}
+
+.ai-scene-input {
+  margin-top: 14px;
+  min-height: 64px;
+  resize: vertical;
+}
+
+.ai-scene-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.ai-scene-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.ai-scene-example-btn {
+  font-size: 0.8rem;
+}
+
+.ai-scene-steps {
+  margin-top: 12px;
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-scene-step {
+  border: 1px solid rgba(106, 183, 255, 0.3);
+  background: rgba(16, 40, 72, 0.35);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  color: #d7edff;
+}
+
+.ai-scene-step.active {
+  border-color: rgba(121, 219, 255, 0.9);
+  background: rgba(22, 87, 143, 0.5);
 }
 
 .bg-a {
@@ -1459,6 +1506,55 @@ textarea:focus {
 
 .openclaw-config-actions button {
   flex: 1 1 180px;
+}
+
+.openclaw-env-grid {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+}
+
+.openclaw-env-item {
+  border: 1px solid rgba(112, 151, 216, 0.2);
+  border-radius: 10px;
+  background: rgba(7, 15, 27, 0.72);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.openclaw-env-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.openclaw-env-key {
+  margin: 0;
+  font-family: "IBM Plex Mono", monospace;
+  color: #deebf7;
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+
+.openclaw-env-source {
+  border: 1px solid rgba(136, 182, 231, 0.24);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #bdd8f5;
+  background: rgba(20, 44, 73, 0.75);
+}
+
+.openclaw-env-meta {
+  margin: 0;
+  color: #8caec8;
+  font-size: 0.72rem;
+  line-height: 1.3;
 }
 
 .openclaw-message-meta {

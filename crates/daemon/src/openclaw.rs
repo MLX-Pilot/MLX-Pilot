@@ -85,10 +85,14 @@ impl OpenClawRuntime {
     }
 
     pub async fn status(&self) -> OpenClawStatusResponse {
+        let cli_exists = self.cfg.cli_path.exists();
+        let state_dir_exists = self.cfg.state_dir.exists();
         let mut response = OpenClawStatusResponse {
             available: false,
             cli_path: self.cfg.cli_path.display().to_string(),
+            cli_exists,
             state_dir: self.cfg.state_dir.display().to_string(),
+            state_dir_exists,
             session_key: self.cfg.session_key.clone(),
             gateway_log: self.cfg.gateway_log.display().to_string(),
             error_log: self.cfg.error_log.display().to_string(),
@@ -97,7 +101,7 @@ impl OpenClawRuntime {
             error: None,
         };
 
-        if !self.cfg.cli_path.exists() {
+        if !cli_exists {
             response.error = Some(format!(
                 "openclaw cli nao encontrado em {}",
                 self.cfg.cli_path.display()
@@ -1458,7 +1462,9 @@ pub struct OpenClawLogChunkResponse {
 pub struct OpenClawStatusResponse {
     pub available: bool,
     pub cli_path: String,
+    pub cli_exists: bool,
     pub state_dir: String,
+    pub state_dir_exists: bool,
     pub session_key: String,
     pub gateway_log: String,
     pub error_log: String,
