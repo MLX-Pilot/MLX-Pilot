@@ -52,11 +52,94 @@ pub trait ApprovalService: Send + Sync {
         timeout: Duration,
     ) -> Result<ApprovalDecision, ApprovalError>;
 
+    /// Resolve a pending approval. Called by the API endpoint (`/agent/approve`).
+    async fn resolve(&self, id: &str, decision: ApprovalDecision) -> Result<(), ApprovalError>;
+
     /// Check if a pattern is in the persistent allowlist.
     fn is_allowed(&self, tool_name: &str, params_pattern: &str) -> bool;
 
     /// Add a pattern to the persistent allowlist.
     fn add_allowlist_entry(&self, tool_name: &str, pattern: String);
+}
+
+/// A concrete implementation of `ApprovalService`.
+pub struct DefaultApprovalService {
+    // Pending requests waiting for user decision.
+    pending: tokio::sync::Mutex<
+        std::collections::HashMap<String, tokio::sync::oneshot::Sender<ApprovalDecision>>,
+    >,
+    // Persistent allowlist (tool_name -> Vec<pattern>)
+    allowlist: std::sync::RwLock<std::collections::HashMap<String, Vec<String>>>,
+}
+
+impl DefaultApprovalService {
+    pub fn new() -> Self {
+        Self {
+            pending: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            allowlist: std::sync::RwLock::new(std::collections::HashMap::new()),
+        }
+    }
+}
+
+impl Default for DefaultApprovalService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait::async_trait]
+impl ApprovalService for DefaultApprovalService {
+    async fn request_approval(
+        &self,
+        request: ApprovalRequest,
+        timeout: Duration,
+    ) -> Result<ApprovalDecision, ApprovalError> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        {
+            let mut pending = self.pending.lock().await;
+            pending.insert(request.id.clone(), tx);
+        }
+
+        match tokio::time::timeout(timeout, rx).await {
+            Ok(Ok(decision)) => Ok(decision),
+            Ok(Err(_)) => Err(ApprovalError::Unavailable),
+            Err(_) => {
+                let mut pending = self.pending.lock().await;
+                pending.remove(&request.id);
+                Err(ApprovalError::Timeout(timeout))
+            }
+        }
+    }
+
+    async fn resolve(&self, id: &str, decision: ApprovalDecision) -> Result<(), ApprovalError> {
+        let mut pending = self.pending.lock().await;
+        if let Some(sender) = pending.remove(id) {
+            let _ = sender.send(decision);
+            Ok(())
+        } else {
+            Err(ApprovalError::NotFound { id: id.to_string() })
+        }
+    }
+
+    fn is_allowed(&self, tool_name: &str, params_pattern: &str) -> bool {
+        if let Ok(allowlist) = self.allowlist.read() {
+            if let Some(patterns) = allowlist.get(tool_name) {
+                return patterns.iter().any(|p| p == params_pattern || p == "*");
+            }
+        }
+        false
+    }
+
+    fn add_allowlist_entry(&self, tool_name: &str, pattern: String) {
+        if let Ok(mut allowlist) = self.allowlist.write() {
+            let patterns = allowlist.entry(tool_name.to_string()).or_default();
+            if !patterns.contains(&pattern) {
+                patterns.push(pattern);
+                // TODO: Persist to allowlist.json
+            }
+        }
+    }
 }
 
 #[cfg(test)]

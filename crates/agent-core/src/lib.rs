@@ -10,6 +10,7 @@ pub mod audit;
 pub mod events;
 pub mod policy;
 pub mod registry;
+pub mod runtime;
 pub mod session;
 
 // Re-exports for convenience.

@@ -3,6 +3,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use tokio::io::AsyncWriteExt;
 
 /// A single audit log entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,10 +49,29 @@ impl AuditLog {
     }
 
     /// Write an entry to today's log file.
-    ///
-    /// Stub — will be implemented in Phase 3.
-    pub async fn write(&self, _entry: &AuditLogEntry) -> Result<(), std::io::Error> {
-        // TODO: serialize to JSONL and append to date-stamped file.
+    pub async fn write(&self, entry: &AuditLogEntry) -> Result<(), std::io::Error> {
+        let date = entry.timestamp.format("%Y-%m-%d").to_string();
+        let filename = format!("{}.jsonl", date);
+        let path = self.log_dir.join(filename);
+
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+
+        let mut file = tokio::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .await?;
+
+        let mut json = serde_json::to_string(entry).unwrap_or_default();
+        if json.is_empty() {
+            return Ok(());
+        }
+        json.push('\n');
+
+        file.write_all(json.as_bytes()).await?;
+
         Ok(())
     }
 }

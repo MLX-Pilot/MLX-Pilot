@@ -53,6 +53,8 @@ pub struct AgentRunRequest {
 #[derive(Debug, Serialize)]
 pub struct AgentRunResponse {
     pub session_id: String,
+    pub audit_id: Option<String>,
+    #[serde(rename = "final_response")]
     pub content: String,
     pub iterations: usize,
     pub tool_calls_made: usize,
@@ -76,6 +78,14 @@ impl IntoResponse for AgentApiError {
     }
 }
 
+/// POST /agent/approve request body.
+#[derive(Debug, Deserialize)]
+pub struct AgentApproveRequest {
+    pub id: String,
+    #[serde(flatten)]
+    pub decision: ApprovalDecision,
+}
+
 // ── State types ──────────────────────────────────────────────────
 
 /// Agent-specific state, held inside AppState.
@@ -87,56 +97,6 @@ pub struct AgentState {
     pub approval: Arc<dyn ApprovalService>,
     pub event_bus: Arc<EventBus>,
     pub audit: Arc<AuditLog>,
-}
-
-// ── Default policy / approval stubs ──────────────────────────────
-
-/// Allow-all policy (Phase 3 will add real enforcement).
-pub struct DefaultPolicy;
-
-#[async_trait::async_trait]
-impl PolicyEngine for DefaultPolicy {
-    async fn check_tool_call(
-        &self,
-        _tool_name: &str,
-        _params: &serde_json::Value,
-        _skill: Option<&mlx_agent_skills::SkillPackage>,
-        _mode: ExecutionMode,
-    ) -> PolicyDecision {
-        PolicyDecision::Allow
-    }
-
-    async fn check_skill_load(&self, _skill: &mlx_agent_skills::SkillPackage) -> PolicyDecision {
-        PolicyDecision::Allow
-    }
-
-    fn check_file_access(&self, _path: &std::path::Path, _write: bool) -> PolicyDecision {
-        PolicyDecision::Allow
-    }
-
-    fn check_network(&self, _url: &str, _method: &str) -> PolicyDecision {
-        PolicyDecision::Allow
-    }
-}
-
-/// Auto-approve all requests (Phase 3/4 will bridge to Tauri UI).
-pub struct AutoApproval;
-
-#[async_trait::async_trait]
-impl ApprovalService for AutoApproval {
-    async fn request_approval(
-        &self,
-        _request: ApprovalRequest,
-        _timeout: Duration,
-    ) -> Result<ApprovalDecision, ApprovalError> {
-        Ok(ApprovalDecision::AllowOnce)
-    }
-
-    fn is_allowed(&self, _tool_name: &str, _params_pattern: &str) -> bool {
-        true
-    }
-
-    fn add_allowlist_entry(&self, _tool_name: &str, _pattern: String) {}
 }
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -196,7 +156,7 @@ pub async fn agent_run(
 
     let config = AgentLoopConfig {
         model_id: model_id.clone(),
-        workspace_root: workspace,
+        workspace_root: workspace.clone(),
         system_prompt: request.system_prompt.clone(),
         max_iterations: request.max_iterations.unwrap_or(25),
         max_tokens_per_turn: 4096,
@@ -211,10 +171,14 @@ pub async fn agent_run(
         "starting agent run"
     );
 
+    let mut skill_runtime = mlx_agent_core::runtime::SkillRuntime::new();
+    skill_runtime.load_from_workspace(&workspace).await;
+
     let mut agent = AgentLoop::new(
         config,
         provider,
         ToolRegistry::with_builtins(),
+        skill_runtime,
         state.agent_state.policy.clone(),
         state.agent_state.approval.clone(),
         state.agent_state.event_bus.clone(),
@@ -232,9 +196,10 @@ pub async fn agent_run(
                 latency_ms = response.latency_ms,
                 "agent run completed"
             );
-
+            let audit_id = response.session_id.clone();
             Ok(Json(AgentRunResponse {
                 session_id: response.session_id,
+                audit_id: Some(audit_id),
                 content: response.content,
                 iterations: response.iterations,
                 tool_calls_made: response.tool_calls_made,
@@ -280,4 +245,23 @@ pub async fn agent_stream(
             "details": "agent streaming will be implemented in Phase 2"
         })),
     )
+}
+
+// ── Approval handler ─────────────────────────────────────────────
+
+pub async fn agent_approve(
+    State(state): State<super::AppState>,
+    Json(payload): Json<AgentApproveRequest>,
+) -> Result<Json<serde_json::Value>, AgentApiError> {
+    state
+        .agent_state
+        .approval
+        .resolve(&payload.id, payload.decision)
+        .await
+        .map_err(|e| AgentApiError {
+            error: "Failed to resolve approval".into(),
+            details: Some(e.to_string()),
+        })?;
+
+    Ok(Json(serde_json::json!({ "status": "ok" })))
 }
