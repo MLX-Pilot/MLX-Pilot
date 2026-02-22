@@ -39,6 +39,19 @@ pub enum ApprovalError {
     Unavailable,
 }
 
+/// Runtime behavior for approval requests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalMode {
+    /// Dangerous actions are auto-approved.
+    Auto,
+    /// Dangerous actions wait for user approval.
+    #[default]
+    Ask,
+    /// Dangerous actions are denied immediately.
+    Deny,
+}
+
 /// Trait for requesting and managing user approvals.
 ///
 /// Concrete implementation will bridge to the Tauri UI via WebSocket
@@ -64,6 +77,7 @@ pub trait ApprovalService: Send + Sync {
 
 /// A concrete implementation of `ApprovalService`.
 pub struct DefaultApprovalService {
+    mode: std::sync::RwLock<ApprovalMode>,
     // Pending requests waiting for user decision.
     pending: tokio::sync::Mutex<
         std::collections::HashMap<String, tokio::sync::oneshot::Sender<ApprovalDecision>>,
@@ -74,10 +88,25 @@ pub struct DefaultApprovalService {
 
 impl DefaultApprovalService {
     pub fn new() -> Self {
+        Self::with_mode(ApprovalMode::Ask)
+    }
+
+    pub fn with_mode(mode: ApprovalMode) -> Self {
         Self {
+            mode: std::sync::RwLock::new(mode),
             pending: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             allowlist: std::sync::RwLock::new(std::collections::HashMap::new()),
         }
+    }
+
+    pub fn set_mode(&self, mode: ApprovalMode) {
+        if let Ok(mut current) = self.mode.write() {
+            *current = mode;
+        }
+    }
+
+    pub fn mode(&self) -> ApprovalMode {
+        self.mode.read().map(|m| *m).unwrap_or(ApprovalMode::Ask)
     }
 }
 
@@ -94,6 +123,12 @@ impl ApprovalService for DefaultApprovalService {
         request: ApprovalRequest,
         timeout: Duration,
     ) -> Result<ApprovalDecision, ApprovalError> {
+        match self.mode() {
+            ApprovalMode::Auto => return Ok(ApprovalDecision::AllowOnce),
+            ApprovalMode::Deny => return Ok(ApprovalDecision::Deny),
+            ApprovalMode::Ask => {}
+        }
+
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         {
@@ -166,5 +201,49 @@ mod tests {
         let once = ApprovalDecision::AllowOnce;
         let json = serde_json::to_string(&once).unwrap();
         assert!(json.contains("allow_once"));
+    }
+
+    #[tokio::test]
+    async fn approval_auto_mode_returns_allow() {
+        let service = DefaultApprovalService::with_mode(ApprovalMode::Auto);
+        let decision = service
+            .request_approval(
+                ApprovalRequest {
+                    id: "id".into(),
+                    skill_name: None,
+                    tool_name: "exec".into(),
+                    description: "desc".into(),
+                    params_summary: "{}".into(),
+                    created_at: Utc::now(),
+                    expires_at: Utc::now(),
+                },
+                Duration::from_secs(1),
+            )
+            .await
+            .unwrap();
+
+        assert!(matches!(decision, ApprovalDecision::AllowOnce));
+    }
+
+    #[tokio::test]
+    async fn approval_deny_mode_returns_deny() {
+        let service = DefaultApprovalService::with_mode(ApprovalMode::Deny);
+        let decision = service
+            .request_approval(
+                ApprovalRequest {
+                    id: "id".into(),
+                    skill_name: None,
+                    tool_name: "exec".into(),
+                    description: "desc".into(),
+                    params_summary: "{}".into(),
+                    created_at: Utc::now(),
+                    expires_at: Utc::now(),
+                },
+                Duration::from_secs(1),
+            )
+            .await
+            .unwrap();
+
+        assert!(matches!(decision, ApprovalDecision::Deny));
     }
 }

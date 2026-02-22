@@ -75,6 +75,9 @@
             <button class="tab-btn" data-tab="openclaw" role="tab" aria-selected="false">
               <span id="agent-tab-label">OpenClaw</span>
             </button>
+            <button class="tab-btn" data-tab="agent" role="tab" aria-selected="false">
+              Agent
+            </button>
             <button class="tab-btn" data-tab="ai-interaction" role="tab" aria-selected="false">
               Interacao IA
             </button>
@@ -328,6 +331,139 @@
             <p id="openclaw-model-current" class="meta-note">Modelo atual: -</p>
             <p id="openclaw-config-feedback" class="meta-note">-</p>
           </article>
+        </section>
+      </section>
+
+      <section id="panel-agent" class="main-panel" role="tabpanel">
+        <header class="agent-header glass">
+          <div>
+            <p class="chat-eyebrow">Agent Runtime</p>
+            <h2>Configuracao completa do agente</h2>
+            <p id="agent-meta" class="meta-note">Provider, skills, tools e policy em uma unica aba.</p>
+          </div>
+          <div class="agent-header-actions">
+            <button id="agent-refresh-btn" class="ghost-btn">Atualizar</button>
+            <button id="agent-save-config-btn" class="primary-btn">Salvar configuracoes</button>
+          </div>
+        </header>
+
+        <section class="agent-grid">
+          <article class="agent-card glass">
+            <h3>Modelo</h3>
+            <label class="field-group">
+              <span>Provider</span>
+              <select id="agent-provider-select" class="input"></select>
+            </label>
+            <label class="field-group">
+              <span>Model</span>
+              <select id="agent-model-select" class="input"></select>
+            </label>
+            <label class="field-group">
+              <span>API Key</span>
+              <input id="agent-api-key-input" class="input" type="password" placeholder="sk-..." autocomplete="off" />
+            </label>
+            <label class="field-group">
+              <span>Base URL</span>
+              <input id="agent-base-url-input" class="input" placeholder="https://..." />
+            </label>
+            <label class="agent-toggle-row">
+              <input id="agent-streaming-toggle" type="checkbox" />
+              <span>Streaming</span>
+            </label>
+            <label class="agent-toggle-row">
+              <input id="agent-fallback-toggle" type="checkbox" />
+              <span>Fallback automatico</span>
+            </label>
+            <label class="field-group">
+              <span>Provider fallback</span>
+              <select id="agent-fallback-provider-select" class="input"></select>
+            </label>
+            <label class="field-group">
+              <span>Model fallback</span>
+              <input id="agent-fallback-model-input" class="input" placeholder="model-id" />
+            </label>
+          </article>
+
+          <article class="agent-card glass">
+            <h3>Execution Mode</h3>
+            <label class="field-group">
+              <span>Modo</span>
+              <select id="agent-execution-mode-select" class="input">
+                <option value="full">Full</option>
+                <option value="read_only">ReadOnly</option>
+                <option value="dry_run">DryRun</option>
+              </select>
+            </label>
+            <label class="field-group">
+              <span>Approval mode</span>
+              <select id="agent-approval-mode-select" class="input">
+                <option value="ask">ask</option>
+                <option value="auto">auto</option>
+                <option value="deny">deny</option>
+              </select>
+            </label>
+            <label class="field-group">
+              <span>Max prompt tokens</span>
+              <input id="agent-max-prompt-input" class="input" type="number" min="256" step="1" />
+            </label>
+            <label class="field-group">
+              <span>Max history messages</span>
+              <input id="agent-max-history-input" class="input" type="number" min="1" step="1" />
+            </label>
+            <label class="field-group">
+              <span>Max tools in prompt</span>
+              <input id="agent-max-tools-input" class="input" type="number" min="1" step="1" />
+            </label>
+            <label class="agent-toggle-row">
+              <input id="agent-aggressive-tools-toggle" type="checkbox" />
+              <span>Aggressive tool filtering</span>
+            </label>
+            <label class="agent-toggle-row">
+              <input id="agent-tool-fallback-toggle" type="checkbox" />
+              <span>Tool-call fallback reprompt</span>
+            </label>
+          </article>
+
+          <article class="agent-card glass">
+            <div class="panel-title-row">
+              <h3>Skills</h3>
+              <button id="agent-reload-skills-btn" class="ghost-btn">Reload</button>
+            </div>
+            <ul id="agent-skills-list" class="agent-toggle-list"></ul>
+          </article>
+
+          <article class="agent-card glass">
+            <h3>Tools</h3>
+            <ul id="agent-tools-list" class="agent-toggle-list"></ul>
+          </article>
+
+          <article class="agent-card glass">
+            <h3>Seguranca</h3>
+            <label class="field-group">
+              <span>Egress allowlist (dominios, separados por virgula)</span>
+              <input id="agent-egress-input" class="input" placeholder="api.github.com,openrouter.ai" />
+            </label>
+            <label class="field-group">
+              <span>Paths sensiveis bloqueados (glob, separados por virgula)</span>
+              <input id="agent-sensitive-paths-input" class="input" placeholder="~/.ssh/*,**/.env" />
+            </label>
+            <p class="meta-note">Ultimos eventos de auditoria:</p>
+            <ul id="agent-audit-list" class="agent-audit-list"></ul>
+          </article>
+        </section>
+
+        <section class="agent-chat-panel glass">
+          <div class="panel-title-row">
+            <h3>Chat do agente</h3>
+            <span id="agent-chat-status" class="meta-note">pronto</span>
+          </div>
+          <div id="agent-chat-log" class="agent-chat-log"></div>
+          <form id="agent-chat-form" class="chat-form">
+            <textarea id="agent-message-input" rows="1" placeholder="Mensagem para o Agent" required></textarea>
+            <div class="chat-form-actions">
+              <button id="agent-send-btn" type="submit" class="primary-btn">Enviar</button>
+            </div>
+          </form>
         </section>
       </section>
 

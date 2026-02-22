@@ -29,6 +29,7 @@ const panelDiscover = document.getElementById("panel-discover");
 const panelOpenClaw = document.getElementById("panel-openclaw");
 const panelSettings = document.getElementById("panel-settings");
 const panelAiInteraction = document.getElementById("panel-ai-interaction");
+const panelAgent = document.getElementById("panel-agent");
 const chatEmptyHero = document.getElementById("chat-empty-hero");
 
 const chatModelSwitcher = document.getElementById("chat-model-switcher");
@@ -153,6 +154,35 @@ const openclawEnvFeedback = document.getElementById("openclaw-env-feedback");
 const openclawEnvPath = document.getElementById("openclaw-env-path");
 const openclawEnvList = document.getElementById("openclaw-env-list");
 
+const agentMeta = document.getElementById("agent-meta");
+const agentRefreshBtn = document.getElementById("agent-refresh-btn");
+const agentSaveConfigBtn = document.getElementById("agent-save-config-btn");
+const agentProviderSelect = document.getElementById("agent-provider-select");
+const agentModelSelect = document.getElementById("agent-model-select");
+const agentApiKeyInput = document.getElementById("agent-api-key-input");
+const agentBaseUrlInput = document.getElementById("agent-base-url-input");
+const agentStreamingToggle = document.getElementById("agent-streaming-toggle");
+const agentFallbackToggle = document.getElementById("agent-fallback-toggle");
+const agentFallbackProviderSelect = document.getElementById("agent-fallback-provider-select");
+const agentFallbackModelInput = document.getElementById("agent-fallback-model-input");
+const agentExecutionModeSelect = document.getElementById("agent-execution-mode-select");
+const agentApprovalModeSelect = document.getElementById("agent-approval-mode-select");
+const agentMaxPromptInput = document.getElementById("agent-max-prompt-input");
+const agentMaxHistoryInput = document.getElementById("agent-max-history-input");
+const agentMaxToolsInput = document.getElementById("agent-max-tools-input");
+const agentAggressiveToolsToggle = document.getElementById("agent-aggressive-tools-toggle");
+const agentToolFallbackToggle = document.getElementById("agent-tool-fallback-toggle");
+const agentReloadSkillsBtn = document.getElementById("agent-reload-skills-btn");
+const agentSkillsList = document.getElementById("agent-skills-list");
+const agentToolsList = document.getElementById("agent-tools-list");
+const agentEgressInput = document.getElementById("agent-egress-input");
+const agentSensitivePathsInput = document.getElementById("agent-sensitive-paths-input");
+const agentAuditList = document.getElementById("agent-audit-list");
+const agentChatStatus = document.getElementById("agent-chat-status");
+const agentChatLog = document.getElementById("agent-chat-log");
+const agentChatForm = document.getElementById("agent-chat-form");
+const agentMessageInput = document.getElementById("agent-message-input");
+
 let daemonBaseUrl = localStorage.getItem(STORAGE_DAEMON_URL) || "http://127.0.0.1:11435";
 let selectedModelId = null;
 let localModels = [];
@@ -201,6 +231,12 @@ let openclawModelsCatalog = {
   local_models: [],
   current: null,
 };
+
+let agentProvidersCatalog = [];
+let agentModelsByProvider = {};
+let agentConfigCache = null;
+let agentSkillsCache = [];
+let agentToolsCache = [];
 
 daemonInput.value = daemonBaseUrl;
 if (braveApiKeyInput) {
@@ -3351,6 +3387,7 @@ function switchTab(nextTab) {
   panelChat.classList.toggle("active", nextTab === "chat");
   panelDiscover.classList.toggle("active", nextTab === "discover");
   panelOpenClaw.classList.toggle("active", nextTab === "openclaw");
+  if (panelAgent) panelAgent.classList.toggle("active", nextTab === "agent");
   panelSettings.classList.toggle("active", nextTab === "settings");
   if (panelAiInteraction) panelAiInteraction.classList.toggle("active", nextTab === "ai-interaction");
 
@@ -3382,6 +3419,8 @@ function switchTab(nextTab) {
 
   if (nextTab === "openclaw") {
     onOpenClawTabSelected();
+  } else if (nextTab === "agent") {
+    void onAgentTabSelected();
   } else {
     stopOpenClawLogPolling();
   }
@@ -4254,6 +4293,425 @@ if (revealOpenclawEnvToggle) {
   revealOpenclawEnvToggle.addEventListener("change", () => {
     setOpenclawEnvironmentInputVisibility();
   });
+}
+
+function setAgentStatus(text) {
+  if (agentChatStatus) {
+    agentChatStatus.textContent = text;
+  }
+}
+
+function clearElement(el) {
+  if (el) {
+    el.innerHTML = "";
+  }
+}
+
+function appendAgentMessage(role, text) {
+  if (!agentChatLog) {
+    return;
+  }
+  const card = document.createElement("article");
+  card.className = `agent-msg ${role}`;
+  card.textContent = text;
+  agentChatLog.appendChild(card);
+  agentChatLog.scrollTop = agentChatLog.scrollHeight;
+}
+
+function renderAgentToggleList(container, items, checkedSet) {
+  if (!container) {
+    return;
+  }
+  container.innerHTML = "";
+  if (!Array.isArray(items) || !items.length) {
+    const empty = document.createElement("li");
+    empty.className = "meta-note";
+    empty.textContent = "Sem itens.";
+    container.appendChild(empty);
+    return;
+  }
+
+  items.forEach((item) => {
+    const li = document.createElement("li");
+    li.className = "agent-toggle-item";
+
+    const meta = document.createElement("div");
+    meta.className = "agent-toggle-meta";
+
+    const title = document.createElement("p");
+    title.className = "agent-toggle-title";
+    title.textContent = item.name || "-";
+
+    const desc = document.createElement("p");
+    desc.className = "agent-toggle-desc";
+    desc.textContent = item.description || item.policy || "";
+
+    meta.appendChild(title);
+    meta.appendChild(desc);
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = checkedSet.has((item.name || "").toLowerCase());
+    checkbox.dataset.itemName = item.name || "";
+
+    li.appendChild(meta);
+    li.appendChild(checkbox);
+    container.appendChild(li);
+  });
+}
+
+function readCheckedNames(container) {
+  if (!container) {
+    return [];
+  }
+  return Array.from(container.querySelectorAll('input[type="checkbox"]'))
+    .filter((el) => el.checked)
+    .map((el) => (el.dataset.itemName || "").trim())
+    .filter(Boolean);
+}
+
+function syncAgentModelOptions() {
+  if (!agentProviderSelect || !agentModelSelect) {
+    return;
+  }
+  const provider = agentProviderSelect.value;
+  const models = agentModelsByProvider[provider] || [];
+  const previous = agentModelSelect.value;
+
+  agentModelSelect.innerHTML = "";
+  if (!models.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Sem modelos detectados";
+    agentModelSelect.appendChild(option);
+    return;
+  }
+
+  models.forEach((model) => {
+    const option = document.createElement("option");
+    option.value = model;
+    option.textContent = model;
+    agentModelSelect.appendChild(option);
+  });
+
+  if (previous && models.includes(previous)) {
+    agentModelSelect.value = previous;
+  }
+}
+
+async function loadAgentProviders() {
+  const providers = await fetchJson("/agent/providers", { method: "GET" });
+  agentProvidersCatalog = Array.isArray(providers) ? providers : [];
+  agentModelsByProvider = {};
+
+  if (agentProviderSelect) {
+    agentProviderSelect.innerHTML = "";
+  }
+  if (agentFallbackProviderSelect) {
+    agentFallbackProviderSelect.innerHTML = "";
+  }
+
+  agentProvidersCatalog.forEach((provider) => {
+    agentModelsByProvider[provider.id] = Array.isArray(provider.models) ? provider.models : [];
+    if (agentProviderSelect) {
+      const opt = document.createElement("option");
+      opt.value = provider.id;
+      opt.textContent = provider.name;
+      agentProviderSelect.appendChild(opt);
+    }
+    if (agentFallbackProviderSelect) {
+      const opt = document.createElement("option");
+      opt.value = provider.id;
+      opt.textContent = provider.name;
+      agentFallbackProviderSelect.appendChild(opt);
+    }
+  });
+}
+
+function applyAgentConfigToForm(config) {
+  if (!config) {
+    return;
+  }
+  agentConfigCache = config;
+
+  if (agentProviderSelect) {
+    agentProviderSelect.value = config.provider || "ollama";
+  }
+  if (agentFallbackProviderSelect) {
+    agentFallbackProviderSelect.value = config.fallback_provider || "mlx";
+  }
+  syncAgentModelOptions();
+  if (agentModelSelect) {
+    const known = agentModelsByProvider[agentProviderSelect?.value] || [];
+    if (known.includes(config.model_id)) {
+      agentModelSelect.value = config.model_id;
+    } else if (config.model_id) {
+      const option = document.createElement("option");
+      option.value = config.model_id;
+      option.textContent = `${config.model_id} (custom)`;
+      agentModelSelect.appendChild(option);
+      agentModelSelect.value = config.model_id;
+    }
+  }
+
+  if (agentApiKeyInput) agentApiKeyInput.value = config.api_key || "";
+  if (agentBaseUrlInput) agentBaseUrlInput.value = config.base_url || "";
+  if (agentStreamingToggle) agentStreamingToggle.checked = Boolean(config.streaming);
+  if (agentFallbackToggle) agentFallbackToggle.checked = Boolean(config.fallback_enabled);
+  if (agentFallbackModelInput) agentFallbackModelInput.value = config.fallback_model_id || "";
+  if (agentExecutionModeSelect) agentExecutionModeSelect.value = config.execution_mode || "full";
+  if (agentApprovalModeSelect) agentApprovalModeSelect.value = config.approval_mode || "ask";
+  if (agentMaxPromptInput) agentMaxPromptInput.value = config.max_prompt_tokens ?? "";
+  if (agentMaxHistoryInput) agentMaxHistoryInput.value = config.max_history_messages ?? "";
+  if (agentMaxToolsInput) agentMaxToolsInput.value = config.max_tools_in_prompt ?? "";
+  if (agentAggressiveToolsToggle) {
+    agentAggressiveToolsToggle.checked = Boolean(config.aggressive_tool_filtering);
+  }
+  if (agentToolFallbackToggle) {
+    agentToolFallbackToggle.checked = Boolean(config.enable_tool_call_fallback);
+  }
+  if (agentEgressInput) {
+    agentEgressInput.value = (config.security?.egress_allow_domains || []).join(",");
+  }
+  if (agentSensitivePathsInput) {
+    agentSensitivePathsInput.value = (config.security?.sensitive_paths || []).join(",");
+  }
+}
+
+function collectAgentConfigFromForm() {
+  const base = agentConfigCache || {};
+  const parseList = (value) =>
+    String(value || "")
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+
+  return {
+    ...base,
+    provider: agentProviderSelect?.value || "ollama",
+    model_id: agentModelSelect?.value || "",
+    api_key: agentApiKeyInput?.value || "",
+    base_url: agentBaseUrlInput?.value || "",
+    custom_headers: base.custom_headers || {},
+    execution_mode: agentExecutionModeSelect?.value || "full",
+    approval_mode: agentApprovalModeSelect?.value || "ask",
+    streaming: Boolean(agentStreamingToggle?.checked),
+    fallback_enabled: Boolean(agentFallbackToggle?.checked),
+    fallback_provider: agentFallbackProviderSelect?.value || "mlx",
+    fallback_model_id: agentFallbackModelInput?.value || "",
+    max_prompt_tokens: agentMaxPromptInput?.value ? Number(agentMaxPromptInput.value) : null,
+    max_history_messages: agentMaxHistoryInput?.value ? Number(agentMaxHistoryInput.value) : null,
+    max_tools_in_prompt: agentMaxToolsInput?.value ? Number(agentMaxToolsInput.value) : null,
+    temperature: base.temperature ?? 0.1,
+    aggressive_tool_filtering: Boolean(agentAggressiveToolsToggle?.checked),
+    enable_tool_call_fallback: Boolean(agentToolFallbackToggle?.checked),
+    enabled_skills: readCheckedNames(agentSkillsList),
+    enabled_tools: readCheckedNames(agentToolsList),
+    workspace_root: base.workspace_root || null,
+    security: {
+      ...(base.security || {}),
+      tool_allowlist: base.security?.tool_allowlist || [],
+      tool_denylist: base.security?.tool_denylist || [],
+      exec_safe_bins: base.security?.exec_safe_bins || [],
+      exec_deny_patterns: base.security?.exec_deny_patterns || [],
+      egress_allow_domains: parseList(agentEgressInput?.value),
+      sensitive_paths: parseList(agentSensitivePathsInput?.value),
+    },
+  };
+}
+
+async function loadAgentConfig() {
+  const config = await fetchJson("/agent/config", { method: "GET" });
+  applyAgentConfigToForm(config);
+  return config;
+}
+
+async function saveAgentConfig() {
+  const payload = collectAgentConfigFromForm();
+  const saved = await fetchJson("/agent/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  applyAgentConfigToForm(saved);
+  return saved;
+}
+
+async function loadAgentSkills() {
+  const skills = await fetchJson("/agent/skills", { method: "GET" });
+  agentSkillsCache = Array.isArray(skills) ? skills : [];
+  const checked = enabledSetFromConfig(agentConfigCache?.enabled_skills);
+  renderAgentToggleList(agentSkillsList, agentSkillsCache, checked);
+}
+
+async function loadAgentTools() {
+  const tools = await fetchJson("/agent/tools", { method: "GET" });
+  agentToolsCache = Array.isArray(tools) ? tools : [];
+  const checked = enabledSetFromConfig(agentConfigCache?.enabled_tools);
+  renderAgentToggleList(agentToolsList, agentToolsCache, checked);
+}
+
+function enabledSetFromConfig(values) {
+  return new Set(
+    Array.isArray(values)
+      ? values.map((v) => String(v).toLowerCase())
+      : []
+  );
+}
+
+async function loadAgentAudit() {
+  const payload = await fetchJson("/agent/audit?limit=12", { method: "GET" });
+  const entries = Array.isArray(payload?.entries) ? payload.entries : [];
+  if (!agentAuditList) {
+    return;
+  }
+
+  clearElement(agentAuditList);
+  if (!entries.length) {
+    const li = document.createElement("li");
+    li.className = "meta-note";
+    li.textContent = "Sem eventos.";
+    agentAuditList.appendChild(li);
+    return;
+  }
+
+  entries.forEach((entry) => {
+    const li = document.createElement("li");
+    li.className = "agent-audit-item";
+    const ts = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : "-";
+    li.textContent = `${ts} • ${entry.event_type || "-"} • ${entry.tool_name || "session"}${
+      entry.duration_ms ? ` • ${entry.duration_ms}ms` : ""
+    }`;
+    agentAuditList.appendChild(li);
+  });
+}
+
+async function onAgentTabSelected() {
+  if (!panelAgent) {
+    return;
+  }
+  setStatus("carregando agent", "running");
+  try {
+    await loadAgentProviders();
+    await loadAgentConfig();
+    await loadAgentSkills();
+    await loadAgentTools();
+    await loadAgentAudit();
+    if (agentMeta) {
+      agentMeta.textContent = "Configuracao carregada.";
+    }
+    setStatus("pronto");
+  } catch (error) {
+    if (agentMeta) {
+      agentMeta.textContent = `Falha ao carregar Agent: ${error.message}`;
+    }
+    setStatus("erro agent", "error");
+  }
+}
+
+async function sendAgentMessage() {
+  const text = String(agentMessageInput?.value || "").trim();
+  if (!text) {
+    return;
+  }
+
+  agentMessageInput.value = "";
+  appendAgentMessage("user", text);
+  setAgentStatus("executando...");
+
+  try {
+    const payload = collectAgentConfigFromForm();
+    const response = await fetchJson("/agent/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: text,
+        provider: payload.provider,
+        model_id: payload.model_id,
+        api_key: payload.api_key,
+        base_url: payload.base_url,
+        custom_headers: payload.custom_headers || {},
+        streaming: payload.streaming,
+        fallback_enabled: payload.fallback_enabled,
+        fallback_provider: payload.fallback_provider,
+        fallback_model_id: payload.fallback_model_id,
+        execution_mode: payload.execution_mode,
+        approval_mode: payload.approval_mode,
+        max_prompt_tokens: payload.max_prompt_tokens,
+        max_history_messages: payload.max_history_messages,
+        max_tools_in_prompt: payload.max_tools_in_prompt,
+        aggressive_tool_filtering: payload.aggressive_tool_filtering,
+        enable_tool_call_fallback: payload.enable_tool_call_fallback,
+        enabled_skills: payload.enabled_skills,
+        enabled_tools: payload.enabled_tools,
+      }),
+    });
+
+    appendAgentMessage("assistant", response.final_response || response.content || "(sem resposta)");
+    setAgentStatus(`ok • ${response.provider || "-"} • ${response.model_id || "-"}`);
+    await loadAgentAudit();
+  } catch (error) {
+    appendAgentMessage("assistant", `Erro: ${error.message}`);
+    setAgentStatus("falha");
+  }
+}
+
+if (agentProviderSelect) {
+  agentProviderSelect.addEventListener("change", () => {
+    syncAgentModelOptions();
+  });
+}
+
+if (agentRefreshBtn) {
+  agentRefreshBtn.addEventListener("click", () => {
+    void onAgentTabSelected();
+  });
+}
+
+if (agentSaveConfigBtn) {
+  agentSaveConfigBtn.addEventListener("click", async () => {
+    try {
+      const old = agentSaveConfigBtn.textContent;
+      agentSaveConfigBtn.disabled = true;
+      agentSaveConfigBtn.textContent = "Salvando...";
+      await saveAgentConfig();
+      agentSaveConfigBtn.textContent = "Salvo!";
+      setTimeout(() => {
+        agentSaveConfigBtn.textContent = old;
+        agentSaveConfigBtn.disabled = false;
+      }, 1200);
+    } catch (error) {
+      if (agentMeta) {
+        agentMeta.textContent = `Falha ao salvar: ${error.message}`;
+      }
+      agentSaveConfigBtn.disabled = false;
+      agentSaveConfigBtn.textContent = "Salvar configuracoes";
+    }
+  });
+}
+
+if (agentReloadSkillsBtn) {
+  agentReloadSkillsBtn.addEventListener("click", async () => {
+    try {
+      await fetchJson("/agent/skills/reload", { method: "POST" });
+      await loadAgentSkills();
+    } catch (error) {
+      if (agentMeta) {
+        agentMeta.textContent = `Falha no reload de skills: ${error.message}`;
+      }
+    }
+  });
+}
+
+if (agentChatForm) {
+  agentChatForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await sendAgentMessage();
+  });
+}
+
+if (agentMessageInput) {
+  agentMessageInput.addEventListener("input", () => autoResizeTextarea(agentMessageInput));
 }
 
 async function bootstrap() {

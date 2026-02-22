@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -5,6 +6,133 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSecurityConfig {
+    #[serde(default)]
+    pub tool_allowlist: Vec<String>,
+    #[serde(default)]
+    pub tool_denylist: Vec<String>,
+    #[serde(default)]
+    pub exec_safe_bins: Vec<String>,
+    #[serde(default)]
+    pub exec_deny_patterns: Vec<String>,
+    #[serde(default)]
+    pub sensitive_paths: Vec<String>,
+    #[serde(default)]
+    pub egress_allow_domains: Vec<String>,
+}
+
+impl Default for AgentSecurityConfig {
+    fn default() -> Self {
+        Self {
+            tool_allowlist: Vec::new(),
+            tool_denylist: Vec::new(),
+            exec_safe_bins: vec![
+                "ls".to_string(),
+                "cat".to_string(),
+                "grep".to_string(),
+                "git".to_string(),
+                "find".to_string(),
+                "rg".to_string(),
+            ],
+            exec_deny_patterns: vec![
+                "rm -rf *".to_string(),
+                "sudo *".to_string(),
+                "chmod 777 *".to_string(),
+                "mkfs*".to_string(),
+            ],
+            sensitive_paths: vec![
+                "~/.ssh/*".to_string(),
+                "~/.aws/*".to_string(),
+                "~/.gnupg/*".to_string(),
+                "**/.env".to_string(),
+                "**/.env.*".to_string(),
+            ],
+            egress_allow_domains: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentUiConfig {
+    #[serde(default = "default_agent_provider")]
+    pub provider: String,
+    #[serde(default = "default_agent_model")]
+    pub model_id: String,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default)]
+    pub custom_headers: BTreeMap<String, String>,
+    #[serde(default = "default_agent_execution_mode")]
+    pub execution_mode: String,
+    #[serde(default = "default_agent_approval_mode")]
+    pub approval_mode: String,
+    #[serde(default)]
+    pub streaming: bool,
+    #[serde(default)]
+    pub fallback_enabled: bool,
+    #[serde(default = "default_agent_fallback_provider")]
+    pub fallback_provider: String,
+    #[serde(default)]
+    pub fallback_model_id: String,
+    #[serde(default)]
+    pub max_prompt_tokens: Option<usize>,
+    #[serde(default)]
+    pub max_history_messages: Option<usize>,
+    #[serde(default)]
+    pub max_tools_in_prompt: Option<usize>,
+    #[serde(default)]
+    pub temperature: Option<f32>,
+    #[serde(default)]
+    pub aggressive_tool_filtering: bool,
+    #[serde(default = "default_true")]
+    pub enable_tool_call_fallback: bool,
+    #[serde(default)]
+    pub enabled_skills: Vec<String>,
+    #[serde(default)]
+    pub enabled_tools: Vec<String>,
+    #[serde(default)]
+    pub workspace_root: Option<String>,
+    #[serde(default)]
+    pub security: AgentSecurityConfig,
+}
+
+impl Default for AgentUiConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_agent_provider(),
+            model_id: default_agent_model(),
+            base_url: String::new(),
+            api_key: String::new(),
+            custom_headers: BTreeMap::new(),
+            execution_mode: default_agent_execution_mode(),
+            approval_mode: default_agent_approval_mode(),
+            streaming: false,
+            fallback_enabled: false,
+            fallback_provider: default_agent_fallback_provider(),
+            fallback_model_id: String::new(),
+            max_prompt_tokens: Some(2200),
+            max_history_messages: Some(14),
+            max_tools_in_prompt: Some(6),
+            temperature: Some(0.1),
+            aggressive_tool_filtering: true,
+            enable_tool_call_fallback: true,
+            enabled_skills: Vec::new(),
+            enabled_tools: vec![
+                "read_file".to_string(),
+                "write_file".to_string(),
+                "edit_file".to_string(),
+                "list_dir".to_string(),
+                "exec".to_string(),
+            ],
+            workspace_root: None,
+            security: AgentSecurityConfig::default(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -46,6 +174,8 @@ pub struct AppConfig {
     pub openclaw_sync_log: PathBuf,
     pub nanobot_cli_path: PathBuf,
     pub active_agent_framework: String,
+    #[serde(default)]
+    pub agent: AgentUiConfig,
 }
 
 impl Default for AppConfig {
@@ -93,6 +223,7 @@ impl Default for AppConfig {
             openclaw_sync_log: PathBuf::from("/Users/kaike/openclaw-mlx-sync.log"),
             nanobot_cli_path: PathBuf::from("/Users/kaike/prod/nanobot"),
             active_agent_framework: "openclaw".to_string(),
+            agent: AgentUiConfig::default(),
         }
     }
 }
@@ -395,6 +526,38 @@ impl AppConfig {
             }
         }
 
+        if let Ok(value) = env::var("APP_AGENT_PROVIDER") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                self.agent.provider = trimmed.to_string();
+            }
+        }
+
+        if let Ok(value) = env::var("APP_AGENT_MODEL") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                self.agent.model_id = trimmed.to_string();
+            }
+        }
+
+        if let Ok(value) = env::var("APP_AGENT_BASE_URL") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                self.agent.base_url = trimmed.to_string();
+            }
+        }
+
+        if let Ok(value) = env::var("APP_AGENT_API_KEY") {
+            self.agent.api_key = value.trim().to_string();
+        }
+
+        if let Ok(value) = env::var("APP_AGENT_APPROVAL_MODE") {
+            let mode = value.trim().to_ascii_lowercase();
+            if matches!(mode.as_str(), "auto" | "ask" | "deny") {
+                self.agent.approval_mode = mode;
+            }
+        }
+
         normalize_mlx_command(&mut self);
 
         self
@@ -471,4 +634,28 @@ fn parse_bool(value: &str, fallback: bool) -> bool {
         "0" | "false" | "no" | "off" => false,
         _ => fallback,
     }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_agent_provider() -> String {
+    "ollama".to_string()
+}
+
+fn default_agent_fallback_provider() -> String {
+    "mlx".to_string()
+}
+
+fn default_agent_model() -> String {
+    "qwen2.5:7b".to_string()
+}
+
+fn default_agent_execution_mode() -> String {
+    "full".to_string()
+}
+
+fn default_agent_approval_mode() -> String {
+    "ask".to_string()
 }

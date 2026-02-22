@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,6 +79,17 @@ pub struct ChatToolsRequest {
     pub options: GenerationOptions,
 }
 
+/// Runtime overrides used by remote providers.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RuntimeProviderConfig {
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+}
+
 // ── Generation options ─────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -148,7 +160,22 @@ pub enum ProviderError {
 pub trait ModelProvider: Send + Sync {
     fn provider_id(&self) -> &'static str;
     async fn list_models(&self) -> Result<Vec<ModelDescriptor>, ProviderError>;
+    async fn list_models_with_runtime(
+        &self,
+        runtime: Option<RuntimeProviderConfig>,
+    ) -> Result<Vec<ModelDescriptor>, ProviderError> {
+        let _ = runtime;
+        self.list_models().await
+    }
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, ProviderError>;
+    async fn chat_with_runtime(
+        &self,
+        request: ChatRequest,
+        runtime: Option<RuntimeProviderConfig>,
+    ) -> Result<ChatResponse, ProviderError> {
+        let _ = runtime;
+        self.chat(request).await
+    }
 
     /// Chat with tool-calling support.
     ///
@@ -165,5 +192,15 @@ pub trait ModelProvider: Send + Sync {
                 self.provider_id()
             ),
         })
+    }
+
+    /// Chat with tool-calling support and runtime overrides.
+    async fn chat_with_tools_with_runtime(
+        &self,
+        request: ChatToolsRequest,
+        runtime: Option<RuntimeProviderConfig>,
+    ) -> Result<ChatResponse, ProviderError> {
+        let _ = runtime;
+        self.chat_with_tools(request).await
     }
 }

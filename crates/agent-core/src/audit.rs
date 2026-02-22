@@ -13,8 +13,10 @@ pub struct AuditLogEntry {
     pub event_type: AuditEventType,
     pub tool_name: Option<String>,
     pub skill_name: Option<String>,
+    pub params_hash: Option<String>,
     pub params_summary: Option<String>,
     pub result_summary: Option<String>,
+    pub duration_ms: Option<u64>,
     pub decision: Option<String>,
     pub error: Option<String>,
 }
@@ -88,8 +90,10 @@ mod tests {
             event_type: AuditEventType::ToolCallExecuted,
             tool_name: Some("read_file".into()),
             skill_name: None,
+            params_hash: Some("abc".into()),
             params_summary: Some("path=/tmp/test".into()),
             result_summary: Some("ok".into()),
+            duration_ms: Some(12),
             decision: None,
             error: None,
         };
@@ -106,8 +110,10 @@ mod tests {
             event_type: AuditEventType::SessionStarted,
             tool_name: None,
             skill_name: None,
+            params_hash: None,
             params_summary: None,
             result_summary: None,
+            duration_ms: None,
             decision: None,
             error: None,
         };

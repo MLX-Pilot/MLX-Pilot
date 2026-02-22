@@ -12,8 +12,9 @@ use crate::registry::ToolRegistry;
 use mlx_agent_tools::ExecutionMode;
 use mlx_ollama_core::{
     ChatMessage, ChatToolsRequest, FunctionDef, GenerationOptions, MessageRole, ModelProvider,
-    ProviderError, TokenUsage, ToolCallRequest,
+    ProviderError, RuntimeProviderConfig, TokenUsage, ToolCallRequest,
 };
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info, warn};
@@ -28,6 +29,7 @@ pub struct AgentLoopConfig {
     pub max_prompt_tokens: Option<usize>,
     pub max_history_messages: Option<usize>,
     pub max_tools_in_prompt: Option<usize>,
+    pub provider_runtime: Option<RuntimeProviderConfig>,
     pub max_tokens_per_turn: u32,
     pub temperature: Option<f32>,
     pub aggressive_tool_filtering: bool,
@@ -46,6 +48,7 @@ impl Default for AgentLoopConfig {
             max_prompt_tokens: None,
             max_history_messages: None,
             max_tools_in_prompt: None,
+            provider_runtime: None,
             max_tokens_per_turn: 4096,
             temperature: None,
             aggressive_tool_filtering: false,
@@ -162,8 +165,10 @@ impl AgentLoop {
             event_type: AuditEventType::SessionStarted,
             tool_name: None,
             skill_name: None,
+            params_hash: None,
             params_summary: None,
             result_summary: None,
+            duration_ms: None,
             decision: None,
             error: None,
         })
@@ -177,9 +182,11 @@ impl AgentLoop {
                 self.config.max_tools_in_prompt,
             );
 
-        let skill_summaries = self
-            .skill_runtime
-            .compact_summaries(profile.max_skill_summaries, profile.max_skill_summary_chars);
+        let skill_summaries = self.skill_runtime.compact_summaries_filtered(
+            profile.max_skill_summaries,
+            profile.max_skill_summary_chars,
+            self.config.skill_filter.as_deref(),
+        );
 
         let all_tool_defs = self.build_tool_definitions();
 
@@ -233,20 +240,23 @@ impl AgentLoop {
             // Call provider with tools.
             let response = self
                 .provider
-                .chat_with_tools(ChatToolsRequest {
-                    model_id: self.config.model_id.clone(),
-                    messages: prompt.messages.clone(),
-                    tools: prompt.tools.clone(),
-                    options: GenerationOptions {
-                        temperature: Some(
-                            self.config
-                                .temperature
-                                .unwrap_or(profile.temperature_default),
-                        ),
-                        max_tokens: Some(self.config.max_tokens_per_turn),
-                        top_p: None,
+                .chat_with_tools_with_runtime(
+                    ChatToolsRequest {
+                        model_id: self.config.model_id.clone(),
+                        messages: prompt.messages.clone(),
+                        tools: prompt.tools.clone(),
+                        options: GenerationOptions {
+                            temperature: Some(
+                                self.config
+                                    .temperature
+                                    .unwrap_or(profile.temperature_default),
+                            ),
+                            max_tokens: Some(self.config.max_tokens_per_turn),
+                            top_p: None,
+                        },
                     },
-                })
+                    self.config.provider_runtime.clone(),
+                )
                 .await?;
 
             // Accumulate usage.
@@ -299,8 +309,10 @@ impl AgentLoop {
                     event_type: AuditEventType::SessionEnded,
                     tool_name: None,
                     skill_name: None,
+                    params_hash: None,
                     params_summary: None,
                     result_summary: None,
+                    duration_ms: Some(started.elapsed().as_millis() as u64),
                     decision: None,
                     error: None,
                 })
@@ -373,6 +385,9 @@ impl AgentLoop {
                 tool: tool_call.name.clone(),
                 message: format!("invalid JSON arguments: {e}"),
             })?;
+        let params_summary = params.to_string();
+        let params_hash = hash_sha256_hex(&params_summary);
+        let tool_started = Instant::now();
 
         let ctx = mlx_agent_tools::ToolContext {
             workspace_root: self.config.workspace_root.clone(),
@@ -406,8 +421,10 @@ impl AgentLoop {
                     event_type: AuditEventType::ToolCallDenied,
                     tool_name: Some(tool_call.name.clone()),
                     skill_name: ctx.active_skill.clone(),
-                    params_summary: Some(params.to_string()),
+                    params_hash: Some(params_hash.clone()),
+                    params_summary: Some(params_summary.clone()),
                     result_summary: None,
+                    duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                     decision: Some("deny".into()),
                     error: Some(reason.clone()),
                 })
@@ -425,7 +442,7 @@ impl AgentLoop {
                     skill_name: ctx.active_skill.clone(),
                     tool_name: tool_call.name.clone(),
                     description: prompt,
-                    params_summary: params.to_string(),
+                    params_summary: params_summary.clone(),
                     created_at: chrono::Utc::now(),
                     // 5 minutes expiry
                     expires_at: chrono::Utc::now() + std::time::Duration::from_secs(300),
@@ -442,8 +459,10 @@ impl AgentLoop {
                     event_type: AuditEventType::ApprovalRequested,
                     tool_name: Some(tool_call.name.clone()),
                     skill_name: ctx.active_skill.clone(),
-                    params_summary: Some(params.to_string()),
+                    params_hash: Some(params_hash.clone()),
+                    params_summary: Some(params_summary.clone()),
                     result_summary: None,
+                    duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                     decision: None,
                     error: None,
                 })
@@ -461,8 +480,10 @@ impl AgentLoop {
                             event_type: AuditEventType::ApprovalGranted,
                             tool_name: Some(tool_call.name.clone()),
                             skill_name: ctx.active_skill.clone(),
+                            params_hash: Some(params_hash.clone()),
                             params_summary: None,
                             result_summary: None,
+                            duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                             decision: Some("allow".into()),
                             error: None,
                         })
@@ -476,8 +497,10 @@ impl AgentLoop {
                             event_type: AuditEventType::ApprovalGranted,
                             tool_name: Some(tool_call.name.clone()),
                             skill_name: ctx.active_skill.clone(),
+                            params_hash: Some(params_hash.clone()),
                             params_summary: None,
                             result_summary: None,
+                            duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                             decision: Some("allow_always".into()),
                             error: None,
                         })
@@ -490,8 +513,10 @@ impl AgentLoop {
                             event_type: AuditEventType::ApprovalDenied,
                             tool_name: Some(tool_call.name.clone()),
                             skill_name: ctx.active_skill.clone(),
+                            params_hash: Some(params_hash.clone()),
                             params_summary: None,
                             result_summary: None,
+                            duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                             decision: Some("deny".into()),
                             error: None,
                         })
@@ -507,8 +532,10 @@ impl AgentLoop {
                             event_type: AuditEventType::ApprovalDenied,
                             tool_name: Some(tool_call.name.clone()),
                             skill_name: ctx.active_skill.clone(),
+                            params_hash: Some(params_hash.clone()),
                             params_summary: None,
                             result_summary: None,
+                            duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                             decision: Some("error".into()),
                             error: Some(e.to_string()),
                         })
@@ -534,8 +561,10 @@ impl AgentLoop {
                     event_type: AuditEventType::ToolCallExecuted,
                     tool_name: Some(tool_call.name.clone()),
                     skill_name: ctx.active_skill.clone(),
-                    params_summary: Some(params.to_string()),
-                    result_summary: Some("ok".into()),
+                    params_hash: Some(params_hash.clone()),
+                    params_summary: Some(params_summary.clone()),
+                    result_summary: Some(summarize_result(&res.output, res.is_error)),
+                    duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                     decision: None,
                     error: None,
                 })
@@ -549,8 +578,10 @@ impl AgentLoop {
                     event_type: AuditEventType::ToolCallFailed,
                     tool_name: Some(tool_call.name.clone()),
                     skill_name: ctx.active_skill.clone(),
-                    params_summary: Some(params.to_string()),
+                    params_hash: Some(params_hash),
+                    params_summary: Some(params_summary),
                     result_summary: None,
+                    duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                     decision: None,
                     error: Some(e.to_string()),
                 })
@@ -583,6 +614,32 @@ impl AgentLoop {
                 parameters: def.parameters,
             })
             .collect()
+    }
+}
+
+fn hash_sha256_hex(input: &str) -> String {
+    let digest = Sha256::digest(input.as_bytes());
+    let mut out = String::with_capacity(digest.len() * 2);
+    for b in digest {
+        use std::fmt::Write as _;
+        let _ = write!(&mut out, "{b:02x}");
+    }
+    out
+}
+
+fn summarize_result(output: &str, is_error: bool) -> String {
+    let normalized = output.split_whitespace().collect::<Vec<_>>().join(" ");
+    let short = if normalized.chars().count() > 160 {
+        let mut s = normalized.chars().take(157).collect::<String>();
+        s.push_str("...");
+        s
+    } else {
+        normalized
+    };
+    if is_error {
+        format!("error: {short}")
+    } else {
+        short
     }
 }
 
@@ -763,6 +820,7 @@ mod tests {
                 max_prompt_tokens: None,
                 max_history_messages: None,
                 max_tools_in_prompt: None,
+                provider_runtime: None,
                 max_tokens_per_turn: 4096,
                 temperature: None,
                 aggressive_tool_filtering: false,

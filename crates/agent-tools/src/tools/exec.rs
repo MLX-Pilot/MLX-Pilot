@@ -224,11 +224,7 @@ mod tests {
             mode: ExecutionMode::Full,
         };
 
-        let cmd = if cfg!(windows) {
-            "echo hello"
-        } else {
-            "echo hello"
-        };
+        let cmd = "echo hello";
         let result = tool
             .execute(serde_json::json!({"command": cmd}), &ctx)
             .await

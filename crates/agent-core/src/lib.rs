@@ -16,7 +16,9 @@ pub mod session;
 
 // Re-exports for convenience.
 pub use agent_loop::{AgentError, AgentLoop, AgentLoopConfig, AgentResponse};
-pub use approval::{ApprovalDecision, ApprovalError, ApprovalRequest, ApprovalService};
+pub use approval::{
+    ApprovalDecision, ApprovalError, ApprovalMode, ApprovalRequest, ApprovalService,
+};
 pub use audit::{AuditEventType, AuditLog, AuditLogEntry};
 pub use events::{AgentEvent, EventBus};
 pub use policy::{PolicyConfig, PolicyDecision, PolicyEngine};

@@ -27,3 +27,4 @@ mlx-agent-skills = { path = "../agent-skills" }
 mlx-provider = { path = "../providers/mlx" }
 llamacpp-provider = { path = "../providers/llamacpp" }
 ollama-provider = { path = "../providers/ollama" }
+http-llm-provider = { path = "../providers/http_llm_provider" }

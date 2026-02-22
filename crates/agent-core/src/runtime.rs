@@ -55,17 +55,46 @@ impl SkillRuntime {
     /// Return compact one-line summaries: `name: summary`.
     /// The skill body is never injected here.
     pub fn compact_summaries(&self, max_skills: usize, max_line_chars: usize) -> Vec<String> {
+        self.compact_summaries_filtered(max_skills, max_line_chars, None)
+    }
+
+    /// Return compact one-line summaries with optional allowlist filtering.
+    pub fn compact_summaries_filtered(
+        &self,
+        max_skills: usize,
+        max_line_chars: usize,
+        allowed: Option<&[String]>,
+    ) -> Vec<String> {
+        let allowed_set = allowed
+            .map(|list| {
+                list.iter()
+                    .map(|v| v.to_ascii_lowercase())
+                    .collect::<std::collections::HashSet<_>>()
+            })
+            .unwrap_or_default();
+
         let mut skills = self.skills.values().collect::<Vec<_>>();
         skills.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
         skills
             .into_iter()
+            .filter(|skill| {
+                allowed
+                    .map(|_| allowed_set.contains(&skill.name.to_ascii_lowercase()))
+                    .unwrap_or(true)
+            })
             .take(max_skills)
             .map(|skill| {
                 let summary = extract_skill_summary_line(skill, max_line_chars);
                 format!("{}: {}", skill.name, summary)
             })
             .collect()
+    }
+
+    pub fn names(&self) -> Vec<String> {
+        let mut names = self.skills.keys().cloned().collect::<Vec<_>>();
+        names.sort();
+        names
     }
 }
 

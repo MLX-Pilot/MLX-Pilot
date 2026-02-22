@@ -145,7 +145,7 @@ impl MlxProvider {
                 return None;
             }
             let raw = String::from_utf8_lossy(&output.stdout);
-            return raw.trim().parse::<u64>().ok();
+            raw.trim().parse::<u64>().ok()
         }
 
         #[cfg(not(target_os = "macos"))]

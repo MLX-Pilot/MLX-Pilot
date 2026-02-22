@@ -4,6 +4,7 @@ members = [
   "crates/providers/mlx",
   "crates/providers/llamacpp",
   "crates/providers/ollama",
+  "crates/providers/http_llm_provider",
   "crates/daemon",
   # Agent crates
   "crates/agent-core",
