@@ -1,5 +1,6 @@
 //! `/agent/*` endpoints — full agent runtime API.
 
+use crate::secrets_vault::SecretsVault;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -17,7 +18,7 @@ use mlx_agent_tools::ExecutionMode;
 use mlx_ollama_core::{ModelProvider, RuntimeProviderConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{info, warn};
 
@@ -198,6 +199,9 @@ pub struct AgentSkillInfo {
     pub description: String,
     pub enabled: bool,
     pub source: String,
+    pub integrity: String,
+    pub sha256: Option<String>,
+    pub capabilities: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -228,6 +232,16 @@ pub struct AgentState {
     pub approval: Arc<DefaultApprovalService>,
     pub event_bus: Arc<EventBus>,
     pub audit: Arc<AuditLog>,
+}
+
+const AGENT_API_KEY_SECRET_REF: &str = "vault://agent.api_key";
+const AGENT_API_KEY_SECRET_KEY: &str = "agent.api_key";
+const SKILL_INTEGRITY_STATE_FILE: &str = "agent_skill_integrity_state.json";
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct SkillIntegrityState {
+    #[serde(default)]
+    hashes: BTreeMap<String, String>,
 }
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -270,7 +284,16 @@ fn merged_vec(primary: Option<Vec<String>>, fallback: &[String]) -> Vec<String> 
         .unwrap_or_else(|| fallback.to_vec())
 }
 
-fn build_policy_config(cfg: &super::config::AgentUiConfig, mode: ExecutionMode) -> PolicyConfig {
+fn build_policy_config(
+    cfg: &super::config::AgentUiConfig,
+    mode: ExecutionMode,
+    workspace_root: &Path,
+    known_skill_hashes: BTreeMap<String, String>,
+) -> PolicyConfig {
+    let security_mode = cfg.security.security_mode.trim().to_ascii_lowercase();
+    let paranoid_mode = security_mode == "paranoid";
+    let enterprise_mode = paranoid_mode || security_mode == "enterprise";
+
     PolicyConfig {
         default_mode: mode,
         tool_allowlist: cfg.security.tool_allowlist.clone(),
@@ -279,9 +302,161 @@ fn build_policy_config(cfg: &super::config::AgentUiConfig, mode: ExecutionMode) 
         exec_deny_patterns: cfg.security.exec_deny_patterns.clone(),
         file_deny_paths: cfg.security.sensitive_paths.clone(),
         network_allow_domains: cfg.security.egress_allow_domains.clone(),
-        min_trust_level: mlx_agent_skills::TrustLevel::Unknown,
-        require_capabilities: false,
+        block_direct_ip_egress: paranoid_mode || cfg.security.block_direct_ip_egress,
+        airgapped_mode: paranoid_mode || cfg.security.airgapped,
+        owner_only_mode: paranoid_mode || cfg.security.owner_only,
+        workspace_root: Some(workspace_root.to_path_buf()),
+        min_trust_level: if paranoid_mode {
+            mlx_agent_skills::TrustLevel::Community
+        } else if enterprise_mode {
+            mlx_agent_skills::TrustLevel::Local
+        } else {
+            mlx_agent_skills::TrustLevel::Unknown
+        },
+        require_capabilities: enterprise_mode || cfg.security.require_capabilities,
+        skill_sha256_pins: cfg.security.skill_sha256_pins.clone(),
+        known_skill_hashes,
     }
+}
+
+fn settings_dir() -> PathBuf {
+    let settings = super::config::AppConfig::get_settings_path();
+    settings
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn skill_integrity_state_path() -> PathBuf {
+    settings_dir().join(SKILL_INTEGRITY_STATE_FILE)
+}
+
+fn load_skill_integrity_state() -> BTreeMap<String, String> {
+    let path = skill_integrity_state_path();
+    if !path.exists() {
+        return BTreeMap::new();
+    }
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return BTreeMap::new();
+    };
+    serde_json::from_str::<SkillIntegrityState>(&raw)
+        .map(|state| state.hashes)
+        .unwrap_or_default()
+}
+
+fn save_skill_integrity_state(hashes: BTreeMap<String, String>) {
+    let path = skill_integrity_state_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let state = SkillIntegrityState { hashes };
+    if let Ok(raw) = serde_json::to_string_pretty(&state) {
+        let _ = std::fs::write(path, raw);
+    }
+}
+
+fn open_secrets_vault() -> Result<SecretsVault, AgentApiError> {
+    SecretsVault::open(&settings_dir()).map_err(|error| {
+        AgentApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "secrets_vault_error",
+            Some(error.to_string()),
+        )
+    })
+}
+
+fn resolve_agent_api_key(
+    request_key: Option<String>,
+    cfg: &super::config::AgentUiConfig,
+) -> Result<String, AgentApiError> {
+    if let Some(value) = request_key
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+    {
+        return Ok(value);
+    }
+
+    if !cfg.api_key.trim().is_empty() {
+        return Ok(cfg.api_key.trim().to_string());
+    }
+
+    if cfg.security.use_secrets_vault {
+        if let Some(reference) = cfg.api_key_ref.as_deref().map(str::trim) {
+            if !reference.is_empty() {
+                let key = reference
+                    .strip_prefix("vault://")
+                    .unwrap_or(AGENT_API_KEY_SECRET_KEY);
+                let vault = open_secrets_vault()?;
+                if let Some(secret) = vault.get_secret(key).map_err(|error| {
+                    AgentApiError::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "secrets_vault_error",
+                        Some(error.to_string()),
+                    )
+                })? {
+                    return Ok(secret);
+                }
+            }
+        }
+    }
+
+    Ok(String::new())
+}
+
+fn is_local_base_url(url: &str) -> bool {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let without_scheme = if let Some(idx) = trimmed.find("://") {
+        &trimmed[(idx + 3)..]
+    } else {
+        trimmed
+    };
+    let host = without_scheme
+        .split('/')
+        .next()
+        .unwrap_or_default()
+        .split('@')
+        .next_back()
+        .unwrap_or_default();
+    let host = if let Some(stripped) = host.strip_prefix('[') {
+        stripped.split(']').next().unwrap_or_default()
+    } else {
+        host.split(':').next().unwrap_or_default()
+    }
+    .to_ascii_lowercase();
+
+    matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1")
+}
+
+fn provider_allowed_in_airgap(provider_id: &str, base_url: &str) -> bool {
+    matches!(
+        provider_id.trim().to_ascii_lowercase().as_str(),
+        "mlx" | "llamacpp" | "ollama"
+    ) || (provider_id.trim().eq_ignore_ascii_case("custom") && is_local_base_url(base_url))
+}
+
+fn canonical_or_normalize_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| {
+        let mut out = PathBuf::new();
+        for component in path.components() {
+            match component {
+                std::path::Component::ParentDir => {
+                    let _ = out.pop();
+                }
+                std::path::Component::CurDir => {}
+                other => out.push(other.as_os_str()),
+            }
+        }
+        out
+    })
+}
+
+fn workspace_allowed_in_owner_mode(project_root: &Path, workspace: &Path) -> bool {
+    let root = canonical_or_normalize_path(project_root);
+    let candidate = canonical_or_normalize_path(workspace);
+    candidate.starts_with(&root)
 }
 
 fn configured_runtime(
@@ -527,6 +702,84 @@ fn build_tool_registry(enabled_tools: &[String]) -> ToolRegistry {
     registry
 }
 
+fn collect_skill_hashes(
+    runtime: &mlx_agent_core::runtime::SkillRuntime,
+) -> BTreeMap<String, String> {
+    let mut hashes = BTreeMap::new();
+    for skill in runtime.all() {
+        if let Some(hash) = skill
+            .sha256
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            hashes.insert(skill.name.clone(), hash.to_string());
+        }
+    }
+    hashes
+}
+
+fn skill_capability_labels(skill: &mlx_agent_skills::SkillPackage) -> Vec<String> {
+    let mut items = Vec::new();
+    if skill.capabilities.allows_fs_read() {
+        items.push("fs_read".to_string());
+    }
+    if skill.capabilities.allows_fs_write() {
+        items.push("fs_write".to_string());
+    }
+    if skill.capabilities.allows_network() {
+        items.push("network".to_string());
+    }
+    if skill.capabilities.allows_exec() {
+        items.push("exec".to_string());
+    }
+    if skill.capabilities.allows_secrets_access() {
+        items.push("secrets_access".to_string());
+    }
+    items
+}
+
+async fn evaluate_skill_integrity(
+    runtime: &mut mlx_agent_core::runtime::SkillRuntime,
+    policy: &(dyn PolicyEngine + Send + Sync),
+    remove_denied: bool,
+) -> BTreeMap<String, String> {
+    let mut statuses = BTreeMap::new();
+    let names = runtime.names();
+    let mut denied = Vec::new();
+
+    for name in names {
+        let Some(skill) = runtime.get(&name) else {
+            continue;
+        };
+
+        match policy.check_skill_load(skill).await {
+            mlx_agent_core::policy::PolicyDecision::Allow => {
+                statuses.insert(name, "ok".to_string());
+            }
+            mlx_agent_core::policy::PolicyDecision::Ask { prompt, .. } => {
+                warn!(skill = %name, warning = %prompt, "skill integrity warning");
+                statuses.insert(name, "changed".to_string());
+            }
+            mlx_agent_core::policy::PolicyDecision::Deny { reason } => {
+                warn!(skill = %name, reason = %reason, "skill blocked by integrity policy");
+                statuses.insert(name.clone(), "blocked".to_string());
+                if remove_denied {
+                    denied.push(name);
+                }
+            }
+        }
+    }
+
+    if remove_denied {
+        for name in denied {
+            runtime.remove(&name);
+        }
+    }
+
+    statuses
+}
+
 async fn run_agent_once(
     state: &super::AppState,
     agent_cfg: &super::config::AgentUiConfig,
@@ -549,7 +802,8 @@ async fn run_agent_once(
     );
     state.agent_state.approval.set_mode(approval_mode);
 
-    let policy_config = build_policy_config(agent_cfg, mode);
+    let known_skill_hashes = load_skill_integrity_state();
+    let policy_config = build_policy_config(agent_cfg, mode, &workspace, known_skill_hashes);
     let policy: Arc<dyn PolicyEngine> = Arc::new(DefaultPolicyEngine::new(policy_config));
 
     let enabled_tools = merged_vec(request.enabled_tools.clone(), &agent_cfg.enabled_tools);
@@ -561,12 +815,14 @@ async fn run_agent_once(
 
     let mut skill_runtime = mlx_agent_core::runtime::SkillRuntime::new();
     skill_runtime.load_from_workspace(&workspace).await;
+    let _ = evaluate_skill_integrity(&mut skill_runtime, policy.as_ref(), true).await;
+    save_skill_integrity_state(collect_skill_hashes(&skill_runtime));
 
     let enabled_skills = merged_vec(request.enabled_skills.clone(), &agent_cfg.enabled_skills);
 
     let config = AgentLoopConfig {
         model_id: resolved.model_id.clone(),
-        workspace_root: workspace,
+        workspace_root: workspace.clone(),
         system_prompt: request.system_prompt.clone(),
         max_iterations: request.max_iterations.unwrap_or(25),
         max_prompt_tokens: request.max_prompt_tokens.or(agent_cfg.max_prompt_tokens),
@@ -649,8 +905,8 @@ pub async fn agent_run(
 
     let provider = merged_value(request.provider.clone(), &agent_cfg.provider);
     let model_id = merged_value(request.model_id.clone(), &agent_cfg.model_id);
-    let api_key = merged_value(request.api_key.clone(), &agent_cfg.api_key);
     let base_url = merged_value(request.base_url.clone(), &agent_cfg.base_url);
+    let api_key = resolve_agent_api_key(request.api_key.clone(), &agent_cfg)?;
     let streaming_enabled = request.streaming.unwrap_or(agent_cfg.streaming);
     let headers = request
         .custom_headers
@@ -670,6 +926,35 @@ pub async fn agent_run(
                 .map(PathBuf::from)
         })
         .unwrap_or_else(|| state.agent_state.default_workspace.clone());
+
+    let security_mode = agent_cfg.security.security_mode.trim().to_ascii_lowercase();
+    let airgapped_mode = agent_cfg.security.airgapped || security_mode == "paranoid";
+    let owner_only_mode = agent_cfg.security.owner_only || security_mode == "paranoid";
+
+    if owner_only_mode
+        && !workspace_allowed_in_owner_mode(&state.agent_state.default_workspace, &workspace)
+    {
+        return Err(AgentApiError::new(
+            StatusCode::FORBIDDEN,
+            "owner_only_block",
+            Some(format!(
+                "workspace '{}' is outside project root '{}'",
+                workspace.display(),
+                state.agent_state.default_workspace.display()
+            )),
+        ));
+    }
+
+    if airgapped_mode && !provider_allowed_in_airgap(&provider, &base_url) {
+        return Err(AgentApiError::new(
+            StatusCode::FORBIDDEN,
+            "airgapped_block",
+            Some(format!(
+                "provider '{}' is blocked in airgapped mode; only local providers are allowed",
+                provider
+            )),
+        ));
+    }
 
     let registry = AgentProviderRegistry;
     let primary = registry.resolve(&state, &provider, &model_id, &api_key, &base_url, &headers)?;
@@ -698,6 +983,17 @@ pub async fn agent_run(
             &agent_cfg.fallback_model_id
         },
     );
+
+    if airgapped_mode && !provider_allowed_in_airgap(&fallback_provider, &base_url) {
+        return Err(AgentApiError::new(
+            StatusCode::FORBIDDEN,
+            "airgapped_block",
+            Some(format!(
+                "fallback provider '{}' is blocked in airgapped mode",
+                fallback_provider
+            )),
+        ));
+    }
 
     let primary_result =
         run_agent_once(&state, &agent_cfg, &request, primary, workspace.clone()).await;
@@ -879,7 +1175,31 @@ pub async fn agent_providers(
 
 /// GET /agent/config
 pub async fn agent_get_config() -> Result<Json<super::config::AgentUiConfig>, AgentApiError> {
-    let cfg = super::config::AppConfig::load_settings().apply_env();
+    let mut cfg = super::config::AppConfig::load_settings().apply_env();
+    if cfg.agent.security.use_secrets_vault && cfg.agent.api_key.trim().is_empty() {
+        if cfg
+            .agent
+            .api_key_ref
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .is_some()
+        {
+            let vault = open_secrets_vault()?;
+            if let Some(secret) = vault
+                .get_secret(AGENT_API_KEY_SECRET_KEY)
+                .map_err(|error| {
+                    AgentApiError::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "secrets_vault_error",
+                        Some(error.to_string()),
+                    )
+                })?
+            {
+                cfg.agent.api_key = secret;
+            }
+        }
+    }
     Ok(Json(cfg.agent))
 }
 
@@ -889,7 +1209,37 @@ pub async fn agent_update_config(
     Json(new_agent_cfg): Json<super::config::AgentUiConfig>,
 ) -> Result<Json<super::config::AgentUiConfig>, AgentApiError> {
     let mut cfg = super::config::AppConfig::load_settings().apply_env();
-    cfg.agent = new_agent_cfg.clone();
+    let mut merged = new_agent_cfg.clone();
+
+    if merged.security.use_secrets_vault {
+        let vault = open_secrets_vault()?;
+        if !merged.api_key.trim().is_empty() {
+            vault
+                .set_secret(AGENT_API_KEY_SECRET_KEY, merged.api_key.trim())
+                .map_err(|error| {
+                    AgentApiError::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "secrets_vault_error",
+                        Some(error.to_string()),
+                    )
+                })?;
+            merged.api_key.clear();
+            merged.api_key_ref = Some(AGENT_API_KEY_SECRET_REF.to_string());
+        } else if merged
+            .api_key_ref
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .is_none()
+        {
+            let _ = vault.remove_secret(AGENT_API_KEY_SECRET_KEY);
+            merged.api_key_ref = None;
+        }
+    } else {
+        merged.api_key_ref = None;
+    }
+
+    cfg.agent = merged.clone();
     cfg.save_settings().map_err(|e| {
         AgentApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -901,7 +1251,16 @@ pub async fn agent_update_config(
     let approval_mode = parse_approval_mode(Some(cfg.agent.approval_mode.as_str()));
     state.agent_state.approval.set_mode(approval_mode);
 
-    Ok(Json(new_agent_cfg))
+    let mut response = merged;
+    if response.security.use_secrets_vault && response.api_key.trim().is_empty() {
+        if let Ok(vault) = open_secrets_vault() {
+            if let Ok(Some(secret)) = vault.get_secret(AGENT_API_KEY_SECRET_KEY) {
+                response.api_key = secret;
+            }
+        }
+    }
+
+    Ok(Json(response))
 }
 
 /// GET /agent/skills
@@ -919,6 +1278,12 @@ pub async fn agent_list_skills(
 
     let mut runtime = mlx_agent_core::runtime::SkillRuntime::new();
     runtime.load_from_workspace(&workspace).await;
+    let known_skill_hashes = load_skill_integrity_state();
+    let mode = parse_execution_mode(Some(cfg.agent.execution_mode.as_str()));
+    let policy_cfg = build_policy_config(&cfg.agent, mode, &workspace, known_skill_hashes);
+    let policy = DefaultPolicyEngine::new(policy_cfg);
+    let integrity = evaluate_skill_integrity(&mut runtime, &policy, false).await;
+    save_skill_integrity_state(collect_skill_hashes(&runtime));
 
     let enabled = enabled_set(&cfg.agent.enabled_skills);
     let mut items = runtime
@@ -928,6 +1293,12 @@ pub async fn agent_list_skills(
             description: s.description.clone(),
             enabled: enabled.is_empty() || enabled.contains(&s.name.to_ascii_lowercase()),
             source: format!("{:?}", s.source).to_ascii_lowercase(),
+            integrity: integrity
+                .get(&s.name)
+                .cloned()
+                .unwrap_or_else(|| "unknown".to_string()),
+            sha256: s.sha256.clone(),
+            capabilities: skill_capability_labels(s),
         })
         .collect::<Vec<_>>();
 
@@ -946,7 +1317,15 @@ pub async fn agent_reload_skills(
 pub async fn agent_list_tools() -> Result<Json<Vec<AgentToolInfo>>, AgentApiError> {
     let cfg = super::config::AppConfig::load_settings().apply_env();
     let mode = parse_execution_mode(Some(cfg.agent.execution_mode.as_str()));
-    let policy_cfg = build_policy_config(&cfg.agent, mode);
+    let workspace = cfg
+        .agent
+        .workspace_root
+        .as_deref()
+        .filter(|v| !v.trim().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    let known_hashes = load_skill_integrity_state();
+    let policy_cfg = build_policy_config(&cfg.agent, mode, &workspace, known_hashes);
     let policy = DefaultPolicyEngine::new(policy_cfg);
 
     let enabled = enabled_set(&cfg.agent.enabled_tools);

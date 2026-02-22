@@ -9,6 +9,7 @@ use crate::frontmatter::{
 };
 use crate::resolver::ResolverError;
 use crate::types::{SkillPackage, SkillSource, TrustLevel};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
 
@@ -140,12 +141,14 @@ impl SkillLoader {
         }
 
         let parsed = parse_frontmatter(&content)?;
-        Ok(to_skill_package(
+        let mut package = to_skill_package(
             &parsed,
             skill_file,
             SkillSource::Workspace,
             TrustLevel::Local,
-        ))
+        );
+        package.sha256 = Some(sha256_hex(content.as_bytes()));
+        Ok(package)
     }
 
     /// Generate the combined skill prompt from loaded skills.
@@ -203,6 +206,12 @@ impl SkillLoader {
             truncated,
         }
     }
+}
+
+fn sha256_hex(input: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(input);
+    format!("{:x}", hasher.finalize())
 }
 
 /// Result of building a skill prompt.
@@ -306,6 +315,7 @@ World!"#,
         let names: Vec<&str> = loaded.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"test-skill"));
         assert!(names.contains(&"another-skill"));
+        assert!(loaded.iter().all(|skill| skill.sha256.is_some()));
 
         let always = loaded.iter().find(|s| s.name == "another-skill").unwrap();
         assert!(always.always);

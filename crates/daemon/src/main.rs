@@ -3,6 +3,7 @@ mod catalog;
 mod chat_stream;
 mod config;
 mod openclaw;
+mod secrets_vault;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};

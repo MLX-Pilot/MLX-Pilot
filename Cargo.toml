@@ -6,6 +6,7 @@ members = [
   "crates/providers/ollama",
   "crates/providers/http_llm_provider",
   "crates/daemon",
+  "crates/bench_agent",
   # Agent crates
   "crates/agent-core",
   "crates/agent-tools",

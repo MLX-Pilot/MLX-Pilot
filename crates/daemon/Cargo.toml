@@ -20,6 +20,8 @@ urlencoding = "2.1"
 futures-util = "0.3"
 bytes = "1"
 tokio-stream = "0.1"
+base64 = "0.22"
+ring = "0.17"
 mlx-ollama-core = { path = "../core" }
 mlx-agent-core = { path = "../agent-core" }
 mlx-agent-tools = { path = "../agent-tools" }

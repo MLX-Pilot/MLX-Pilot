@@ -47,6 +47,11 @@ impl SkillRuntime {
         self.skills.get(name)
     }
 
+    /// Remove a skill by name.
+    pub fn remove(&mut self, name: &str) -> Option<SkillPackage> {
+        self.skills.remove(name)
+    }
+
     /// Returns all loaded skills.
     pub fn all(&self) -> impl Iterator<Item = &SkillPackage> {
         self.skills.values()
