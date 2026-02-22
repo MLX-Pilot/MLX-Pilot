@@ -19,7 +19,7 @@ pub trait Tool: Send + Sync {
     fn parameters(&self) -> &ParamSchema;
 
     /// Execute the tool with validated parameters.
-    async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError>;
+    async fn execute(&self, params: &Value, ctx: &ToolContext) -> Result<ToolResult, ToolError>;
 
     /// Convert to an OpenAI-compatible function-calling definition.
     fn to_definition(&self) -> ToolDefinition {

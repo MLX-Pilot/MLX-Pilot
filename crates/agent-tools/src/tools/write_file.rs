@@ -52,7 +52,7 @@ impl crate::Tool for WriteFileTool {
         &self.schema
     }
 
-    async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+    async fn execute(&self, params: &Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
         match ctx.mode {
             ExecutionMode::Locked | ExecutionMode::ReadOnly => {
                 return Err(ToolError::ModeRestriction { mode: ctx.mode });
@@ -125,7 +125,7 @@ mod tests {
 
         let result = tool
             .execute(
-                serde_json::json!({"path": "sub/new.txt", "content": "hello"}),
+                &serde_json::json!({"path": "sub/new.txt", "content": "hello"}),
                 &ctx,
             )
             .await
@@ -154,7 +154,7 @@ mod tests {
 
         let result = tool
             .execute(
-                serde_json::json!({"path": "../../escape.txt", "content": "evil"}),
+                &serde_json::json!({"path": "../../escape.txt", "content": "evil"}),
                 &ctx,
             )
             .await;
@@ -178,7 +178,7 @@ mod tests {
 
         let result = tool
             .execute(
-                serde_json::json!({"path": "test.txt", "content": "nope"}),
+                &serde_json::json!({"path": "test.txt", "content": "nope"}),
                 &ctx,
             )
             .await;
@@ -202,7 +202,7 @@ mod tests {
 
         let result = tool
             .execute(
-                serde_json::json!({"path": "test.txt", "content": "data"}),
+                &serde_json::json!({"path": "test.txt", "content": "data"}),
                 &ctx,
             )
             .await

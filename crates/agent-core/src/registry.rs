@@ -6,12 +6,17 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+struct RegisteredTool {
+    tool: Arc<dyn Tool>,
+    schema_validator: Result<jsonschema::Validator, String>,
+}
+
 /// Central registry of all available tools.
 ///
 /// The `AgentLoop` uses this to convert tool names from the LLM into
 /// actual `Tool` implementations and dispatch calls.
 pub struct ToolRegistry {
-    tools: HashMap<String, Arc<dyn Tool>>,
+    tools: HashMap<String, RegisteredTool>,
 }
 
 impl ToolRegistry {
@@ -24,22 +29,31 @@ impl ToolRegistry {
 
     /// Register a tool. Overwrites any existing tool with the same name.
     pub fn register(&mut self, tool: Arc<dyn Tool>) {
-        self.tools.insert(tool.name().to_string(), tool);
+        let schema_validator = jsonschema::validator_for(tool.parameters())
+            .map_err(|e| format!("invalid schema for tool '{}': {}", tool.name(), e));
+
+        self.tools.insert(
+            tool.name().to_string(),
+            RegisteredTool {
+                tool,
+                schema_validator,
+            },
+        );
     }
 
     /// Look up a tool by name.
     pub fn get(&self, name: &str) -> Option<&Arc<dyn Tool>> {
-        self.tools.get(name)
+        self.tools.get(name).map(|entry| &entry.tool)
     }
 
     /// Validate params against the tool's JSON Schema, then dispatch.
     pub async fn dispatch(
         &self,
         tool_name: &str,
-        params: Value,
+        params: &Value,
         ctx: &ToolContext,
     ) -> Result<ToolResult, ToolError> {
-        let tool = self
+        let entry = self
             .tools
             .get(tool_name)
             .ok_or_else(|| ToolError::InvalidParams {
@@ -47,20 +61,19 @@ impl ToolRegistry {
             })?;
 
         // Validate params against JSON Schema.
-        self.validate_params(tool.as_ref(), &params)?;
+        self.validate_params(entry, params)?;
 
-        tool.execute(params, ctx).await
+        entry.tool.execute(params, ctx).await
     }
 
     /// Validate parameters against a tool's JSON Schema.
-    fn validate_params(&self, tool: &dyn Tool, params: &Value) -> Result<(), ToolError> {
-        let schema = tool.parameters();
-
-        // Build a JSON Schema validator.
+    fn validate_params(&self, tool: &RegisteredTool, params: &Value) -> Result<(), ToolError> {
         let validator =
-            jsonschema::validator_for(schema).map_err(|e| ToolError::InvalidParams {
-                details: format!("invalid schema for tool '{}': {e}", tool.name()),
-            })?;
+            tool.schema_validator
+                .as_ref()
+                .map_err(|error| ToolError::InvalidParams {
+                    details: error.clone(),
+                })?;
 
         // Validate and collect errors.
         let errors: Vec<String> = validator
@@ -72,7 +85,7 @@ impl ToolRegistry {
             return Err(ToolError::InvalidParams {
                 details: format!(
                     "parameter validation failed for '{}': {}",
-                    tool.name(),
+                    tool.tool.name(),
                     errors.join("; ")
                 ),
             });
@@ -83,7 +96,10 @@ impl ToolRegistry {
 
     /// Return all tool definitions (for LLM function-calling).
     pub fn definitions(&self) -> Vec<ToolDefinition> {
-        self.tools.values().map(|t| t.to_definition()).collect()
+        self.tools
+            .values()
+            .map(|entry| entry.tool.to_definition())
+            .collect()
     }
 
     /// Number of registered tools.
@@ -154,9 +170,8 @@ mod tests {
     #[tokio::test]
     async fn dispatch_unknown_tool_errors() {
         let reg = ToolRegistry::new();
-        let result = reg
-            .dispatch("nonexistent", serde_json::json!({}), &test_ctx())
-            .await;
+        let params = serde_json::json!({});
+        let result = reg.dispatch("nonexistent", &params, &test_ctx()).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("unknown tool"));
     }
@@ -165,9 +180,8 @@ mod tests {
     async fn dispatch_validates_schema_rejects_invalid() {
         let reg = ToolRegistry::with_builtins();
         // read_file requires "path" (string), send a number instead.
-        let result = reg
-            .dispatch("read_file", serde_json::json!({"path": 12345}), &test_ctx())
-            .await;
+        let params = serde_json::json!({"path": 12345});
+        let result = reg.dispatch("read_file", &params, &test_ctx()).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
@@ -180,13 +194,8 @@ mod tests {
     async fn dispatch_validates_schema_missing_required() {
         let reg = ToolRegistry::with_builtins();
         // write_file requires "path" and "content".
-        let result = reg
-            .dispatch(
-                "write_file",
-                serde_json::json!({"path": "test.txt"}),
-                &test_ctx(),
-            )
-            .await;
+        let params = serde_json::json!({"path": "test.txt"});
+        let result = reg.dispatch("write_file", &params, &test_ctx()).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(

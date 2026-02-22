@@ -55,7 +55,7 @@ impl crate::Tool for EditFileTool {
         &self.schema
     }
 
-    async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+    async fn execute(&self, params: &Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
         match ctx.mode {
             ExecutionMode::Locked | ExecutionMode::ReadOnly => {
                 return Err(ToolError::ModeRestriction { mode: ctx.mode });
@@ -143,7 +143,7 @@ mod tests {
 
         let result = tool
             .execute(
-                serde_json::json!({
+                &serde_json::json!({
                     "path": "file.txt",
                     "old_text": "world",
                     "new_text": "rust"
@@ -178,7 +178,7 @@ mod tests {
 
         let result = tool
             .execute(
-                serde_json::json!({
+                &serde_json::json!({
                     "path": "file.txt",
                     "old_text": "nonexistent",
                     "new_text": "replacement"
