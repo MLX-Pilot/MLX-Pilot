@@ -1,0 +1,163 @@
+﻿cargo :     Checking mlx-agent-tools v0.1.0 (G:\ai\AI_F
+or_MLX-Pilot\mlx-ollama-pilot\crates\agent-tools)
+No linha:1 caractere:1
++ cargo check --workspace --tests 2>&1 | Out-File 
+-Encoding utf8 build_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Check 
+   ing ml...es\agent-tools):String) [], RemoteExcepti  
+  on
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    Checking mlx-agent-skills v0.1.0 (G:\ai\AI_For_MLX-
+Pilot\mlx-ollama-pilot\crates\agent-skills)
+    Checking mlx-agent-core v0.1.0 (G:\ai\AI_For_MLX-Pi
+lot\mlx-ollama-pilot\crates\agent-core)
+    Checking http-llm-provider v0.1.0 (G:\ai\AI_For_MLX
+-Pilot\mlx-ollama-pilot\crates\providers\http_llm_provi
+der)
+    Checking bench-agent v0.1.0 (G:\ai\AI_For_MLX-Pilot
+\mlx-ollama-pilot\crates\bench_agent)
+    Checking ollama-provider v0.1.0 (G:\ai\AI_For_MLX-P
+ilot\mlx-ollama-pilot\crates\providers\ollama)
+    Checking llamacpp-provider v0.1.0 (G:\ai\AI_For_MLX
+-Pilot\mlx-ollama-pilot\crates\providers\llamacpp)
+    Checking mlx-provider v0.1.0 (G:\ai\AI_For_MLX-Pilo
+t\mlx-ollama-pilot\crates\providers\mlx)
+    Checking mlx-ollama-core v0.1.0 
+(G:\ai\AI_For_MLX-Pilot\mlx-ollama-pilot\crates\core)
+    Checking mlx-ollama-daemon v0.1.0 
+(G:\ai\AI_For_MLX-Pilot\mlx-ollama-pilot\crates\daemon)
+error[E0433]: failed to resolve: use of unresolved 
+module or unlinked crate `chrono`
+   --> crates\daemon\src\agent_api.rs:877:28
+    |
+877 |                 timestamp: chrono::Utc::now(),
+    |                            ^^^^^^ use of 
+unresolved module or unlinked crate `chrono`
+    |
+    = help: if you wanted to use a crate named 
+`chrono`, use `cargo add chrono` to add it to your 
+`Cargo.toml`
+
+error[E0433]: failed to resolve: use of unresolved 
+module or unlinked crate `chrono`
+   --> crates\daemon\src\agent_api.rs:913:28
+    |
+913 |                 timestamp: chrono::Utc::now(),
+    |                            ^^^^^^ use of 
+unresolved module or unlinked crate `chrono`
+    |
+    = help: if you wanted to use a crate named 
+`chrono`, use `cargo add chrono` to add it to your 
+`Cargo.toml`
+
+error[E0433]: failed to resolve: use of unresolved 
+module or unlinked crate `chrono`
+    --> crates\daemon\src\agent_api.rs:1471:25
+     |
+1471 |             updated_at: chrono::Utc::now(),
+     |                         ^^^^^^ use of 
+unresolved module or unlinked crate `chrono`
+     |
+     = help: if you wanted to use a crate named 
+`chrono`, use `cargo add chrono` to add it to your 
+`Cargo.toml`
+
+warning: fields `run_index`, `provider`, `model`, and 
+`error` are never read
+   --> crates\bench_agent\src\main.rs:91:5
+    |
+ 90 | struct RunRecord {
+    |        --------- fields in this struct
+ 91 |     run_index: usize,
+    |     ^^^^^^^^^
+...
+101 |     provider: Option<String>,
+    |     ^^^^^^^^
+102 |     model: Option<String>,
+    |     ^^^^^
+103 |     error: Option<String>,
+    |     ^^^^^
+    |
+    = note: `RunRecord` has derived impls for the 
+traits `Clone` and `Debug`, but these are 
+intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of 
+`#[warn(unused)]`) on by default
+
+warning: field `successes` is never read
+   --> crates\bench_agent\src\main.rs:109:5
+    |
+107 | struct GroupSummary {
+    |        ------------ field in this struct
+108 |     attempts: usize,
+109 |     successes: usize,
+    |     ^^^^^^^^^
+    |
+    = note: `GroupSummary` has derived impls for the 
+traits `Clone` and `Debug`, but these are 
+intentionally ignored during dead code analysis
+
+warning: field `provider` is never read
+   --> crates\bench_agent\src\main.rs:235:5
+    |
+232 | struct OpenClawCurrentModel {
+    |        -------------------- field in this struct
+...
+235 |     provider: String,
+    |     ^^^^^^^^
+    |
+    = note: `OpenClawCurrentModel` has derived impls 
+for the traits `Clone` and `Debug`, but these are 
+intentionally ignored during dead code analysis
+
+warning: field `model` is never read
+   --> crates\bench_agent\src\main.rs:243:5
+    |
+240 | struct OpenClawCloudModel {
+    |        ------------------ field in this struct
+...
+243 |     model: String,
+    |     ^^^^^
+    |
+    = note: `OpenClawCloudModel` has derived impls for 
+the traits `Clone` and `Debug`, but these are 
+intentionally ignored during dead code analysis
+
+warning: field `custom_headers` is never read
+   --> crates\bench_agent\src\main.rs:269:5
+    |
+263 | struct AgentConfigResponse {
+    |        ------------------- field in this struct
+...
+269 |     custom_headers: BTreeMap<String, String>,
+    |     ^^^^^^^^^^^^^^
+    |
+    = note: `AgentConfigResponse` has derived impls 
+for the traits `Clone` and `Debug`, but these are 
+intentionally ignored during dead code analysis
+
+warning: `bench-agent` (bin "bench-agent" test) 
+generated 5 warnings
+error[E0433]: failed to resolve: use of unresolved 
+module or unlinked crate `tempfile`
+   --> crates\agent-core\src\session.rs:246:24
+    |
+246 |         let temp_dir = 
+tempfile::tempdir().unwrap();
+    |                        ^^^^^^^^ use of 
+unresolved module or unlinked crate `tempfile`
+    |
+    = help: if you wanted to use a crate named 
+`tempfile`, use `cargo add tempfile` to add it to your 
+`Cargo.toml`
+
+For more information about this error, try `rustc 
+--explain E0433`.
+error: could not compile `mlx-agent-core` (lib test) 
+due to 1 previous error
+warning: build failed, waiting for other jobs to 
+finish...
+error: could not compile `mlx-ollama-daemon` (bin 
+"mlx-ollama-daemon" test) due to 3 previous errors

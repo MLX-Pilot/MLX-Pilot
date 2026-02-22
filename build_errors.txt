@@ -1,0 +1,100 @@
+﻿cargo : warning: fields `run_index`, `provider`, 
+`model`, and `error` are never read
+No linha:1 caractere:1
++ cargo check --workspace 2>&1 | Out-File -Encoding 
+utf8 build_errors.t ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (warning:  
+   fields... are never read:String) [], RemoteExcepti  
+  on
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   --> crates\bench_agent\src\main.rs:91:5
+    |
+ 90 | struct RunRecord {
+    |        --------- fields in this struct
+ 91 |     run_index: usize,
+    |     ^^^^^^^^^
+...
+101 |     provider: Option<String>,
+    |     ^^^^^^^^
+102 |     model: Option<String>,
+    |     ^^^^^
+103 |     error: Option<String>,
+    |     ^^^^^
+    |
+    = note: `RunRecord` has derived impls for the 
+traits `Clone` and `Debug`, but these are 
+intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of 
+`#[warn(unused)]`) on by default
+
+warning: field `successes` is never read
+   --> crates\bench_agent\src\main.rs:109:5
+    |
+107 | struct GroupSummary {
+    |        ------------ field in this struct
+108 |     attempts: usize,
+109 |     successes: usize,
+    |     ^^^^^^^^^
+    |
+    = note: `GroupSummary` has derived impls for the 
+traits `Clone` and `Debug`, but these are 
+intentionally ignored during dead code analysis
+
+warning: field `provider` is never read
+   --> crates\bench_agent\src\main.rs:235:5
+    |
+232 | struct OpenClawCurrentModel {
+    |        -------------------- field in this struct
+...
+235 |     provider: String,
+    |     ^^^^^^^^
+    |
+    = note: `OpenClawCurrentModel` has derived impls 
+for the traits `Clone` and `Debug`, but these are 
+intentionally ignored during dead code analysis
+
+warning: field `model` is never read
+   --> crates\bench_agent\src\main.rs:243:5
+    |
+240 | struct OpenClawCloudModel {
+    |        ------------------ field in this struct
+...
+243 |     model: String,
+    |     ^^^^^
+    |
+    = note: `OpenClawCloudModel` has derived impls for 
+the traits `Clone` and `Debug`, but these are 
+intentionally ignored during dead code analysis
+
+warning: field `custom_headers` is never read
+   --> crates\bench_agent\src\main.rs:269:5
+    |
+263 | struct AgentConfigResponse {
+    |        ------------------- field in this struct
+...
+269 |     custom_headers: BTreeMap<String, String>,
+    |     ^^^^^^^^^^^^^^
+    |
+    = note: `AgentConfigResponse` has derived impls 
+for the traits `Clone` and `Debug`, but these are 
+intentionally ignored during dead code analysis
+
+warning: `bench-agent` (bin "bench-agent") generated 5 
+warnings
+    Checking mlx-ollama-daemon v0.1.0 
+(G:\ai\AI_For_MLX-Pilot\mlx-ollama-pilot\crates\daemon)
+error: this file contains an unclosed delimiter
+    --> crates\daemon\src\agent_api.rs:1595:3
+     |
+1405 | ) -> Result<Json<AgentAuditResponse>, 
+AgentApiError> {
+     |                                                 
+     - unclosed delimiter
+...
+1595 | }
+     |  ^
+
+error: could not compile `mlx-ollama-daemon` (bin 
+"mlx-ollama-daemon") due to 1 previous error
