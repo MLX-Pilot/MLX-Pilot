@@ -367,8 +367,10 @@ async fn main() -> anyhow::Result<()> {
             default_workspace: std::env::var("APP_AGENT_WORKSPACE")
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default()),
-            policy: Arc::new(agent_api::DefaultPolicy),
-            approval: Arc::new(agent_api::AutoApproval),
+            policy: Arc::new(mlx_agent_core::policy::DefaultPolicyEngine::new(
+                mlx_agent_core::policy::PolicyConfig::default(),
+            )),
+            approval: Arc::new(mlx_agent_core::approval::DefaultApprovalService::new()),
             event_bus: Arc::new(mlx_agent_core::EventBus::default()),
             audit: Arc::new(mlx_agent_core::AuditLog::new(
                 std::env::temp_dir().join("mlx-pilot-audit"),
@@ -426,6 +428,7 @@ async fn main() -> anyhow::Result<()> {
         )
         // ── Agent API ──
         .route("/agent/run", post(agent_api::agent_run))
+        .route("/agent/approve", post(agent_api::agent_approve))
         .route("/agent/stream", post(agent_api::agent_stream))
         .with_state(state)
         .layer(CorsLayer::permissive())
