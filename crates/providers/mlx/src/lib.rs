@@ -136,7 +136,7 @@ impl MlxProvider {
     fn detect_system_memory_bytes() -> Option<u64> {
         #[cfg(target_os = "macos")]
         {
-            let output = StdCommand::new("sysctl")
+            let output = std::process::Command::new("sysctl")
                 .arg("-n")
                 .arg("hw.memsize")
                 .output()

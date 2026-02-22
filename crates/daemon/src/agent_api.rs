@@ -4,10 +4,10 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
-use mlx_agent_core::approval::{ApprovalDecision, ApprovalError, ApprovalRequest, ApprovalService};
+use mlx_agent_core::approval::{ApprovalDecision, ApprovalService};
 use mlx_agent_core::audit::AuditLog;
 use mlx_agent_core::events::EventBus;
-use mlx_agent_core::policy::{PolicyDecision, PolicyEngine};
+use mlx_agent_core::policy::PolicyEngine;
 use mlx_agent_core::registry::ToolRegistry;
 use mlx_agent_core::{AgentError, AgentLoop, AgentLoopConfig};
 use mlx_agent_tools::ExecutionMode;
@@ -15,7 +15,6 @@ use mlx_ollama_core::ModelProvider;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 use tracing::info;
 
 // ── Request / Response types ─────────────────────────────────────
@@ -44,6 +43,24 @@ pub struct AgentRunRequest {
     /// Max iterations (default 25).
     #[serde(default)]
     pub max_iterations: Option<usize>,
+    /// Max tokens allocated to system + history + tools.
+    #[serde(default)]
+    pub max_prompt_tokens: Option<usize>,
+    /// Max history messages kept in the sliding window.
+    #[serde(default)]
+    pub max_history_messages: Option<usize>,
+    /// Max tools sent in a single prompt.
+    #[serde(default)]
+    pub max_tools_in_prompt: Option<usize>,
+    /// Optional temperature override.
+    #[serde(default)]
+    pub temperature: Option<f32>,
+    /// Restrict prompt tools to likely-relevant ones.
+    #[serde(default)]
+    pub aggressive_tool_filtering: Option<bool>,
+    /// Enables one short fallback reprompt for tool-call JSON.
+    #[serde(default)]
+    pub enable_tool_call_fallback: Option<bool>,
     /// Workspace root override.
     #[serde(default)]
     pub workspace_root: Option<String>,
@@ -159,7 +176,13 @@ pub async fn agent_run(
         workspace_root: workspace.clone(),
         system_prompt: request.system_prompt.clone(),
         max_iterations: request.max_iterations.unwrap_or(25),
+        max_prompt_tokens: request.max_prompt_tokens,
+        max_history_messages: request.max_history_messages,
+        max_tools_in_prompt: request.max_tools_in_prompt,
         max_tokens_per_turn: 4096,
+        temperature: request.temperature,
+        aggressive_tool_filtering: request.aggressive_tool_filtering.unwrap_or(false),
+        enable_tool_call_fallback: request.enable_tool_call_fallback.unwrap_or(true),
         mode,
         skill_filter: None,
     };

@@ -5,6 +5,9 @@ use crate::approval::ApprovalService;
 use crate::audit::AuditLog;
 use crate::events::EventBus;
 use crate::policy::PolicyEngine;
+use crate::prompt_builder::{
+    select_model_prompt_profile, ModelPromptProfile, PromptBuildInput, PromptBuilder,
+};
 use crate::registry::ToolRegistry;
 use mlx_agent_tools::ExecutionMode;
 use mlx_ollama_core::{
@@ -22,7 +25,13 @@ pub struct AgentLoopConfig {
     pub workspace_root: std::path::PathBuf,
     pub system_prompt: Option<String>,
     pub max_iterations: usize,
+    pub max_prompt_tokens: Option<usize>,
+    pub max_history_messages: Option<usize>,
+    pub max_tools_in_prompt: Option<usize>,
     pub max_tokens_per_turn: u32,
+    pub temperature: Option<f32>,
+    pub aggressive_tool_filtering: bool,
+    pub enable_tool_call_fallback: bool,
     pub mode: ExecutionMode,
     pub skill_filter: Option<Vec<String>>,
 }
@@ -34,7 +43,13 @@ impl Default for AgentLoopConfig {
             workspace_root: std::path::PathBuf::new(),
             system_prompt: None,
             max_iterations: 25,
+            max_prompt_tokens: None,
+            max_history_messages: None,
+            max_tools_in_prompt: None,
             max_tokens_per_turn: 4096,
+            temperature: None,
+            aggressive_tool_filtering: false,
+            enable_tool_call_fallback: true,
             mode: ExecutionMode::Full,
             skill_filter: None,
         }
@@ -96,6 +111,7 @@ pub struct AgentLoop {
     #[allow(dead_code)]
     audit: Arc<AuditLog>,
     skill_runtime: crate::runtime::SkillRuntime,
+    prompt_builder: PromptBuilder,
     /// In-memory conversation history for the current run.
     history: Vec<ChatMessage>,
 }
@@ -123,6 +139,7 @@ impl AgentLoop {
             event_bus,
             audit,
             history: Vec::new(),
+            prompt_builder: PromptBuilder,
         }
     }
 
@@ -152,36 +169,26 @@ impl AgentLoop {
         })
         .await;
 
-        // Build initial messages.
-        let mut messages: Vec<ChatMessage> = Vec::new();
+        let provider_id = self.provider.provider_id();
+        let profile = select_model_prompt_profile(provider_id, &self.config.model_id)
+            .apply_overrides(
+                self.config.max_prompt_tokens,
+                self.config.max_history_messages,
+                self.config.max_tools_in_prompt,
+            );
 
-        // System prompt.
-        let mut full_system_prompt = String::new();
-        if let Some(text) = self.skill_runtime.system_prompt_text() {
-            full_system_prompt.push_str(text);
-        }
-        if let Some(ref system) = self.config.system_prompt {
-            if !full_system_prompt.is_empty() {
-                full_system_prompt.push_str("\n\n---\n\n");
-            }
-            full_system_prompt.push_str(system);
-        }
+        let skill_summaries = self
+            .skill_runtime
+            .compact_summaries(profile.max_skill_summaries, profile.max_skill_summary_chars);
 
-        if !full_system_prompt.is_empty() {
-            messages.push(ChatMessage::text(MessageRole::System, full_system_prompt));
-        }
+        let all_tool_defs = self.build_tool_definitions();
 
-        // Conversation history.
-        messages.extend(self.history.iter().cloned());
-
-        // User message.
-        messages.push(ChatMessage::text(
+        let mut conversation: Vec<ChatMessage> = self.history.clone();
+        conversation.push(ChatMessage::text(
             MessageRole::User,
             user_message.to_string(),
         ));
-
-        // Build tool definitions from registry.
-        let tool_defs = self.build_tool_definitions();
+        let mut fallback_attempted = false;
 
         let mut iterations = 0;
         let mut total_tool_calls = 0;
@@ -205,10 +212,21 @@ impl AgentLoop {
                 });
             }
 
+            let prompt = self.build_prompt_context(
+                &profile,
+                &conversation,
+                &all_tool_defs,
+                &skill_summaries,
+            );
+
             debug!(
                 session = %session_id,
                 iteration = iterations,
-                messages = messages.len(),
+                provider = provider_id,
+                profile = ?profile.kind,
+                messages = prompt.messages.len(),
+                tools = prompt.tools.len(),
+                prompt_estimate = prompt.estimated_prompt_tokens,
                 "calling provider"
             );
 
@@ -217,10 +235,14 @@ impl AgentLoop {
                 .provider
                 .chat_with_tools(ChatToolsRequest {
                     model_id: self.config.model_id.clone(),
-                    messages: messages.clone(),
-                    tools: tool_defs.clone(),
+                    messages: prompt.messages.clone(),
+                    tools: prompt.tools.clone(),
                     options: GenerationOptions {
-                        temperature: Some(0.1),
+                        temperature: Some(
+                            self.config
+                                .temperature
+                                .unwrap_or(profile.temperature_default),
+                        ),
                         max_tokens: Some(self.config.max_tokens_per_turn),
                         top_p: None,
                     },
@@ -236,6 +258,25 @@ impl AgentLoop {
 
             // Check if there are tool calls.
             if assistant_msg.tool_calls.is_empty() {
+                if self.config.enable_tool_call_fallback
+                    && !fallback_attempted
+                    && total_tool_calls == 0
+                    && PromptBuilder::should_force_tool_call(user_message, &prompt.tools)
+                {
+                    fallback_attempted = true;
+                    conversation.push(assistant_msg.clone());
+                    let tool_names = prompt
+                        .tools
+                        .iter()
+                        .map(|t| t.name.clone())
+                        .collect::<Vec<_>>();
+                    conversation.push(ChatMessage::text(
+                        MessageRole::User,
+                        PromptBuilder::tool_call_reprompt(&tool_names),
+                    ));
+                    continue;
+                }
+
                 // Final response — no more tool calls.
                 info!(
                     session = %session_id,
@@ -276,7 +317,7 @@ impl AgentLoop {
             }
 
             // Process tool calls.
-            messages.push(assistant_msg.clone());
+            conversation.push(assistant_msg.clone());
 
             for tool_call in &assistant_msg.tool_calls {
                 total_tool_calls += 1;
@@ -296,9 +337,27 @@ impl AgentLoop {
                 };
 
                 // Inject tool result.
-                messages.push(ChatMessage::tool_result(tool_call.id.clone(), tool_output));
+                conversation.push(ChatMessage::tool_result(tool_call.id.clone(), tool_output));
             }
         }
+    }
+
+    fn build_prompt_context(
+        &self,
+        profile: &ModelPromptProfile,
+        conversation: &[ChatMessage],
+        all_tool_defs: &[FunctionDef],
+        skill_summaries: &[String],
+    ) -> crate::prompt_builder::PromptBuildOutput {
+        self.prompt_builder.build(PromptBuildInput {
+            system_prompt_override: self.config.system_prompt.clone(),
+            execution_mode: self.config.mode,
+            profile: profile.clone(),
+            conversation: conversation.to_vec(),
+            skill_summaries: skill_summaries.to_vec(),
+            tools: all_tool_defs.to_vec(),
+            aggressive_tool_filtering: self.config.aggressive_tool_filtering,
+        })
     }
 
     /// Execute a single tool call through the registry.
@@ -674,7 +733,11 @@ mod tests {
             Ok(ApprovalDecision::AllowOnce)
         }
 
-        async fn resolve(&self, _id: &str, _decision: ApprovalDecision) -> Result<(), ApprovalError> {
+        async fn resolve(
+            &self,
+            _id: &str,
+            _decision: ApprovalDecision,
+        ) -> Result<(), ApprovalError> {
             Ok(())
         }
 
@@ -697,7 +760,13 @@ mod tests {
                 workspace_root: tmp,
                 system_prompt: Some("You are a helpful assistant.".into()),
                 max_iterations: 10,
+                max_prompt_tokens: None,
+                max_history_messages: None,
+                max_tools_in_prompt: None,
                 max_tokens_per_turn: 4096,
+                temperature: None,
+                aggressive_tool_filtering: false,
+                enable_tool_call_fallback: true,
                 mode: ExecutionMode::Full,
                 skill_filter: None,
             },
@@ -719,7 +788,9 @@ mod tests {
     fn default_config_values() {
         let config = AgentLoopConfig::default();
         assert_eq!(config.max_iterations, 25);
+        assert_eq!(config.max_prompt_tokens, None);
         assert_eq!(config.max_tokens_per_turn, 4096);
+        assert!(config.enable_tool_call_fallback);
         assert_eq!(config.mode, ExecutionMode::Full);
     }
 
@@ -840,5 +911,98 @@ mod tests {
         assert_eq!(response.iterations, 1, "should complete in 1 iteration");
         assert_eq!(response.tool_calls_made, 0);
         assert!(response.content.contains("Hello"));
+    }
+
+    #[tokio::test]
+    async fn agent_loop_tool_fallback_reprompt_works() {
+        struct FallbackProvider {
+            calls: AtomicUsize,
+        }
+
+        #[async_trait::async_trait]
+        impl ModelProvider for FallbackProvider {
+            fn provider_id(&self) -> &'static str {
+                "ollama"
+            }
+
+            async fn list_models(&self) -> Result<Vec<ModelDescriptor>, ProviderError> {
+                Ok(vec![])
+            }
+
+            async fn chat(&self, _r: ChatRequest) -> Result<ChatResponse, ProviderError> {
+                unreachable!()
+            }
+
+            async fn chat_with_tools(
+                &self,
+                req: ChatToolsRequest,
+            ) -> Result<ChatResponse, ProviderError> {
+                let n = self.calls.fetch_add(1, Ordering::SeqCst);
+                match n {
+                    0 => Ok(ChatResponse {
+                        model_id: req.model_id,
+                        provider: "fallback".into(),
+                        message: ChatMessage::text(MessageRole::Assistant, "I can help with that."),
+                        usage: TokenUsage {
+                            prompt_tokens: 12,
+                            completion_tokens: 6,
+                            total_tokens: 18,
+                        },
+                        latency_ms: 12,
+                        raw_output: None,
+                    }),
+                    1 => Ok(ChatResponse {
+                        model_id: req.model_id,
+                        provider: "fallback".into(),
+                        message: ChatMessage {
+                            role: MessageRole::Assistant,
+                            content: String::new(),
+                            tool_calls: vec![ToolCallRequest {
+                                id: "fallback_call_1".into(),
+                                name: "list_dir".into(),
+                                arguments: r#"{"path":"."}"#.into(),
+                            }],
+                            tool_call_id: None,
+                        },
+                        usage: TokenUsage {
+                            prompt_tokens: 20,
+                            completion_tokens: 8,
+                            total_tokens: 28,
+                        },
+                        latency_ms: 10,
+                        raw_output: None,
+                    }),
+                    _ => Ok(ChatResponse {
+                        model_id: req.model_id,
+                        provider: "fallback".into(),
+                        message: ChatMessage::text(
+                            MessageRole::Assistant,
+                            "Done, listed the directory.",
+                        ),
+                        usage: TokenUsage {
+                            prompt_tokens: 22,
+                            completion_tokens: 7,
+                            total_tokens: 29,
+                        },
+                        latency_ms: 9,
+                        raw_output: None,
+                    }),
+                }
+            }
+        }
+
+        let provider = Arc::new(FallbackProvider {
+            calls: AtomicUsize::new(0),
+        });
+        let mut agent = create_test_loop(provider);
+        agent.config.enable_tool_call_fallback = true;
+
+        let response = agent
+            .run("List files in this workspace please")
+            .await
+            .unwrap();
+        assert_eq!(response.tool_calls_made, 1);
+        assert_eq!(response.iterations, 3);
+        assert!(response.content.contains("listed"));
     }
 }
