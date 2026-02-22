@@ -66,6 +66,9 @@ impl MlxProvider {
                 MessageRole::Assistant => {
                     let _ = writeln!(prompt, "[ASSISTANT]\n{}\n", message.content.trim());
                 }
+                MessageRole::Tool => {
+                    let _ = writeln!(prompt, "[TOOL]\n{}\n", message.content.trim());
+                }
             }
         }
 
@@ -391,10 +394,7 @@ impl ModelProvider for MlxProvider {
         Ok(ChatResponse {
             model_id: Self::model_name_from_path(&model_path),
             provider: self.provider_id().to_string(),
-            message: ChatMessage {
-                role: MessageRole::Assistant,
-                content: text,
-            },
+            message: ChatMessage::text(MessageRole::Assistant, text),
             usage,
             latency_ms: started.elapsed().as_millis() as u64,
             raw_output: Some(raw),
@@ -411,14 +411,8 @@ mod tests {
     #[test]
     fn prompt_contains_all_roles_and_assistant_suffix() {
         let messages = vec![
-            ChatMessage {
-                role: MessageRole::System,
-                content: "You are concise".to_string(),
-            },
-            ChatMessage {
-                role: MessageRole::User,
-                content: "Explain Rust ownership".to_string(),
-            },
+            ChatMessage::text(MessageRole::System, "You are concise"),
+            ChatMessage::text(MessageRole::User, "Explain Rust ownership"),
         ];
 
         let prompt = MlxProvider::build_prompt(&messages);

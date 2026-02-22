@@ -450,6 +450,7 @@ impl ModelProvider for OllamaProvider {
                         MessageRole::System => "system".to_string(),
                         MessageRole::User => "user".to_string(),
                         MessageRole::Assistant => "assistant".to_string(),
+                        MessageRole::Tool => "tool".to_string(),
                     },
                     content: message.content.clone(),
                 })
@@ -517,10 +518,7 @@ impl ModelProvider for OllamaProvider {
                 payload.model
             },
             provider: self.provider_id().to_string(),
-            message: ChatMessage {
-                role: MessageRole::Assistant,
-                content,
-            },
+            message: ChatMessage::text(MessageRole::Assistant, content),
             usage,
             latency_ms,
             raw_output,
