@@ -483,6 +483,11 @@ fn build_prompt(messages: &[ChatMessage]) -> String {
                 prompt.push_str(message.content.trim());
                 prompt.push_str("\n\n");
             }
+            MessageRole::Tool => {
+                prompt.push_str("[TOOL]\n");
+                prompt.push_str(message.content.trim());
+                prompt.push_str("\n\n");
+            }
         }
     }
 

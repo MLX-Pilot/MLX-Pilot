@@ -1668,14 +1668,8 @@ async fn nanobot_chat(
             .chat(ChatRequest {
                 model_id: local_model_path,
                 messages: vec![
-                    ChatMessage {
-                        role: MessageRole::System,
-                        content: "Responda somente com a resposta final para o usuario, sem tags <think>, sem logs e sem metricas.".to_string(),
-                    },
-                    ChatMessage {
-                        role: MessageRole::User,
-                        content: message.to_string(),
-                    },
+                    ChatMessage::text(MessageRole::System, "Responda somente com a resposta final para o usuario, sem tags <think>, sem logs e sem metricas."),
+                    ChatMessage::text(MessageRole::User, message),
                 ],
                 options: GenerationOptions {
                     temperature: Some(0.15),

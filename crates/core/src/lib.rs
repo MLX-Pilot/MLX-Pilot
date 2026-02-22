@@ -8,13 +8,77 @@ pub enum MessageRole {
     System,
     User,
     Assistant,
+    /// Tool result message (contains the output of a tool call).
+    Tool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: MessageRole,
     pub content: String,
+    /// Tool calls requested by the assistant (only set when role=Assistant).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ToolCallRequest>,
+    /// The tool_call_id this message is responding to (only set when role=Tool).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
+
+impl ChatMessage {
+    /// Create a simple text message (no tool calls).
+    pub fn text(role: MessageRole, content: impl Into<String>) -> Self {
+        Self {
+            role,
+            content: content.into(),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+        }
+    }
+
+    /// Create a tool result message.
+    pub fn tool_result(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            role: MessageRole::Tool,
+            content: content.into(),
+            tool_calls: Vec::new(),
+            tool_call_id: Some(tool_call_id.into()),
+        }
+    }
+}
+
+// ── Tool-calling types ─────────────────────────────────────────────
+
+/// A tool call requested by the LLM.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolCallRequest {
+    /// Unique ID for this call (used to correlate with ToolResult).
+    pub id: String,
+    /// Name of the tool/function to invoke.
+    pub name: String,
+    /// JSON-encoded arguments.
+    pub arguments: String,
+}
+
+/// Function definition for LLM tool-calling.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionDef {
+    pub name: String,
+    pub description: String,
+    pub parameters: serde_json::Value,
+}
+
+/// A chat request that includes tool definitions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatToolsRequest {
+    pub model_id: String,
+    pub messages: Vec<ChatMessage>,
+    #[serde(default)]
+    pub tools: Vec<FunctionDef>,
+    #[serde(default)]
+    pub options: GenerationOptions,
+}
+
+// ── Generation options ─────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GenerationOptions {
@@ -85,4 +149,21 @@ pub trait ModelProvider: Send + Sync {
     fn provider_id(&self) -> &'static str;
     async fn list_models(&self) -> Result<Vec<ModelDescriptor>, ProviderError>;
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, ProviderError>;
+
+    /// Chat with tool-calling support.
+    ///
+    /// Default implementation returns `Unavailable`. Providers that support
+    /// tool-calling (e.g. Ollama with function calling) should override this.
+    async fn chat_with_tools(
+        &self,
+        request: ChatToolsRequest,
+    ) -> Result<ChatResponse, ProviderError> {
+        let _ = request;
+        Err(ProviderError::Unavailable {
+            details: format!(
+                "provider '{}' does not support tool-calling",
+                self.provider_id()
+            ),
+        })
+    }
 }

@@ -451,6 +451,7 @@ impl ModelProvider for LlamaCppProvider {
                     MessageRole::System => "system",
                     MessageRole::User => "user",
                     MessageRole::Assistant => "assistant",
+                    MessageRole::Tool => "tool",
                 },
                 "content": entry.content,
             })).collect::<Vec<_>>(),
@@ -505,10 +506,7 @@ impl ModelProvider for LlamaCppProvider {
         Ok(ChatResponse {
             model_id: model_path.display().to_string(),
             provider: self.provider_id().to_string(),
-            message: ChatMessage {
-                role: MessageRole::Assistant,
-                content: answer,
-            },
+            message: ChatMessage::text(MessageRole::Assistant, answer),
             usage: TokenUsage {
                 prompt_tokens,
                 completion_tokens,
