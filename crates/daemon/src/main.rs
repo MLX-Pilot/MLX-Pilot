@@ -63,8 +63,9 @@ struct AppState {
     catalog: Arc<CatalogService>,
     chat_runtime: ChatRuntimeConfig,
     openclaw_runtime: Arc<OpenClawRuntime>,
-    nanobot_runtime: Arc<Mutex<NanoBotRuntimeManager>>,
-    agent_state: agent_api::AgentState,
+    pub nanobot_runtime: Arc<Mutex<NanoBotRuntimeManager>>,
+    pub session_store: Arc<mlx_agent_core::SessionStore>,
+    pub agent_state: agent_api::AgentState,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -372,6 +373,11 @@ async fn main() -> anyhow::Result<()> {
                 std::env::temp_dir().join("mlx-pilot-audit"),
             )),
         },
+        session_store: Arc::new(
+            mlx_agent_core::SessionStore::new(AppConfig::get_settings_path().parent().unwrap_or(std::path::Path::new(".")).join("sessions"))
+                .await
+                .expect("Failed to initialize session store"),
+        ),
     };
 
     let app = Router::new()
@@ -435,6 +441,20 @@ async fn main() -> anyhow::Result<()> {
         .route("/agent/audit", get(agent_api::agent_audit))
         .route("/agent/approve", post(agent_api::agent_approve))
         .route("/agent/stream", post(agent_api::agent_stream))
+        .route(
+            "/agent/sessions",
+            get(agent_api::agent_list_sessions).post(agent_api::agent_create_session),
+        )
+        .route(
+            "/agent/sessions/:id",
+            get(agent_api::agent_get_session)
+                .patch(agent_api::agent_rename_session)
+                .delete(agent_api::agent_delete_session),
+        )
+        .route(
+            "/agent/sessions/:id/export",
+            get(agent_api::agent_export_session),
+        )
         .with_state(state)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());

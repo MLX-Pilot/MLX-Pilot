@@ -854,8 +854,35 @@ async fn run_agent_once(
         model = %resolved.model_id,
         mode = ?mode,
         approval = ?approval_mode,
+        session_id = ?request.session_id,
         "starting agent run"
     );
+
+    let session_id = request
+        .session_id
+        .clone()
+        .unwrap_or_else(mlx_agent_core::SessionStore::new_session_id);
+
+    // Persist session + user message
+    let _ = state.session_store.ensure_session(&session_id, None).await;
+    let _ = state
+        .session_store
+        .append(
+            &session_id,
+            &mlx_agent_core::session::SessionMessage {
+                role: "user".to_string(),
+                content: request.message.clone(),
+                tool_call_id: None,
+                tool_name: None,
+                timestamp: chrono::Utc::now(),
+            },
+        )
+        .await;
+
+    // TODO: if we want to seamlessly pass previous session messages to AgentLoop,
+    // we should load them and prepend to a `history` field in the AgentRunRequest/AgentLoopConfig.
+    // However, for v0.1.1, the prompt builder might build fresh. We'll leave history injection
+    // out of AgentLoop for a future phase or inject them if AgentLoopConfig adds support.
 
     let mut agent = AgentLoop::new(
         config,
@@ -873,11 +900,26 @@ async fn run_agent_once(
         .await
         .map_err(AgentApiError::from_agent_error)?;
 
+    // Persist final assistant message
+    let _ = state
+        .session_store
+        .append(
+            &session_id,
+            &mlx_agent_core::session::SessionMessage {
+                role: "assistant".to_string(),
+                content: response.content.clone(),
+                tool_call_id: None,
+                tool_name: None,
+                timestamp: chrono::Utc::now(),
+            },
+        )
+        .await;
+
     Ok(AgentRunResponse {
         provider: resolved.provider_name,
         model_id: resolved.model_id,
-        session_id: response.session_id.clone(),
-        audit_id: Some(response.session_id),
+        session_id: session_id.clone(),
+        audit_id: Some(session_id),
         content: response.content,
         iterations: response.iterations,
         tool_calls_made: response.tool_calls_made,
@@ -1373,8 +1415,129 @@ pub async fn agent_audit(
 
     entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
     entries.truncate(limit);
-
     Ok(Json(AgentAuditResponse { entries }))
+}
+
+// ── Session API Handlers ─────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct CreateSessionRequest {
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RenameSessionRequest {
+    pub name: String,
+}
+
+pub async fn agent_list_sessions(
+    State(state): State<super::AppState>,
+) -> Result<Json<Vec<mlx_agent_core::session::SessionMeta>>, AgentApiError> {
+    let sessions = state.session_store.list_sessions().await.map_err(|e| {
+        AgentApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "session_error",
+            Some(format!("Failed to list sessions: {e}")),
+        )
+    })?;
+    Ok(Json(sessions))
+}
+
+pub async fn agent_create_session(
+    State(state): State<super::AppState>,
+    Json(req): Json<CreateSessionRequest>,
+) -> Result<Json<mlx_agent_core::session::SessionMeta>, AgentApiError> {
+    let session_id = mlx_agent_core::SessionStore::new_session_id();
+    state
+        .session_store
+        .ensure_session(&session_id, req.name)
+        .await
+        .map_err(|e| {
+            AgentApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "session_error",
+                Some(format!("Failed to create session: {e}")),
+            )
+        })?;
+
+    // Fetch the newly created meta
+    let sessions = state.session_store.list_sessions().await.unwrap_or_default();
+    let meta = sessions
+        .into_iter()
+        .find(|s| s.id == session_id)
+        .unwrap_or_else(|| mlx_agent_core::session::SessionMeta {
+            id: session_id,
+            name: "Nova conversa".to_string(),
+            updated_at: chrono::Utc::now(),
+            message_count: 0,
+        });
+
+    Ok(Json(meta))
+}
+
+pub async fn agent_get_session(
+    State(state): State<super::AppState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<Json<Vec<mlx_agent_core::session::SessionMessage>>, AgentApiError> {
+    let messages = state.session_store.load(&id).await.map_err(|e| {
+        AgentApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "session_error",
+            Some(format!("Failed to load session: {e}")),
+        )
+    })?;
+    Ok(Json(messages))
+}
+
+pub async fn agent_rename_session(
+    State(state): State<super::AppState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(req): Json<RenameSessionRequest>,
+) -> Result<Json<serde_json::Value>, AgentApiError> {
+    state.session_store.rename(&id, &req.name).await.map_err(|e| {
+        AgentApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "session_error",
+            Some(format!("Failed to rename session: {e}")),
+        )
+    })?;
+    Ok(Json(serde_json::json!({ "success": true })))
+}
+
+pub async fn agent_delete_session(
+    State(state): State<super::AppState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, AgentApiError> {
+    state.session_store.delete(&id).await.map_err(|e| {
+        AgentApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "session_error",
+            Some(format!("Failed to delete session: {e}")),
+        )
+    })?;
+    Ok(Json(serde_json::json!({ "success": true })))
+}
+
+pub async fn agent_export_session(
+    State(state): State<super::AppState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<axum::response::Response, AgentApiError> {
+    let json_str = state.session_store.export(&id).await.map_err(|e| {
+        AgentApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "session_error",
+            Some(format!("Failed to export session: {e}")),
+        )
+    })?;
+
+    Ok(axum::response::Response::builder()
+        .header("Content-Type", "application/json")
+        .header(
+            "Content-Disposition",
+            format!("attachment; filename=\"session_{}.json\"", id),
+        )
+        .body(axum::body::Body::from(json_str))
+        .unwrap())
 }
 
 // ── Approval handler ─────────────────────────────────────────────
