@@ -439,6 +439,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/agent/skills/reload", post(agent_api::agent_reload_skills))
         .route("/agent/tools", get(agent_api::agent_list_tools))
         .route("/agent/audit", get(agent_api::agent_audit))
+        .route("/agent/audit/export", get(agent_api::agent_audit_export))
+        .route("/agent/audit/:id", get(agent_api::agent_audit_get_id))
         .route("/agent/approve", post(agent_api::agent_approve))
         .route("/agent/stream", post(agent_api::agent_stream))
         .route(

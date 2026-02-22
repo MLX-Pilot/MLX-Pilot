@@ -161,9 +161,12 @@ impl AgentLoop {
 
         use crate::audit::{AuditEventType, AuditLogEntry};
         self.log_audit(AuditLogEntry {
+            id: uuid::Uuid::new_v4().to_string(),
             timestamp: chrono::Utc::now(),
             session_id: session_id.clone(),
             event_type: AuditEventType::SessionStarted,
+            provider: None,
+            model: None,
             tool_name: None,
             skill_name: None,
             params_hash: None,
@@ -171,7 +174,9 @@ impl AgentLoop {
             result_summary: None,
             duration_ms: None,
             decision: None,
+            reason: None,
             error: None,
+            error_summary: None,
         })
         .await;
 
@@ -303,9 +308,12 @@ impl AgentLoop {
                 self.history.push(assistant_msg.clone());
 
                 self.log_audit(AuditLogEntry {
+                    id: uuid::Uuid::new_v4().to_string(),
                     timestamp: chrono::Utc::now(),
                     session_id: session_id.clone(),
                     event_type: AuditEventType::SessionEnded,
+                    provider: Some(provider_id.into()),
+                    model: Some(self.config.model_id.clone()),
                     tool_name: None,
                     skill_name: None,
                     params_hash: None,
@@ -313,7 +321,9 @@ impl AgentLoop {
                     result_summary: None,
                     duration_ms: Some(elapsed_ms_u64(started)),
                     decision: None,
+                    reason: None,
                     error: None,
+                    error_summary: None,
                 })
                 .await;
 
@@ -422,9 +432,12 @@ impl AgentLoop {
                     });
 
                 self.log_audit(AuditLogEntry {
+                    id: uuid::Uuid::new_v4().to_string(),
                     timestamp: chrono::Utc::now(),
                     session_id: session_id.into(),
-                    event_type: AuditEventType::ToolCallDenied,
+                    event_type: AuditEventType::ToolDenied,
+                    provider: None,
+                    model: None,
                     tool_name: Some(tool_call.name.clone()),
                     skill_name: ctx.active_skill.clone(),
                     params_hash: Some(params_hash.clone()),
@@ -432,7 +445,9 @@ impl AgentLoop {
                     result_summary: None,
                     duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                     decision: Some("deny".into()),
+                    reason: Some(reason.clone()),
                     error: Some(reason.clone()),
+                    error_summary: None,
                 })
                 .await;
 
@@ -460,9 +475,12 @@ impl AgentLoop {
                     });
 
                 self.log_audit(AuditLogEntry {
+                    id: uuid::Uuid::new_v4().to_string(),
                     timestamp: chrono::Utc::now(),
                     session_id: session_id.into(),
-                    event_type: AuditEventType::ApprovalRequested,
+                    event_type: AuditEventType::ApprovalPending,
+                    provider: None,
+                    model: None,
                     tool_name: Some(tool_call.name.clone()),
                     skill_name: ctx.active_skill.clone(),
                     params_hash: Some(params_hash.clone()),
@@ -470,7 +488,9 @@ impl AgentLoop {
                     result_summary: None,
                     duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                     decision: None,
+                    reason: None,
                     error: None,
+                    error_summary: None,
                 })
                 .await;
 
@@ -481,9 +501,12 @@ impl AgentLoop {
                 {
                     Ok(ApprovalDecision::AllowOnce) | Ok(ApprovalDecision::AllowSession) => {
                         self.log_audit(AuditLogEntry {
+                            id: uuid::Uuid::new_v4().to_string(),
                             timestamp: chrono::Utc::now(),
                             session_id: session_id.into(),
-                            event_type: AuditEventType::ApprovalGranted,
+                            event_type: AuditEventType::ApprovalDecision,
+                            provider: None,
+                            model: None,
                             tool_name: Some(tool_call.name.clone()),
                             skill_name: ctx.active_skill.clone(),
                             params_hash: Some(params_hash.clone()),
@@ -491,16 +514,21 @@ impl AgentLoop {
                             result_summary: None,
                             duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                             decision: Some("allow".into()),
+                            reason: None,
                             error: None,
+                            error_summary: None,
                         })
                         .await;
                     }
                     Ok(ApprovalDecision::AllowAlways { pattern }) => {
                         self.approval.add_allowlist_entry(&tool_call.name, pattern);
                         self.log_audit(AuditLogEntry {
+                            id: uuid::Uuid::new_v4().to_string(),
                             timestamp: chrono::Utc::now(),
                             session_id: session_id.into(),
-                            event_type: AuditEventType::ApprovalGranted,
+                            event_type: AuditEventType::ApprovalDecision,
+                            provider: None,
+                            model: None,
                             tool_name: Some(tool_call.name.clone()),
                             skill_name: ctx.active_skill.clone(),
                             params_hash: Some(params_hash.clone()),
@@ -508,15 +536,20 @@ impl AgentLoop {
                             result_summary: None,
                             duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                             decision: Some("allow_always".into()),
+                            reason: None,
                             error: None,
+                            error_summary: None,
                         })
                         .await;
                     }
                     Ok(ApprovalDecision::Deny) => {
                         self.log_audit(AuditLogEntry {
+                            id: uuid::Uuid::new_v4().to_string(),
                             timestamp: chrono::Utc::now(),
                             session_id: session_id.into(),
-                            event_type: AuditEventType::ApprovalDenied,
+                            event_type: AuditEventType::ApprovalDecision,
+                            provider: None,
+                            model: None,
                             tool_name: Some(tool_call.name.clone()),
                             skill_name: ctx.active_skill.clone(),
                             params_hash: Some(params_hash.clone()),
@@ -524,7 +557,9 @@ impl AgentLoop {
                             result_summary: None,
                             duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                             decision: Some("deny".into()),
+                            reason: Some("User denied execution".into()),
                             error: None,
+                            error_summary: None,
                         })
                         .await;
                         return Err(AgentError::PolicyDenied {
@@ -533,9 +568,12 @@ impl AgentLoop {
                     }
                     Err(e) => {
                         self.log_audit(AuditLogEntry {
+                            id: uuid::Uuid::new_v4().to_string(),
                             timestamp: chrono::Utc::now(),
                             session_id: session_id.into(),
-                            event_type: AuditEventType::ApprovalDenied,
+                            event_type: AuditEventType::ApprovalDecision,
+                            provider: None,
+                            model: None,
                             tool_name: Some(tool_call.name.clone()),
                             skill_name: ctx.active_skill.clone(),
                             params_hash: Some(params_hash.clone()),
@@ -543,7 +581,9 @@ impl AgentLoop {
                             result_summary: None,
                             duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                             decision: Some("error".into()),
+                            reason: None,
                             error: Some(e.to_string()),
+                            error_summary: None,
                         })
                         .await;
                         return Err(AgentError::PolicyDenied {
@@ -562,9 +602,12 @@ impl AgentLoop {
         {
             Ok(res) => {
                 self.log_audit(AuditLogEntry {
+                    id: uuid::Uuid::new_v4().to_string(),
                     timestamp: chrono::Utc::now(),
                     session_id: session_id.into(),
-                    event_type: AuditEventType::ToolCallExecuted,
+                    event_type: AuditEventType::ToolExecuted,
+                    provider: None,
+                    model: None,
                     tool_name: Some(tool_call.name.clone()),
                     skill_name: ctx.active_skill.clone(),
                     params_hash: Some(params_hash.clone()),
@@ -572,16 +615,21 @@ impl AgentLoop {
                     result_summary: Some(summarize_result(&res.output, res.is_error)),
                     duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                     decision: None,
+                    reason: None,
                     error: None,
+                    error_summary: None,
                 })
                 .await;
                 res
             }
             Err(e) => {
                 self.log_audit(AuditLogEntry {
+                    id: uuid::Uuid::new_v4().to_string(),
                     timestamp: chrono::Utc::now(),
                     session_id: session_id.into(),
-                    event_type: AuditEventType::ToolCallFailed,
+                    event_type: AuditEventType::ToolFailed,
+                    provider: None,
+                    model: None,
                     tool_name: Some(tool_call.name.clone()),
                     skill_name: ctx.active_skill.clone(),
                     params_hash: Some(params_hash),
@@ -589,7 +637,9 @@ impl AgentLoop {
                     result_summary: None,
                     duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                     decision: None,
+                    reason: None,
                     error: Some(e.to_string()),
+                    error_summary: None,
                 })
                 .await;
                 return Err(AgentError::ToolError {

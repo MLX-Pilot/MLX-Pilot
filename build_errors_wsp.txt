@@ -1,0 +1,108 @@
+﻿cargo :     Checking hyper-util v0.1.20
+No linha:1 caractere:1
++ cargo check --workspace --color never 2>&1 | 
+Out-File -Encoding utf8  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Check 
+   ing hyper-util v0.1.20:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    Checking uuid v1.21.0
+    Checking uuid-simd v0.8.0
+    Checking hyper-rustls v0.27.7
+    Checking axum v0.8.8
+    Checking reqwest v0.12.28
+    Checking jsonschema v0.29.1
+    Checking llamacpp-provider v0.1.0 (G:\ai\AI_For_MLX
+-Pilot\mlx-ollama-pilot\crates\providers\llamacpp)
+    Checking ollama-provider v0.1.0 (G:\ai\AI_For_MLX-P
+ilot\mlx-ollama-pilot\crates\providers\ollama)
+    Checking http-llm-provider v0.1.0 (G:\ai\AI_For_MLX
+-Pilot\mlx-ollama-pilot\crates\providers\http_llm_provi
+der)
+    Checking bench-agent v0.1.0 (G:\ai\AI_For_MLX-Pilot
+\mlx-ollama-pilot\crates\bench_agent)
+warning: fields `run_index`, `provider`, `model`, and 
+`error` are never read
+   --> crates\bench_agent\src\main.rs:91:5
+    |
+ 90 | struct RunRecord {
+    |        --------- fields in this struct
+ 91 |     run_index: usize,
+    |     ^^^^^^^^^
+...
+101 |     provider: Option<String>,
+    |     ^^^^^^^^
+102 |     model: Option<String>,
+    |     ^^^^^
+103 |     error: Option<String>,
+    |     ^^^^^
+    |
+    = note: `RunRecord` has derived impls for the 
+traits `Clone` and `Debug`, but these are 
+intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of 
+`#[warn(unused)]`) on by default
+
+warning: field `successes` is never read
+   --> crates\bench_agent\src\main.rs:109:5
+    |
+107 | struct GroupSummary {
+    |        ------------ field in this struct
+108 |     attempts: usize,
+109 |     successes: usize,
+    |     ^^^^^^^^^
+    |
+    = note: `GroupSummary` has derived impls for the 
+traits `Clone` and `Debug`, but these are 
+intentionally ignored during dead code analysis
+
+warning: field `provider` is never read
+   --> crates\bench_agent\src\main.rs:235:5
+    |
+232 | struct OpenClawCurrentModel {
+    |        -------------------- field in this struct
+...
+235 |     provider: String,
+    |     ^^^^^^^^
+    |
+    = note: `OpenClawCurrentModel` has derived impls 
+for the traits `Clone` and `Debug`, but these are 
+intentionally ignored during dead code analysis
+
+warning: field `model` is never read
+   --> crates\bench_agent\src\main.rs:243:5
+    |
+240 | struct OpenClawCloudModel {
+    |        ------------------ field in this struct
+...
+243 |     model: String,
+    |     ^^^^^
+    |
+    = note: `OpenClawCloudModel` has derived impls for 
+the traits `Clone` and `Debug`, but these are 
+intentionally ignored during dead code analysis
+
+warning: field `custom_headers` is never read
+   --> crates\bench_agent\src\main.rs:269:5
+    |
+263 | struct AgentConfigResponse {
+    |        ------------------- field in this struct
+...
+269 |     custom_headers: BTreeMap<String, String>,
+    |     ^^^^^^^^^^^^^^
+    |
+    = note: `AgentConfigResponse` has derived impls 
+for the traits `Clone` and `Debug`, but these are 
+intentionally ignored during dead code analysis
+
+warning: `bench-agent` (bin "bench-agent") generated 5 
+warnings
+    Checking mlx-agent-tools v0.1.0 (G:\ai\AI_For_MLX-P
+ilot\mlx-ollama-pilot\crates\agent-tools)
+    Checking mlx-agent-core v0.1.0 (G:\ai\AI_For_MLX-Pi
+lot\mlx-ollama-pilot\crates\agent-core)
+    Checking mlx-ollama-daemon v0.1.0 
+(G:\ai\AI_For_MLX-Pilot\mlx-ollama-pilot\crates\daemon)
+    Finished `dev` profile [unoptimized + debuginfo] 
+target(s) in 8.07s

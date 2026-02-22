@@ -182,6 +182,24 @@ const agentChatStatus = document.getElementById("agent-chat-status");
 const agentChatLog = document.getElementById("agent-chat-log");
 const agentChatForm = document.getElementById("agent-chat-form");
 const agentMessageInput = document.getElementById("agent-message-input");
+const agentSendBtn = document.getElementById("agent-send-btn");
+
+// Agent Observability Console (Audit Feed)
+const auditFilterSession = document.getElementById("audit-filter-session");
+const auditFilterEvent = document.getElementById("audit-filter-event");
+const auditFilterStatus = document.getElementById("audit-filter-status");
+const auditFilterTool = document.getElementById("audit-filter-tool");
+const auditFollowToggle = document.getElementById("audit-follow-toggle");
+const auditExportBtn = document.getElementById("audit-export-btn");
+const agentObservabilityList = document.getElementById("agent-observability-list");
+
+const auditDetailPanel = document.getElementById("audit-detail-panel");
+const auditDetailContent = document.getElementById("audit-detail-content");
+const auditDetailCloseBtn = document.getElementById("audit-detail-close");
+
+let auditPollTimer = null;
+let auditConsoleLastParams = "";
+let auditActiveSessionFollowCache = null;
 
 const agentSessionSelect = document.getElementById("agent-session-select");
 const agentNewSessionBtn = document.getElementById("agent-new-session-btn");
@@ -3430,8 +3448,10 @@ function switchTab(nextTab) {
     onOpenClawTabSelected();
   } else if (nextTab === "agent") {
     void onAgentTabSelected();
+    startAuditPolling();
   } else {
     stopOpenClawLogPolling();
+    stopAuditPolling();
   }
 }
 
@@ -4741,6 +4761,224 @@ async function loadAgentAudit() {
   });
 }
 
+// -------------------------------------------------------------
+// Agent Observability Console (Dynamic feed)
+// -------------------------------------------------------------
+
+function getRelativeTimeString(dateString) {
+  if (!dateString) return "-";
+  const date = new Date(dateString);
+  const diffMs = Date.now() - date.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+
+  if (diffSec < 5) return "agora mesmo";
+  if (diffSec < 60) return `há ${diffSec}s`;
+  if (diffSec < 3600) return `há ${Math.floor(diffSec / 60)}m`;
+  if (diffSec < 86400) return `há ${Math.floor(diffSec / 3600)}h`;
+  return `há ${Math.floor(diffSec / 86400)}d`;
+}
+
+async function loadObservabilityFeed() {
+  if (!agentObservabilityList) return;
+
+  const filters = {
+    limit: "100",
+  };
+
+  // Override session filter if follow toggle is on
+  if (auditFollowToggle && auditFollowToggle.checked) {
+    if (activeAgentSessionId) {
+      auditFilterSession.value = activeAgentSessionId;
+      auditActiveSessionFollowCache = activeAgentSessionId;
+    }
+  }
+
+  if (auditFilterSession && auditFilterSession.value) {
+    filters.session_id = auditFilterSession.value;
+  }
+  if (auditFilterEvent && auditFilterEvent.value) {
+    filters.event_type = auditFilterEvent.value;
+  }
+  if (auditFilterStatus && auditFilterStatus.value) {
+    filters.status = auditFilterStatus.value;
+  }
+  if (auditFilterTool && auditFilterTool.value.trim()) {
+    filters.tool_name = auditFilterTool.value.trim();
+  }
+
+  const queryParams = new URLSearchParams(filters).toString();
+
+  if (queryParams === auditConsoleLastParams && auditObservabilityEntriesCache) {
+    // Light poll just to check if new stuff arrived ? 
+    // Usually we would fetch to check, but since we re-fetch everything anyway, 
+    // let's do a fast equality check. Wait, best is to just fetch and compare stringified.
+  }
+
+  let payload;
+  try {
+    payload = await fetchJson(`/agent/audit?${queryParams}`, { method: "GET" });
+  } catch (err) {
+    console.error("Failed to load audit feed:", err);
+    return;
+  }
+
+  auditConsoleLastParams = queryParams;
+
+  const entries = Array.isArray(payload?.entries) ? payload.entries : [];
+
+  const fingerprint = entries.map(e => e.id).join("|");
+  if (fingerprint === auditObservabilityEntriesCache) {
+    return; // No changes to the feed list
+  }
+  auditObservabilityEntriesCache = fingerprint;
+
+  clearElement(agentObservabilityList);
+
+  if (!entries.length) {
+    const li = document.createElement("li");
+    li.style.padding = "16px";
+    li.style.textAlign = "center";
+    li.style.color = "var(--muted)";
+    li.textContent = "Nenhum evento corresponde aos filtros.";
+    agentObservabilityList.appendChild(li);
+    return;
+  }
+
+  entries.forEach((entry) => {
+    const li = document.createElement("li");
+    li.className = "agent-audit-item";
+    li.style.cursor = "pointer";
+    li.style.transition = "background-color 0.2s";
+
+    // Status color
+    let statusColor = "var(--text)";
+    if (entry.status === "error") statusColor = "var(--danger)";
+    if (entry.status === "denied") statusColor = "var(--warning)";
+    if (entry.status === "success" && (entry.event_type === "ToolExecuted" || entry.event_type === "ResponseFinal" || entry.event_type === "ApprovalDecision")) {
+      statusColor = "var(--accent)";
+    }
+
+    const timeRel = getRelativeTimeString(entry.timestamp);
+    const eventType = entry.event_type || "-";
+
+    // Determine main label: tool name, provider, or something representative
+    let mainLabel = entry.tool_name || "";
+    if (entry.event_type === "ProviderCall" && entry.provider) {
+      mainLabel = `${entry.provider} / ${entry.model || "-"}`;
+    }
+    if (!mainLabel && entry.reason) {
+      mainLabel = entry.reason.length > 50 ? entry.reason.substring(0, 50) + "..." : entry.reason;
+    }
+
+    li.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: baseline; width: 100%;">
+        <div>
+          <span style="font-weight: 600; font-size: 0.9rem; color: ${statusColor};">${eventType}</span>
+          ${mainLabel ? `<span style="margin-left: 8px; font-size: 0.85rem; color: var(--muted);">${mainLabel}</span>` : ""}
+        </div>
+        <div style="font-size: 0.8rem; color: var(--muted); text-align: right;">
+          ${entry.duration_ms ? `<span>${entry.duration_ms}ms</span> • ` : ""}
+          <span>${timeRel}</span>
+        </div>
+      </div>
+    `;
+
+    // Hover effect
+    li.onmouseenter = () => li.style.backgroundColor = "rgba(255,255,255,0.05)";
+    li.onmouseleave = () => li.style.backgroundColor = "transparent";
+
+    // Click to view details
+    li.addEventListener("click", () => openAuditDetail(entry.id));
+
+    agentObservabilityList.appendChild(li);
+  });
+}
+
+let auditObservabilityEntriesCache = "";
+
+async function openAuditDetail(eventId) {
+  if (!auditDetailPanel || !auditDetailContent) return;
+
+  auditDetailContent.innerHTML = "Carregando...";
+  auditDetailPanel.style.display = "flex";
+
+  try {
+    const entry = await fetchJson(`/agent/audit/${eventId}`, { method: "GET" });
+    const formattedJson = JSON.stringify(entry, null, 2);
+    auditDetailContent.innerHTML = `<pre style="margin: 0; font-family: monospace; font-size: 0.8rem; overflow-x: auto;">${formattedJson}</pre>`;
+  } catch (err) {
+    auditDetailContent.innerHTML = `<span style="color: var(--danger);">Falha ao carregar os detalhes do evento: ${err.message}</span>`;
+  }
+}
+
+if (auditDetailCloseBtn) {
+  auditDetailCloseBtn.addEventListener("click", () => {
+    if (auditDetailPanel) auditDetailPanel.style.display = "none";
+  });
+}
+
+function startAuditPolling() {
+  if (auditPollTimer !== null) return;
+  auditPollTimer = setInterval(() => {
+    void loadObservabilityFeed();
+  }, 1500);
+}
+
+function stopAuditPolling() {
+  if (auditPollTimer !== null) {
+    clearInterval(auditPollTimer);
+    auditPollTimer = null;
+  }
+}
+
+async function syncAuditSessionFilterDropdown() {
+  if (!auditFilterSession) return;
+
+  const currentVal = auditFilterSession.value;
+  auditFilterSession.innerHTML = `<option value="">Todas Sessoes</option>`;
+
+  agentSessions.forEach(s => {
+    const opt = document.createElement("option");
+    opt.value = s.id;
+    opt.textContent = `${s.name || s.id}`;
+    auditFilterSession.appendChild(opt);
+  });
+
+  if (currentVal && agentSessions.some(s => s.id === currentVal)) {
+    auditFilterSession.value = currentVal;
+  }
+}
+
+if (auditExportBtn) {
+  auditExportBtn.addEventListener("click", () => {
+    if (!daemonBaseUrl) return;
+
+    const filters = new URLSearchParams();
+    if (auditFilterSession && auditFilterSession.value) filters.append("session_id", auditFilterSession.value);
+    if (auditFilterEvent && auditFilterEvent.value) filters.append("event_type", auditFilterEvent.value);
+    if (auditFilterStatus && auditFilterStatus.value) filters.append("status", auditFilterStatus.value);
+    if (auditFilterTool && auditFilterTool.value.trim()) filters.append("tool_name", auditFilterTool.value.trim());
+    filters.append("limit", "5000"); // Request a higher limit for exports
+
+    window.open(`${daemonBaseUrl}/agent/audit/export?${filters.toString()}`, "_blank");
+  });
+}
+
+if (auditFilterSession) auditFilterSession.addEventListener("change", () => {
+  if (auditFollowToggle && auditFollowToggle.checked && auditFilterSession.value !== activeAgentSessionId) {
+    auditFollowToggle.checked = false; // Disable follow mode if user manually changes session via filter
+  }
+  loadObservabilityFeed();
+});
+if (auditFilterEvent) auditFilterEvent.addEventListener("change", () => loadObservabilityFeed());
+if (auditFilterStatus) auditFilterStatus.addEventListener("change", () => loadObservabilityFeed());
+if (auditFilterTool) auditFilterTool.addEventListener("input", () => {
+  // debounce slightly
+  clearTimeout(auditFilterTool.timer);
+  auditFilterTool.timer = setTimeout(() => loadObservabilityFeed(), 300);
+});
+if (auditFollowToggle) auditFollowToggle.addEventListener("change", () => loadObservabilityFeed());
+
 async function onAgentTabSelected() {
   if (!panelAgent) {
     return;
@@ -4753,9 +4991,15 @@ async function onAgentTabSelected() {
     await loadAgentTools();
     await loadAgentAudit();
     await loadAgentSessions();
+    syncAuditSessionFilterDropdown(); // ensure console gets the latest sessions list
     if (activeAgentSessionId) {
       await fetchAgentSessionMessages(activeAgentSessionId);
     }
+
+    if (auditFollowToggle && auditFollowToggle.checked) {
+      loadObservabilityFeed(); // initial eager fetch inside tab load
+    }
+
     if (agentMeta) {
       agentMeta.textContent = "Configuracao carregada.";
     }
@@ -4814,8 +5058,10 @@ async function sendAgentMessage() {
     if (response.session_id && response.session_id !== activeAgentSessionId) {
       activeAgentSessionId = response.session_id;
       await loadAgentSessions();
+      syncAuditSessionFilterDropdown();
     } else {
       await loadAgentSessions();
+      syncAuditSessionFilterDropdown();
     }
   } catch (error) {
     appendAgentMessage("assistant", `Erro: ${error.message}`);
@@ -4882,7 +5128,13 @@ if (agentMessageInput) {
 }
 
 if (agentSessionSelect) {
-  agentSessionSelect.addEventListener("change", handleAgentSessionSelectChange);
+  agentSessionSelect.addEventListener("change", () => {
+    handleAgentSessionSelectChange();
+    if (auditFollowToggle && auditFollowToggle.checked && auditFilterSession) {
+      auditFilterSession.value = agentSessionSelect.value;
+      loadObservabilityFeed();
+    }
+  });
 }
 if (agentNewSessionBtn) {
   agentNewSessionBtn.addEventListener("click", handleAgentNewSession);

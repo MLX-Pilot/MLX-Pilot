@@ -1,0 +1,295 @@
+﻿cargo :     Checking mlx-agent-core v0.1.0 (G:\ai\AI_Fo
+r_MLX-Pilot\mlx-ollama-pilot\crates\agent-core)
+No linha:1 caractere:1
++ cargo check -p mlx-agent-core --color never 2>&1 | 
+Out-File -Encoding ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Check 
+   ing ml...tes\agent-core):String) [], RemoteExcepti  
+  on
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+error[E0063]: missing fields `error_summary`, `id`, 
+`model` and 2 other fields in initializer of 
+`AuditLogEntry`
+   --> crates\agent-core\src\agent_loop.rs:163:24
+    |
+163 |         self.log_audit(AuditLogEntry {
+    |                        ^^^^^^^^^^^^^ missing 
+`error_summary`, `id`, `model` and 2 other fields
+
+error[E0063]: missing fields `error_summary`, `id`, 
+`model` and 2 other fields in initializer of 
+`AuditLogEntry`
+   --> crates\agent-core\src\agent_loop.rs:305:32
+    |
+305 |                 self.log_audit(AuditLogEntry {
+    |                                ^^^^^^^^^^^^^ 
+missing `error_summary`, `id`, `model` and 2 other 
+fields
+
+error[E0599]: no variant or associated item named 
+`ToolCallDenied` found for enum `AuditEventType` in 
+the current scope
+   --> crates\agent-core\src\agent_loop.rs:427:49
+    |
+427 |                     event_type: 
+AuditEventType::ToolCallDenied,
+    |                                                 
+^^^^^^^^^^^^^^ variant or associated item not found in 
+`AuditEventType`
+    |
+   ::: crates\agent-core\src\audit.rs:32:1
+    |
+ 32 | pub enum AuditEventType {
+    | ----------------------- variant or associated 
+item `ToolCallDenied` not found for this enum
+    |
+help: there is a variant with a similar name
+    |
+427 -                     event_type: 
+AuditEventType::ToolCallDenied,
+427 +                     event_type: 
+AuditEventType::ToolDenied,
+    |
+
+error[E0063]: missing fields `error_summary`, `id`, 
+`model` and 2 other fields in initializer of 
+`AuditLogEntry`
+   --> crates\agent-core\src\agent_loop.rs:424:32
+    |
+424 |                 self.log_audit(AuditLogEntry {
+    |                                ^^^^^^^^^^^^^ 
+missing `error_summary`, `id`, `model` and 2 other 
+fields
+
+error[E0599]: no variant or associated item named 
+`ApprovalRequested` found for enum `AuditEventType` in 
+the current scope
+   --> crates\agent-core\src\agent_loop.rs:465:49
+    |
+465 |                     event_type: 
+AuditEventType::ApprovalRequested,
+    |                                                 
+^^^^^^^^^^^^^^^^^ variant or associated item not found 
+in `AuditEventType`
+    |
+   ::: crates\agent-core\src\audit.rs:32:1
+    |
+ 32 | pub enum AuditEventType {
+    | ----------------------- variant or associated 
+item `ApprovalRequested` not found for this enum
+
+error[E0063]: missing fields `error_summary`, `id`, 
+`model` and 2 other fields in initializer of 
+`AuditLogEntry`
+   --> crates\agent-core\src\agent_loop.rs:462:32
+    |
+462 |                 self.log_audit(AuditLogEntry {
+    |                                ^^^^^^^^^^^^^ 
+missing `error_summary`, `id`, `model` and 2 other 
+fields
+
+error[E0599]: no variant or associated item named 
+`ApprovalGranted` found for enum `AuditEventType` in 
+the current scope
+   --> crates\agent-core\src\agent_loop.rs:486:57
+    |
+486 | ...                   event_type: 
+AuditEventType::ApprovalGranted,
+    |                                                  
+ ^^^^^^^^^^^^^^^ variant or associated item not found 
+in `AuditEventType`
+    |
+   ::: crates\agent-core\src\audit.rs:32:1
+    |
+ 32 | pub enum AuditEventType {
+    | ----------------------- variant or associated 
+item `ApprovalGranted` not found for this enum
+
+error[E0063]: missing fields `error_summary`, `id`, 
+`model` and 2 other fields in initializer of 
+`AuditLogEntry`
+   --> crates\agent-core\src\agent_loop.rs:483:40
+    |
+483 |                         
+self.log_audit(AuditLogEntry {
+    |                                        
+^^^^^^^^^^^^^ missing `error_summary`, `id`, `model` 
+and 2 other fields
+
+error[E0599]: no variant or associated item named 
+`ApprovalGranted` found for enum `AuditEventType` in 
+the current scope
+   --> crates\agent-core\src\agent_loop.rs:503:57
+    |
+503 | ...                   event_type: 
+AuditEventType::ApprovalGranted,
+    |                                                  
+ ^^^^^^^^^^^^^^^ variant or associated item not found 
+in `AuditEventType`
+    |
+   ::: crates\agent-core\src\audit.rs:32:1
+    |
+ 32 | pub enum AuditEventType {
+    | ----------------------- variant or associated 
+item `ApprovalGranted` not found for this enum
+
+error[E0063]: missing fields `error_summary`, `id`, 
+`model` and 2 other fields in initializer of 
+`AuditLogEntry`
+   --> crates\agent-core\src\agent_loop.rs:500:40
+    |
+500 |                         
+self.log_audit(AuditLogEntry {
+    |                                        
+^^^^^^^^^^^^^ missing `error_summary`, `id`, `model` 
+and 2 other fields
+
+error[E0599]: no variant or associated item named 
+`ApprovalDenied` found for enum `AuditEventType` in 
+the current scope
+   --> crates\agent-core\src\agent_loop.rs:519:57
+    |
+519 | ...                   event_type: 
+AuditEventType::ApprovalDenied,
+    |                                                  
+ ^^^^^^^^^^^^^^ variant or associated item not found 
+in `AuditEventType`
+    |
+   ::: crates\agent-core\src\audit.rs:32:1
+    |
+ 32 | pub enum AuditEventType {
+    | ----------------------- variant or associated 
+item `ApprovalDenied` not found for this enum
+    |
+help: there is a variant with a similar name
+    |
+519 -                             event_type: 
+AuditEventType::ApprovalDenied,
+519 +                             event_type: 
+AuditEventType::ApprovalPending,
+    |
+
+error[E0063]: missing fields `error_summary`, `id`, 
+`model` and 2 other fields in initializer of 
+`AuditLogEntry`
+   --> crates\agent-core\src\agent_loop.rs:516:40
+    |
+516 |                         
+self.log_audit(AuditLogEntry {
+    |                                        
+^^^^^^^^^^^^^ missing `error_summary`, `id`, `model` 
+and 2 other fields
+
+error[E0599]: no variant or associated item named 
+`ApprovalDenied` found for enum `AuditEventType` in 
+the current scope
+   --> crates\agent-core\src\agent_loop.rs:538:57
+    |
+538 | ...                   event_type: 
+AuditEventType::ApprovalDenied,
+    |                                                  
+ ^^^^^^^^^^^^^^ variant or associated item not found 
+in `AuditEventType`
+    |
+   ::: crates\agent-core\src\audit.rs:32:1
+    |
+ 32 | pub enum AuditEventType {
+    | ----------------------- variant or associated 
+item `ApprovalDenied` not found for this enum
+    |
+help: there is a variant with a similar name
+    |
+538 -                             event_type: 
+AuditEventType::ApprovalDenied,
+538 +                             event_type: 
+AuditEventType::ApprovalPending,
+    |
+
+error[E0063]: missing fields `error_summary`, `id`, 
+`model` and 2 other fields in initializer of 
+`AuditLogEntry`
+   --> crates\agent-core\src\agent_loop.rs:535:40
+    |
+535 |                         
+self.log_audit(AuditLogEntry {
+    |                                        
+^^^^^^^^^^^^^ missing `error_summary`, `id`, `model` 
+and 2 other fields
+
+error[E0599]: no variant or associated item named 
+`ToolCallExecuted` found for enum `AuditEventType` in 
+the current scope
+   --> crates\agent-core\src\agent_loop.rs:567:49
+    |
+567 |                     event_type: 
+AuditEventType::ToolCallExecuted,
+    |                                                 
+^^^^^^^^^^^^^^^^ variant or associated item not found 
+in `AuditEventType`
+    |
+   ::: crates\agent-core\src\audit.rs:32:1
+    |
+ 32 | pub enum AuditEventType {
+    | ----------------------- variant or associated 
+item `ToolCallExecuted` not found for this enum
+    |
+help: there is a variant with a similar name
+    |
+567 -                     event_type: 
+AuditEventType::ToolCallExecuted,
+567 +                     event_type: 
+AuditEventType::ToolExecuted,
+    |
+
+error[E0063]: missing fields `error_summary`, `id`, 
+`model` and 2 other fields in initializer of 
+`AuditLogEntry`
+   --> crates\agent-core\src\agent_loop.rs:564:32
+    |
+564 |                 self.log_audit(AuditLogEntry {
+    |                                ^^^^^^^^^^^^^ 
+missing `error_summary`, `id`, `model` and 2 other 
+fields
+
+error[E0599]: no variant or associated item named 
+`ToolCallFailed` found for enum `AuditEventType` in 
+the current scope
+   --> crates\agent-core\src\agent_loop.rs:584:49
+    |
+584 |                     event_type: 
+AuditEventType::ToolCallFailed,
+    |                                                 
+^^^^^^^^^^^^^^ variant or associated item not found in 
+`AuditEventType`
+    |
+   ::: crates\agent-core\src\audit.rs:32:1
+    |
+ 32 | pub enum AuditEventType {
+    | ----------------------- variant or associated 
+item `ToolCallFailed` not found for this enum
+    |
+help: there is a variant with a similar name
+    |
+584 -                     event_type: 
+AuditEventType::ToolCallFailed,
+584 +                     event_type: 
+AuditEventType::ToolFailed,
+    |
+
+error[E0063]: missing fields `error_summary`, `id`, 
+`model` and 2 other fields in initializer of 
+`AuditLogEntry`
+   --> crates\agent-core\src\agent_loop.rs:581:32
+    |
+581 |                 self.log_audit(AuditLogEntry {
+    |                                ^^^^^^^^^^^^^ 
+missing `error_summary`, `id`, `model` and 2 other 
+fields
+
+Some errors have detailed explanations: E0063, E0599.
+For more information about an error, try `rustc 
+--explain E0063`.
+error: could not compile `mlx-agent-core` (lib) due to 
+18 previous errors
