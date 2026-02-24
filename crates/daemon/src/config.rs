@@ -204,10 +204,15 @@ pub struct AppConfig {
 
 impl Default for AppConfig {
     fn default() -> Self {
+        let models_dir = default_models_dir();
+        let app_data_dir = default_app_data_dir();
+        let openclaw_state_dir = default_openclaw_state_dir();
+        let openclaw_logs_dir = openclaw_state_dir.join("logs");
+
         Self {
             bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 11435),
             local_provider: "auto".to_string(),
-            models_dir: PathBuf::from("/Users/kaike/models"),
+            models_dir: models_dir.clone(),
             mlx_command: default_mlx_command(),
             mlx_prefix_args: Vec::new(),
             mlx_suffix_args: Vec::new(),
@@ -226,26 +231,22 @@ impl Default for AppConfig {
             ollama_startup_timeout: Duration::from_secs(30),
             ollama_auto_start: true,
             ollama_auto_install: true,
-            remote_downloads_dir: PathBuf::from("/Users/kaike/models"),
+            remote_downloads_dir: models_dir,
             hf_api_base: "https://huggingface.co".to_string(),
             hf_token: None,
             brave_api_key: None,
             catalog_search_limit: 18,
             catalog_download_timeout: Duration::from_secs(21600),
             openclaw_node_command: "node".to_string(),
-            openclaw_cli_path: PathBuf::from("/Users/kaike/prod/openclaw/openclaw.mjs"),
-            openclaw_state_dir: PathBuf::from("/Users/kaike/prod/openclaw/deploy/data"),
+            openclaw_cli_path: app_data_dir.join("openclaw").join("openclaw.mjs"),
+            openclaw_state_dir: openclaw_state_dir.clone(),
             openclaw_gateway_token: "openclaw-local-token".to_string(),
             openclaw_session_key: "agent:main:main".to_string(),
             openclaw_timeout: Duration::from_secs(120),
-            openclaw_gateway_log: PathBuf::from(
-                "/Users/kaike/prod/openclaw/deploy/data/logs/gateway.log",
-            ),
-            openclaw_error_log: PathBuf::from(
-                "/Users/kaike/prod/openclaw/deploy/data/logs/gateway.err.log",
-            ),
-            openclaw_sync_log: PathBuf::from("/Users/kaike/openclaw-mlx-sync.log"),
-            nanobot_cli_path: PathBuf::from("/Users/kaike/prod/nanobot"),
+            openclaw_gateway_log: openclaw_logs_dir.join("gateway.log"),
+            openclaw_error_log: openclaw_logs_dir.join("gateway.err.log"),
+            openclaw_sync_log: app_data_dir.join("logs").join("openclaw-mlx-sync.log"),
+            nanobot_cli_path: app_data_dir.join("nanobot"),
             active_agent_framework: "openclaw".to_string(),
             agent: AgentUiConfig::default(),
         }
@@ -608,8 +609,35 @@ fn parse_shell_args(value: &str) -> Option<Vec<String>> {
     shell_words::split(value).ok()
 }
 
+fn home_dir() -> Option<PathBuf> {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()
+        .map(PathBuf::from)
+}
+
+fn default_app_data_dir() -> PathBuf {
+    if let Some(home) = home_dir() {
+        return home.join(".mlx-pilot");
+    }
+    PathBuf::from(".").join(".mlx-pilot")
+}
+
+fn default_models_dir() -> PathBuf {
+    if let Some(home) = home_dir() {
+        return home.join("mlx-pilot-models");
+    }
+    PathBuf::from(".").join("models")
+}
+
+fn default_openclaw_state_dir() -> PathBuf {
+    default_app_data_dir().join("openclaw").join("state")
+}
+
 fn default_mlx_command() -> String {
-    let preferred = PathBuf::from("/Users/kaike/mlx-env/bin/mlx_lm.generate");
+    let preferred = home_dir()
+        .map(|home| home.join("mlx-env").join("bin").join("mlx_lm.generate"))
+        .unwrap_or_else(|| PathBuf::from("mlx_lm.generate"));
     if preferred.exists() {
         preferred.display().to_string()
     } else {
@@ -618,12 +646,29 @@ fn default_mlx_command() -> String {
 }
 
 fn default_llamacpp_server_binary() -> String {
-    let bundled = PathBuf::from("/Users/kaike/mlx-ollama-pilot/bin/llama-server");
-    if bundled.exists() {
-        bundled.display().to_string()
-    } else {
-        "llama-server".to_string()
+    let mut candidates = Vec::new();
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join("llama-server"));
+            candidates.push(exe_dir.join("llama-server.exe"));
+            candidates.push(exe_dir.join("bin").join("llama-server"));
+            candidates.push(exe_dir.join("bin").join("llama-server.exe"));
+            candidates.push(exe_dir.join("../Resources").join("llama-server"));
+            candidates.push(exe_dir.join("../Resources").join("llama-server.exe"));
+        }
     }
+
+    candidates.push(PathBuf::from("bin").join("llama-server"));
+    candidates.push(PathBuf::from("bin").join("llama-server.exe"));
+
+    for candidate in candidates {
+        if candidate.exists() {
+            return candidate.display().to_string();
+        }
+    }
+
+    "llama-server".to_string()
 }
 
 fn normalize_mlx_command(cfg: &mut AppConfig) {

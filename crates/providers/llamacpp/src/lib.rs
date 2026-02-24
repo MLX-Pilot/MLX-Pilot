@@ -33,7 +33,7 @@ pub struct LlamaCppProviderConfig {
 impl Default for LlamaCppProviderConfig {
     fn default() -> Self {
         Self {
-            models_dir: PathBuf::from("/Users/kaike/models"),
+            models_dir: default_models_dir(),
             server_binary: default_llama_server_binary(),
             base_url: "http://127.0.0.1:11439".to_string(),
             timeout: Duration::from_secs(900),
@@ -380,6 +380,17 @@ impl ModelProvider for LlamaCppProvider {
     }
 
     async fn list_models(&self) -> Result<Vec<ModelDescriptor>, ProviderError> {
+        if !self.cfg.models_dir.exists() {
+            std::fs::create_dir_all(&self.cfg.models_dir).map_err(|source| ProviderError::Io {
+                context: format!(
+                    "creating models directory {}",
+                    self.cfg.models_dir.display()
+                ),
+                source,
+            })?;
+            return Ok(Vec::new());
+        }
+
         let files =
             discover_gguf_models(&self.cfg.models_dir).map_err(|source| ProviderError::Io {
                 context: format!("reading models directory {}", self.cfg.models_dir.display()),
@@ -588,12 +599,38 @@ fn extract_host_port(base_url: &str) -> Result<(String, u16), ProviderError> {
 }
 
 fn default_llama_server_binary() -> String {
-    let bundled = PathBuf::from("/Users/kaike/mlx-ollama-pilot/bin/llama-server");
-    if bundled.exists() {
-        bundled.display().to_string()
-    } else {
-        "llama-server".to_string()
+    let mut candidates = Vec::new();
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join("llama-server"));
+            candidates.push(exe_dir.join("llama-server.exe"));
+            candidates.push(exe_dir.join("bin").join("llama-server"));
+            candidates.push(exe_dir.join("bin").join("llama-server.exe"));
+            candidates.push(exe_dir.join("../Resources").join("llama-server"));
+            candidates.push(exe_dir.join("../Resources").join("llama-server.exe"));
+        }
     }
+
+    candidates.push(PathBuf::from("bin").join("llama-server"));
+    candidates.push(PathBuf::from("bin").join("llama-server.exe"));
+
+    for candidate in candidates {
+        if candidate.exists() {
+            return candidate.display().to_string();
+        }
+    }
+
+    "llama-server".to_string()
+}
+
+fn default_models_dir() -> PathBuf {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()
+        .map(PathBuf::from)
+        .map(|home| home.join("mlx-pilot-models"))
+        .unwrap_or_else(|| PathBuf::from(".").join("models"))
 }
 
 async fn command_available(command: &str) -> bool {

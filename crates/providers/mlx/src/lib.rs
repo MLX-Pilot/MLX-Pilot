@@ -24,7 +24,7 @@ pub struct MlxProviderConfig {
 impl Default for MlxProviderConfig {
     fn default() -> Self {
         Self {
-            models_dir: PathBuf::from("/Users/kaike/models"),
+            models_dir: default_models_dir(),
             command: default_mlx_command(),
             command_prefix_args: Vec::new(),
             command_suffix_args: Vec::new(),
@@ -195,12 +195,26 @@ impl ModelScan {
 }
 
 fn default_mlx_command() -> String {
-    let preferred = PathBuf::from("/Users/kaike/mlx-env/bin/mlx_lm.generate");
+    let preferred = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()
+        .map(PathBuf::from)
+        .map(|home| home.join("mlx-env").join("bin").join("mlx_lm.generate"))
+        .unwrap_or_else(|| PathBuf::from("mlx_lm.generate"));
     if preferred.exists() {
         preferred.display().to_string()
     } else {
         "mlx_lm.generate".to_string()
     }
+}
+
+fn default_models_dir() -> PathBuf {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()
+        .map(PathBuf::from)
+        .map(|home| home.join("mlx-pilot-models"))
+        .unwrap_or_else(|| PathBuf::from(".").join("models"))
 }
 
 #[async_trait]
@@ -210,6 +224,19 @@ impl ModelProvider for MlxProvider {
     }
 
     async fn list_models(&self) -> Result<Vec<ModelDescriptor>, ProviderError> {
+        if !self.cfg.models_dir.exists() {
+            tokio::fs::create_dir_all(&self.cfg.models_dir)
+                .await
+                .map_err(|source| ProviderError::Io {
+                    context: format!(
+                        "creating models directory {}",
+                        self.cfg.models_dir.display()
+                    ),
+                    source,
+                })?;
+            return Ok(Vec::new());
+        }
+
         let mut entries = tokio::fs::read_dir(&self.cfg.models_dir)
             .await
             .map_err(|source| ProviderError::Io {
