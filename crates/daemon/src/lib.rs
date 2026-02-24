@@ -444,7 +444,7 @@ pub async fn run() -> anyhow::Result<()> {
         .route("/agent/tools", get(agent_api::agent_list_tools))
         .route("/agent/audit", get(agent_api::agent_audit))
         .route("/agent/audit/export", get(agent_api::agent_audit_export))
-        .route("/agent/audit/:id", get(agent_api::agent_audit_get_id))
+        .route("/agent/audit/{id}", get(agent_api::agent_audit_get_id))
         .route("/agent/approve", post(agent_api::agent_approve))
         .route("/agent/stream", post(agent_api::agent_stream))
         .route(
@@ -452,13 +452,13 @@ pub async fn run() -> anyhow::Result<()> {
             get(agent_api::agent_list_sessions).post(agent_api::agent_create_session),
         )
         .route(
-            "/agent/sessions/:id",
+            "/agent/sessions/{id}",
             get(agent_api::agent_get_session)
                 .patch(agent_api::agent_rename_session)
                 .delete(agent_api::agent_delete_session),
         )
         .route(
-            "/agent/sessions/:id/export",
+            "/agent/sessions/{id}/export",
             get(agent_api::agent_export_session),
         )
         .with_state(state)
