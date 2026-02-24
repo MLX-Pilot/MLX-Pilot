@@ -11,6 +11,8 @@ const STREAM_TICK_MS = 20;
 const CHAT_SCROLL_THRESHOLD_PX = 72;
 const OPENCLAW_LOG_POLL_MS = 1500;
 const OPENCLAW_LOG_MAX_CHARS = 120000;
+const DAEMON_BOOT_TIMEOUT_MS = 45000;
+const DAEMON_BOOT_POLL_MS = 500;
 
 const appShell = document.getElementById("app-shell");
 const splashScreen = document.getElementById("splash-screen");
@@ -310,6 +312,44 @@ async function fetchJson(path, options = {}) {
   }
 
   return response.json();
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function hideSplash() {
+  if (splashScreen) {
+    splashScreen.classList.add("hidden");
+  }
+}
+
+async function waitForDaemonReady() {
+  const startedAt = Date.now();
+  let lastError = "sem resposta";
+
+  while (Date.now() - startedAt < DAEMON_BOOT_TIMEOUT_MS) {
+    try {
+      const response = await fetch(`${daemonBaseUrl}/health`, {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      if (response.ok) {
+        return true;
+      }
+      lastError = `HTTP ${response.status}`;
+    } catch (error) {
+      lastError = error?.message || "falha de conexao";
+    }
+
+    await delay(DAEMON_BOOT_POLL_MS);
+  }
+
+  addSystemMessage(`Daemon indisponivel em ${daemonBaseUrl}: ${lastError}`);
+  return false;
 }
 
 function isNanobotActive() {
@@ -2398,18 +2438,28 @@ async function loadModels() {
 }
 
 async function loadCatalogSources() {
-  const sources = await fetchJson("/catalog/sources");
+  try {
+    const sources = await fetchJson("/catalog/sources");
 
-  catalogSource.innerHTML = "";
-  sources.forEach((source) => {
-    const option = document.createElement("option");
-    option.value = source.id;
-    option.textContent = source.name;
-    catalogSource.appendChild(option);
-  });
+    catalogSource.innerHTML = "";
+    sources.forEach((source) => {
+      const option = document.createElement("option");
+      option.value = source.id;
+      option.textContent = source.name;
+      catalogSource.appendChild(option);
+    });
 
-  if (!catalogSource.value && sources[0]) {
-    catalogSource.value = sources[0].id;
+    if (!catalogSource.value && sources[0]) {
+      catalogSource.value = sources[0].id;
+    }
+  } catch (error) {
+    catalogSource.innerHTML = "";
+    const fallback = document.createElement("option");
+    fallback.value = "huggingface";
+    fallback.textContent = "Hugging Face";
+    catalogSource.appendChild(fallback);
+    catalogSource.value = "huggingface";
+    catalogMeta.textContent = `Catalogo indisponivel: ${error.message}`;
   }
 }
 
@@ -5150,6 +5200,7 @@ if (agentDeleteSessionBtn) {
 }
 
 async function bootstrap() {
+  let daemonReady = false;
   try {
     const storedWebsearch = localStorage.getItem(STORAGE_CHAT_WEBSEARCH_ENABLED);
     setWebsearchToggleState(storedWebsearch === "1", { persist: false });
@@ -5168,15 +5219,23 @@ async function bootstrap() {
     rebuildChatFromThread();
     setEditMode(null);
 
-    await loadModels();
-    await loadCatalogSources();
-    await searchCatalogModels();
-    await loadConfig();
+    setStatus("conectando daemon", "running");
+    daemonReady = await waitForDaemonReady();
+    if (daemonReady) {
+      await loadModels();
+      await loadCatalogSources();
+      await searchCatalogModels();
+      await loadConfig();
+      await loadDownloads();
+      setStatus("pronto");
+    } else {
+      setStatus("daemon offline", "error");
+    }
+
     if (!restoreOpenClawObservabilityFromStorage()) {
       clearChipList(openclawSkills, "Nenhuma skill reportada");
       clearChipList(openclawTools, "Nenhuma tool reportada");
     }
-    await loadDownloads();
 
     if (downloadsTimer) {
       window.clearInterval(downloadsTimer);
@@ -5191,20 +5250,17 @@ async function bootstrap() {
     }
 
     downloadsTimer = window.setInterval(() => {
-      void loadDownloads();
+      if (daemonReady) {
+        void loadDownloads();
+      }
     }, 2000);
 
     switchTab(activeTab);
-    setStatus("pronto");
-
-    if (splashScreen) {
-      setTimeout(() => {
-        splashScreen.classList.add("hidden");
-      }, 1000);
-    }
   } catch (error) {
     setStatus("erro inicial", "error");
     addSystemMessage(`Falha na inicializacao: ${error.message}`);
+  } finally {
+    setTimeout(hideSplash, 300);
   }
 }
 
