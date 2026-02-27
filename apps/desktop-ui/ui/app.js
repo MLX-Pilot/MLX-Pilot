@@ -65,6 +65,9 @@ const catalogQuery = document.getElementById("catalog-query");
 const catalogSearchBtn = document.getElementById("catalog-search-btn");
 const catalogMeta = document.getElementById("catalog-meta");
 const remoteResults = document.getElementById("remote-results");
+const discoverSubtabButtons = Array.from(document.querySelectorAll("[data-discover-subtab]"));
+const discoverCatalogView = document.getElementById("discover-view-catalog");
+const discoverInstalledView = document.getElementById("discover-view-installed");
 const remoteCardTemplate = document.getElementById("remote-card-template");
 const refreshDownloadsBtn = document.getElementById("refresh-downloads");
 const downloadList = document.getElementById("download-list");
@@ -222,6 +225,7 @@ let activeThreadId = null;
 let openThreadMenuId = null;
 
 let activeTab = "chat";
+let activeDiscoverSubtab = "catalog";
 let activeAgentFramework = "openclaw";
 let chatModelMenuOpen = false;
 let isGenerating = false;
@@ -3093,6 +3097,28 @@ function renderInstalledModelsList() {
   });
 }
 
+function switchDiscoverSubtab(nextSubtab) {
+  const normalized = nextSubtab === "installed" ? "installed" : "catalog";
+  activeDiscoverSubtab = normalized;
+
+  discoverSubtabButtons.forEach((button) => {
+    const isActive = button.dataset.discoverSubtab === normalized;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-selected", isActive ? "true" : "false");
+  });
+
+  if (discoverCatalogView) {
+    discoverCatalogView.classList.toggle("active", normalized === "catalog");
+  }
+  if (discoverInstalledView) {
+    discoverInstalledView.classList.toggle("active", normalized === "installed");
+  }
+
+  if (normalized === "installed") {
+    renderInstalledModelsList();
+  }
+}
+
 async function renameInstalledModel(modelId) {
   const current = localModels.find((entry) => entry.id === modelId);
   if (!current) {
@@ -4221,6 +4247,7 @@ function switchTab(nextTab) {
   }
 
   if (nextTab === "discover") {
+    switchDiscoverSubtab(activeDiscoverSubtab);
     void searchCatalogModels();
     void loadDownloads();
   }
@@ -4392,6 +4419,18 @@ catalogQuery.addEventListener("keydown", (event) => {
 refreshDownloadsBtn.addEventListener("click", () => {
   void loadDownloads(true);
 });
+
+if (discoverSubtabButtons.length) {
+  discoverSubtabButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextSubtab = button.dataset.discoverSubtab || "catalog";
+      switchDiscoverSubtab(nextSubtab);
+      if (nextSubtab === "installed") {
+        void loadModels();
+      }
+    });
+  });
+}
 
 if (refreshInstalledModelsBtn) {
   refreshInstalledModelsBtn.addEventListener("click", () => {
@@ -6043,6 +6082,7 @@ async function bootstrap() {
     }, 2000);
 
     switchTab(activeTab);
+    switchDiscoverSubtab(activeDiscoverSubtab);
   } catch (error) {
     setStatus("erro inicial", "error");
     addSystemMessage(`Falha na inicializacao: ${error.message}`);
