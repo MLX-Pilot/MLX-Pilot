@@ -17,7 +17,7 @@ use axum::body::Body;
 use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use bytes::Bytes;
 use catalog::{
@@ -388,6 +388,8 @@ pub async fn run() -> anyhow::Result<()> {
         .route("/config", get(get_config).post(update_config))
         .route("/health", get(health))
         .route("/models", get(list_models))
+        .route("/models/rename", post(rename_model))
+        .route("/models/{model_id}", delete(delete_model))
         .route("/chat", post(chat))
         .route("/chat/stream", post(chat_stream))
         .route("/web/brave/search", post(brave_web_search))
@@ -506,6 +508,120 @@ async fn list_models(
 ) -> Result<Json<Vec<ModelDescriptor>>, AppError> {
     let models = list_chat_models(&state).await?;
     Ok(Json(models))
+}
+
+#[derive(Debug, Deserialize)]
+struct RenameModelRequest {
+    current_id: String,
+    new_id: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ModelMutationResponse {
+    message: String,
+    model_id: String,
+}
+
+async fn rename_model(
+    Json(request): Json<RenameModelRequest>,
+) -> Result<Json<ModelMutationResponse>, AppError> {
+    let current_id = request.current_id.trim();
+    let new_id = request.new_id.trim();
+
+    validate_local_model_id(current_id)?;
+    validate_local_model_id(new_id)?;
+    if current_id == new_id {
+        return Err(AppError::Provider(ProviderError::InvalidRequest {
+            details: "novo nome deve ser diferente do atual".to_string(),
+        }));
+    }
+
+    let models_dir = AppConfig::load_settings().apply_env().models_dir;
+    let source = models_dir.join(current_id);
+    let destination = models_dir.join(new_id);
+
+    if !source.exists() || !source.is_dir() {
+        return Err(AppError::NotFound(format!(
+            "modelo local '{}' nao encontrado",
+            current_id
+        )));
+    }
+    if destination.exists() {
+        return Err(AppError::Provider(ProviderError::InvalidRequest {
+            details: format!("ja existe um modelo chamado '{}'", new_id),
+        }));
+    }
+
+    fs::rename(&source, &destination).map_err(|source_err| {
+        AppError::Provider(ProviderError::Io {
+            context: format!(
+                "falha ao renomear modelo local '{}' para '{}'",
+                current_id, new_id
+            ),
+            source: source_err,
+        })
+    })?;
+
+    Ok(Json(ModelMutationResponse {
+        message: format!("modelo '{}' renomeado para '{}'", current_id, new_id),
+        model_id: new_id.to_string(),
+    }))
+}
+
+async fn delete_model(
+    AxumPath(model_id): AxumPath<String>,
+) -> Result<Json<ModelMutationResponse>, AppError> {
+    let model_id = model_id.trim();
+    validate_local_model_id(model_id)?;
+
+    let models_dir = AppConfig::load_settings().apply_env().models_dir;
+    let target = models_dir.join(model_id);
+    if !target.exists() || !target.is_dir() {
+        return Err(AppError::NotFound(format!(
+            "modelo local '{}' nao encontrado",
+            model_id
+        )));
+    }
+
+    fs::remove_dir_all(&target).map_err(|source_err| {
+        AppError::Provider(ProviderError::Io {
+            context: format!("falha ao apagar modelo local '{}'", model_id),
+            source: source_err,
+        })
+    })?;
+
+    Ok(Json(ModelMutationResponse {
+        message: format!("modelo '{}' removido", model_id),
+        model_id: model_id.to_string(),
+    }))
+}
+
+fn validate_local_model_id(model_id: &str) -> Result<(), AppError> {
+    let normalized = model_id.trim();
+    if normalized.is_empty() {
+        return Err(AppError::Provider(ProviderError::InvalidRequest {
+            details: "nome do modelo nao pode ser vazio".to_string(),
+        }));
+    }
+    if normalized == "." || normalized == ".." {
+        return Err(AppError::Provider(ProviderError::InvalidRequest {
+            details: "nome do modelo invalido".to_string(),
+        }));
+    }
+    if normalized.contains('/') || normalized.contains('\\') {
+        return Err(AppError::Provider(ProviderError::InvalidRequest {
+            details: "nome do modelo invalido: nao use separadores de pasta".to_string(),
+        }));
+    }
+    if !normalized
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.')
+    {
+        return Err(AppError::Provider(ProviderError::InvalidRequest {
+            details: "use apenas letras, numeros, '-', '_' ou '.' no nome do modelo".to_string(),
+        }));
+    }
+    Ok(())
 }
 
 async fn chat(

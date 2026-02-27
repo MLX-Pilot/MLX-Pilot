@@ -69,6 +69,9 @@ const remoteCardTemplate = document.getElementById("remote-card-template");
 const refreshDownloadsBtn = document.getElementById("refresh-downloads");
 const downloadList = document.getElementById("download-list");
 const downloadItemTemplate = document.getElementById("download-item-template");
+const refreshInstalledModelsBtn = document.getElementById("refresh-installed-models");
+const installedModelsMeta = document.getElementById("installed-models-meta");
+const installedModelsList = document.getElementById("installed-models-list");
 
 const openclawStatusText = document.getElementById("openclaw-status-text");
 const openclawRuntimeMeta = document.getElementById("openclaw-runtime-meta");
@@ -3019,11 +3022,156 @@ async function loadModels() {
     renderThreadList();
     renderSelectedThreadMeta();
     renderOpenClawModelSelectors();
+    renderInstalledModelsList();
 
     setStatus("pronto");
   } catch (error) {
     setStatus("erro modelos", "error");
     addSystemMessage(`Falha ao carregar modelos: ${error.message}`);
+  }
+}
+
+function renderInstalledModelsList() {
+  if (!installedModelsList || !installedModelsMeta) {
+    return;
+  }
+
+  installedModelsList.innerHTML = "";
+  const installed = localModels.filter((entry) => String(entry.provider || "").toLowerCase() === "mlx");
+  installedModelsMeta.textContent = `${installed.length} modelo(s) local(is) instalado(s).`;
+
+  if (!installed.length) {
+    const empty = document.createElement("li");
+    empty.className = "meta-note";
+    empty.textContent = "Nenhum modelo local instalado encontrado no diretorio atual.";
+    installedModelsList.appendChild(empty);
+    return;
+  }
+
+  installed.forEach((model) => {
+    const item = document.createElement("li");
+    item.className = "download-item";
+
+    const main = document.createElement("div");
+    main.className = "download-main";
+
+    const name = document.createElement("p");
+    name.className = "download-model";
+    name.textContent = model.name || model.id || "-";
+
+    const meta = document.createElement("p");
+    meta.className = "download-destination";
+    meta.textContent = `${model.id || "-"} • ${model.path || "-"}`;
+
+    main.appendChild(name);
+    main.appendChild(meta);
+
+    const actions = document.createElement("div");
+    actions.className = "remote-actions";
+
+    const renameBtn = document.createElement("button");
+    renameBtn.type = "button";
+    renameBtn.className = "ghost-btn";
+    renameBtn.textContent = "Renomear";
+    renameBtn.addEventListener("click", () => {
+      void renameInstalledModel(model.id);
+    });
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "ghost-btn danger";
+    deleteBtn.textContent = "Apagar";
+    deleteBtn.addEventListener("click", () => {
+      void deleteInstalledModel(model.id);
+    });
+
+    actions.appendChild(renameBtn);
+    actions.appendChild(deleteBtn);
+    item.appendChild(main);
+    item.appendChild(actions);
+    installedModelsList.appendChild(item);
+  });
+}
+
+async function renameInstalledModel(modelId) {
+  const current = localModels.find((entry) => entry.id === modelId);
+  if (!current) {
+    addSystemMessage("Modelo nao encontrado para renomear.");
+    return;
+  }
+
+  const nextName = await showTextPrompt({
+    title: "Renomear modelo instalado",
+    message: "Informe o novo nome da pasta do modelo local.",
+    defaultValue: current.id,
+    confirmLabel: "Renomear",
+  });
+  if (nextName === null) {
+    return;
+  }
+
+  const normalized = String(nextName).trim();
+  if (!normalized || normalized === current.id) {
+    return;
+  }
+
+  try {
+    await fetchJson("/models/rename", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ current_id: current.id, new_id: normalized }),
+    });
+    chatThreads.forEach((thread) => {
+      if (thread.modelId === current.id) {
+        thread.modelId = normalized;
+        thread.updatedAt = Date.now();
+      }
+    });
+    persistThreads();
+    await loadModels();
+    setStatus("modelo renomeado");
+  } catch (error) {
+    addSystemMessage(`Falha ao renomear modelo: ${error.message}`);
+    setStatus("erro ao renomear modelo", "error");
+  }
+}
+
+async function deleteInstalledModel(modelId) {
+  const current = localModels.find((entry) => entry.id === modelId);
+  if (!current) {
+    addSystemMessage("Modelo nao encontrado para apagar.");
+    return;
+  }
+
+  const confirmed = await showConfirmDialog({
+    title: "Apagar modelo instalado",
+    message: `Deseja apagar o modelo "${current.id}"? Essa acao remove os arquivos do disco.`,
+    confirmLabel: "Apagar",
+    danger: true,
+  });
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await fetchJson(`/models/${encodeURIComponent(current.id)}`, {
+      method: "DELETE",
+    });
+    chatThreads.forEach((thread) => {
+      if (thread.modelId === current.id) {
+        thread.modelId = null;
+        thread.updatedAt = Date.now();
+      }
+    });
+    if (selectedModelId === current.id) {
+      selectedModelId = null;
+    }
+    persistThreads();
+    await loadModels();
+    setStatus("modelo apagado");
+  } catch (error) {
+    addSystemMessage(`Falha ao apagar modelo: ${error.message}`);
+    setStatus("erro ao apagar modelo", "error");
   }
 }
 
@@ -4244,6 +4392,12 @@ catalogQuery.addEventListener("keydown", (event) => {
 refreshDownloadsBtn.addEventListener("click", () => {
   void loadDownloads(true);
 });
+
+if (refreshInstalledModelsBtn) {
+  refreshInstalledModelsBtn.addEventListener("click", () => {
+    void loadModels();
+  });
+}
 
 tabButtons.forEach((button) => {
   button.addEventListener("click", () => {
