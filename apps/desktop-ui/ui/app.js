@@ -3,7 +3,6 @@ import { ParticleSystem } from "./particles.js";
 const STORAGE_DAEMON_URL = "mlxPilotDaemonUrl";
 const STORAGE_CHAT_THREADS = "mlxPilotChatThreadsV2";
 const STORAGE_AGENT_OBSERVABILITY_PREFIX = "mlxPilotAgentObservabilityV2";
-const STORAGE_BRAVE_API_KEY = "mlxPilotBraveApiKey";
 const STORAGE_CHAT_WEBSEARCH_ENABLED = "mlxPilotWebsearchEnabled";
 
 const STREAM_CHARS_PER_TICK = 22;
@@ -13,6 +12,9 @@ const OPENCLAW_LOG_POLL_MS = 1500;
 const OPENCLAW_LOG_MAX_CHARS = 120000;
 const DAEMON_BOOT_TIMEOUT_MS = 45000;
 const DAEMON_BOOT_POLL_MS = 500;
+const CHAT_MAX_TOKENS_DEFAULT = 512;
+const CHAT_MAX_TOKENS_THINKING = 1536;
+const ENVIRONMENT_ENDPOINT_CANDIDATES = ["/environment", "/openclaw/environment"];
 
 const appShell = document.getElementById("app-shell");
 const splashScreen = document.getElementById("splash-screen");
@@ -21,7 +23,6 @@ const chatSidebar = document.getElementById("chat-sidebar");
 const statusPill = document.getElementById("status-pill");
 
 const daemonInput = document.getElementById("daemon-url");
-const braveApiKeyInput = document.getElementById("brave-api-key");
 const saveUrlBtn = document.getElementById("save-url");
 
 const tabButtons = Array.from(document.querySelectorAll(".tab-btn[data-tab]"));
@@ -255,6 +256,7 @@ let openclawRuntimeActionInFlight = false;
 let openclawSelectedViews = new Set(["chat"]);
 let openclawMultiView = false;
 let openclawEnvironmentInFlight = false;
+let resolvedEnvironmentEndpoint = null;
 let openclawModelsCatalog = {
   cloud_models: [],
   local_models: [],
@@ -268,9 +270,6 @@ let agentSkillsCache = [];
 let agentToolsCache = [];
 
 daemonInput.value = daemonBaseUrl;
-if (braveApiKeyInput) {
-  braveApiKeyInput.value = localStorage.getItem(STORAGE_BRAVE_API_KEY) || "";
-}
 
 function setStatus(text, tone = "normal") {
   statusPill.textContent = text;
@@ -1248,7 +1247,26 @@ function threadStorageSafeParse(raw) {
         const messages = Array.isArray(entry.messages)
           ? entry.messages
             .filter((item) => item && typeof item.role === "string" && typeof item.content === "string")
-            .map((item) => ({ role: item.role, content: item.content }))
+            .map((item) => {
+              const normalized = {
+                role: item.role,
+                content: item.content,
+              };
+
+              if (normalized.role === "assistant") {
+                const thinking = typeof item.thinking === "string" ? item.thinking.trim() : "";
+                if (thinking) {
+                  normalized.thinking = thinking;
+                }
+
+                const metrics = normalizeAssistantMetrics(item.metrics);
+                if (metrics) {
+                  normalized.metrics = metrics;
+                }
+              }
+
+              return normalized;
+            })
           : [];
 
         return {
@@ -1710,6 +1728,263 @@ function roleClassFromValue(role) {
   return "assistant";
 }
 
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function sanitizeMarkdownLinkUrl(rawValue) {
+  const value = String(rawValue || "").trim();
+  if (!value) {
+    return "#";
+  }
+
+  if (value.startsWith("#")) {
+    return value;
+  }
+
+  const hasExplicitScheme = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(value);
+  if (!hasExplicitScheme && !value.startsWith("//")) {
+    return value;
+  }
+
+  try {
+    const parsed = new URL(value, "https://mlx-pilot.local");
+    if (["http:", "https:", "mailto:"].includes(parsed.protocol)) {
+      return parsed.href;
+    }
+  } catch {
+    // ignore invalid URL
+  }
+
+  return "#";
+}
+
+function renderInlineMarkdown(rawValue) {
+  let html = escapeHtml(rawValue);
+
+  html = html.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_match, label, href) => {
+    const safeUrl = escapeHtml(sanitizeMarkdownLinkUrl(href));
+    return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+  });
+
+  html = html.replace(/`([^`]+)`/g, (_match, code) => `<code>${code}</code>`);
+  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+
+  return html;
+}
+
+function renderMarkdownToHtml(rawMarkdown) {
+  const source = String(rawMarkdown || "").replace(/\r\n/g, "\n");
+  if (!source.trim()) {
+    return "";
+  }
+
+  const lines = source.split("\n");
+  const html = [];
+
+  let inCodeBlock = false;
+  let codeLang = "";
+  let codeLines = [];
+  let inUnorderedList = false;
+  let inOrderedList = false;
+  let paragraphLines = [];
+  let quoteLines = [];
+
+  const closeLists = () => {
+    if (inUnorderedList) {
+      html.push("</ul>");
+      inUnorderedList = false;
+    }
+    if (inOrderedList) {
+      html.push("</ol>");
+      inOrderedList = false;
+    }
+  };
+
+  const flushParagraph = () => {
+    if (!paragraphLines.length) {
+      return;
+    }
+    const rendered = paragraphLines
+      .map((line) => renderInlineMarkdown(line.trim()))
+      .join("<br />");
+    html.push(`<p>${rendered}</p>`);
+    paragraphLines = [];
+  };
+
+  const flushQuote = () => {
+    if (!quoteLines.length) {
+      return;
+    }
+    const rendered = quoteLines
+      .map((line) => renderInlineMarkdown(line.trim()))
+      .join("<br />");
+    html.push(`<blockquote>${rendered}</blockquote>`);
+    quoteLines = [];
+  };
+
+  const flushCodeBlock = () => {
+    if (!codeLines.length) {
+      html.push("<pre><code></code></pre>");
+      return;
+    }
+
+    const languageClass = codeLang
+      ? ` class="language-${escapeHtml(codeLang.replace(/[^\w-]/g, ""))}"`
+      : "";
+    html.push(`<pre><code${languageClass}>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+    codeLines = [];
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (inCodeBlock) {
+      if (trimmed.startsWith("```")) {
+        flushCodeBlock();
+        inCodeBlock = false;
+        codeLang = "";
+      } else {
+        codeLines.push(line);
+      }
+      continue;
+    }
+
+    if (trimmed.startsWith("```")) {
+      flushParagraph();
+      flushQuote();
+      closeLists();
+      inCodeBlock = true;
+      codeLang = trimmed.slice(3).trim();
+      codeLines = [];
+      continue;
+    }
+
+    if (!trimmed) {
+      flushParagraph();
+      flushQuote();
+      closeLists();
+      continue;
+    }
+
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+      flushParagraph();
+      flushQuote();
+      closeLists();
+      html.push("<hr />");
+      continue;
+    }
+
+    const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
+    if (headingMatch) {
+      flushParagraph();
+      flushQuote();
+      closeLists();
+      const level = headingMatch[1].length;
+      html.push(`<h${level}>${renderInlineMarkdown(headingMatch[2])}</h${level}>`);
+      continue;
+    }
+
+    const quoteMatch = line.match(/^\s*>\s?(.*)$/);
+    if (quoteMatch) {
+      flushParagraph();
+      closeLists();
+      quoteLines.push(quoteMatch[1]);
+      continue;
+    }
+
+    const unorderedMatch = line.match(/^\s*[-*+]\s*(.+)$/);
+    if (unorderedMatch) {
+      flushParagraph();
+      flushQuote();
+      if (!inUnorderedList) {
+        if (inOrderedList) {
+          html.push("</ol>");
+          inOrderedList = false;
+        }
+        html.push("<ul>");
+        inUnorderedList = true;
+      }
+      html.push(`<li>${renderInlineMarkdown(unorderedMatch[1])}</li>`);
+      continue;
+    }
+
+    const orderedMatch = line.match(/^\s*\d+\.\s*(.+)$/);
+    if (orderedMatch) {
+      flushParagraph();
+      flushQuote();
+      if (!inOrderedList) {
+        if (inUnorderedList) {
+          html.push("</ul>");
+          inUnorderedList = false;
+        }
+        html.push("<ol>");
+        inOrderedList = true;
+      }
+      html.push(`<li>${renderInlineMarkdown(orderedMatch[1])}</li>`);
+      continue;
+    }
+
+    flushQuote();
+    closeLists();
+    paragraphLines.push(line);
+  }
+
+  flushParagraph();
+  flushQuote();
+  closeLists();
+
+  if (inCodeBlock) {
+    flushCodeBlock();
+  }
+
+  return html.join("\n");
+}
+
+function renderMarkdownInto(element, markdownText) {
+  if (!element) {
+    return;
+  }
+
+  element.innerHTML = renderMarkdownToHtml(markdownText);
+}
+
+function normalizeAssistantMetrics(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const normalized = {};
+  const integerKeys = ["prompt_tokens", "completion_tokens", "total_tokens", "latency_ms"];
+  const floatKeys = ["prompt_tps", "generation_tps", "peak_memory_gb"];
+
+  integerKeys.forEach((key) => {
+    const parsed = Number(value[key]);
+    if (Number.isFinite(parsed)) {
+      normalized[key] = Math.round(parsed);
+    }
+  });
+
+  floatKeys.forEach((key) => {
+    const parsed = Number(value[key]);
+    if (Number.isFinite(parsed)) {
+      normalized[key] = parsed;
+    }
+  });
+
+  if (typeof value.raw_metrics === "string" && value.raw_metrics.trim()) {
+    normalized.raw_metrics = value.raw_metrics.trim();
+  }
+
+  return Object.keys(normalized).length ? normalized : null;
+}
+
 function addSystemMessage(text) {
   const node = messageTemplate.content.firstElementChild.cloneNode(true);
   node.classList.add("role-system");
@@ -1736,9 +2011,16 @@ function scrollChatToBottom(force = false) {
 
 function addMessageCard(role, content, { editable = false, messageIndex = null, forceScroll = true } = {}) {
   const node = messageTemplate.content.firstElementChild.cloneNode(true);
-  node.classList.add(`role-${roleClassFromValue(role)}`);
+  const roleClass = roleClassFromValue(role);
+  node.classList.add(`role-${roleClass}`);
   node.querySelector(".message-role").textContent = role;
-  node.querySelector(".message-content").textContent = content;
+  const contentNode = node.querySelector(".message-content");
+  if (roleClass === "assistant") {
+    contentNode.classList.add("markdown-view");
+    renderMarkdownInto(contentNode, content);
+  } else {
+    contentNode.textContent = content;
+  }
 
   const actions = node.querySelector(".message-actions");
   const editBtn = node.querySelector(".edit-message-btn");
@@ -1792,6 +2074,11 @@ function rebuildChatFromThread() {
       return;
     }
 
+    if (message.role === "assistant" && (message.thinking || message.metrics)) {
+      addAssistantHistoryCard(message, { forceScroll: false });
+      return;
+    }
+
     addMessageCard(message.role, message.content, { forceScroll: false });
   });
 
@@ -1800,13 +2087,26 @@ function rebuildChatFromThread() {
   updateChatEmptyState();
 }
 
-function appendMessageToActiveThread(role, content) {
+function appendMessageToActiveThread(role, content, extra = {}) {
   const active = getActiveThread();
   if (!active) {
     return;
   }
 
-  active.messages.push({ role, content });
+  const message = { role, content };
+  if (role === "assistant") {
+    const thinking = typeof extra.thinking === "string" ? extra.thinking.trim() : "";
+    if (thinking) {
+      message.thinking = thinking;
+    }
+
+    const metrics = normalizeAssistantMetrics(extra.metrics);
+    if (metrics) {
+      message.metrics = metrics;
+    }
+  }
+
+  active.messages.push(message);
   active.updatedAt = Date.now();
 
   if (role === "user" && (active.title === "Nova conversa" || !active.title?.trim())) {
@@ -1860,7 +2160,7 @@ function applyEditedMessageAndTrim(messageIndex, nextContent) {
   return true;
 }
 
-function createAssistantStreamCard() {
+function createAssistantStreamCard({ forceScroll = true } = {}) {
   const node = assistantStreamTemplate.content.firstElementChild.cloneNode(true);
   node.classList.add("role-assistant");
   const ui = {
@@ -1874,6 +2174,7 @@ function createAssistantStreamCard() {
     metricsSection: node.querySelector(".assistant-metrics"),
     metricsText: node.querySelector(".assistant-metrics-text"),
     finalAnswer: "",
+    answerRaw: "",
     thinkingQueue: "",
     answerQueue: "",
     flushTimer: null,
@@ -1881,8 +2182,42 @@ function createAssistantStreamCard() {
   };
 
   chatLog.appendChild(node);
-  scrollChatToBottom(true);
+  scrollChatToBottom(forceScroll);
   return ui;
+}
+
+function addAssistantHistoryCard(message, { forceScroll = true } = {}) {
+  const ui = createAssistantStreamCard({ forceScroll: false });
+  setAssistantState(ui, "completed");
+
+  const savedThinking = typeof message?.thinking === "string" ? message.thinking.trim() : "";
+  const savedAnswer = String(message?.content || "").trim();
+  const savedMetrics = normalizeAssistantMetrics(message?.metrics);
+
+  if (savedThinking) {
+    ui.thinkingSection.classList.remove("hidden");
+    ui.thinkingText.textContent = savedThinking;
+  }
+
+  if (savedAnswer) {
+    ui.answerSection.classList.remove("hidden");
+    ui.answerRaw = message.content;
+    ui.finalAnswer = message.content;
+    renderMarkdownInto(ui.answerText, ui.answerRaw);
+  }
+
+  if (savedMetrics) {
+    renderAssistantMetrics(ui, savedMetrics);
+  }
+
+  if (!savedThinking && !savedAnswer && !savedMetrics) {
+    ui.answerSection.classList.remove("hidden");
+    ui.answerRaw = "(sem resposta textual)";
+    ui.finalAnswer = ui.answerRaw;
+    renderMarkdownInto(ui.answerText, ui.answerRaw);
+  }
+
+  scrollChatToBottom(forceScroll);
 }
 
 function setAssistantState(ui, status) {
@@ -1927,8 +2262,9 @@ function flushAssistantQueues(ui) {
     const chunk = ui.answerQueue.slice(0, STREAM_CHARS_PER_TICK);
     ui.answerQueue = ui.answerQueue.slice(chunk.length);
     ui.answerSection.classList.remove("hidden");
-    ui.answerText.textContent += chunk;
-    ui.finalAnswer = ui.answerText.textContent;
+    ui.answerRaw += chunk;
+    renderMarkdownInto(ui.answerText, ui.answerRaw);
+    ui.finalAnswer = ui.answerRaw;
     changed = true;
   }
 
@@ -2032,38 +2368,77 @@ function splitThinkingAndAnswer(content) {
   };
 }
 
+function isThinkingModel(modelId) {
+  const normalized = String(modelId || "").trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized.includes("deepseek-r1")
+    || normalized.includes("reason")
+    || normalized.includes("thinking")
+    || normalized.includes("qwq")
+    || /(?:^|[-_/])r1(?:$|[-_/])/.test(normalized)
+  );
+}
+
+function resolveChatMaxTokens(modelId) {
+  return isThinkingModel(modelId) ? CHAT_MAX_TOKENS_THINKING : CHAT_MAX_TOKENS_DEFAULT;
+}
+
+function promoteThinkingToAnswerIfNeeded(ui) {
+  if (!ui || String(ui.finalAnswer || "").trim()) {
+    return false;
+  }
+
+  const fallbackAnswer = String(ui.thinkingText?.textContent || "").trim();
+  if (!fallbackAnswer) {
+    return false;
+  }
+
+  ui.thinkingText.textContent = "";
+  ui.thinkingSection.classList.add("hidden");
+  setAssistantState(ui, "answering");
+  appendAnswer(ui, fallbackAnswer);
+  return true;
+}
+
 function renderAssistantMetrics(ui, event) {
-  if (!event) {
+  const normalizedEvent = normalizeAssistantMetrics(event);
+  if (!normalizedEvent) {
     return;
   }
 
-  const lines = [];
-  const hasRawMetrics = typeof event.raw_metrics === "string" && event.raw_metrics.trim().length > 0;
+  ui.latestMetrics = normalizedEvent;
 
-  if (!hasRawMetrics && event.prompt_tokens != null) {
-    lines.push(`Prompt: ${event.prompt_tokens} tokens`);
+  const lines = [];
+  const hasRawMetrics = typeof normalizedEvent.raw_metrics === "string" && normalizedEvent.raw_metrics.trim().length > 0;
+
+  if (!hasRawMetrics && normalizedEvent.prompt_tokens != null) {
+    lines.push(`Prompt: ${normalizedEvent.prompt_tokens} tokens`);
   }
-  if (!hasRawMetrics && event.completion_tokens != null) {
-    lines.push(`Generation: ${event.completion_tokens} tokens`);
+  if (!hasRawMetrics && normalizedEvent.completion_tokens != null) {
+    lines.push(`Generation: ${normalizedEvent.completion_tokens} tokens`);
   }
-  if (event.total_tokens != null) {
-    lines.push(`Total: ${event.total_tokens} tokens`);
+  if (normalizedEvent.total_tokens != null) {
+    lines.push(`Total: ${normalizedEvent.total_tokens} tokens`);
   }
-  if (!hasRawMetrics && event.prompt_tps != null) {
-    lines.push(`Prompt rate: ${Number(event.prompt_tps).toFixed(3)} tokens/sec`);
+  if (!hasRawMetrics && normalizedEvent.prompt_tps != null) {
+    lines.push(`Prompt rate: ${Number(normalizedEvent.prompt_tps).toFixed(3)} tokens/sec`);
   }
-  if (!hasRawMetrics && event.generation_tps != null) {
-    lines.push(`Generation rate: ${Number(event.generation_tps).toFixed(3)} tokens/sec`);
+  if (!hasRawMetrics && normalizedEvent.generation_tps != null) {
+    lines.push(`Generation rate: ${Number(normalizedEvent.generation_tps).toFixed(3)} tokens/sec`);
   }
-  if (!hasRawMetrics && event.peak_memory_gb != null) {
-    lines.push(`Peak memory: ${Number(event.peak_memory_gb).toFixed(3)} GB`);
+  if (!hasRawMetrics && normalizedEvent.peak_memory_gb != null) {
+    lines.push(`Peak memory: ${Number(normalizedEvent.peak_memory_gb).toFixed(3)} GB`);
   }
-  if (event.latency_ms != null) {
-    lines.push(`Latency: ${event.latency_ms} ms`);
+  if (normalizedEvent.latency_ms != null) {
+    lines.push(`Latency: ${normalizedEvent.latency_ms} ms`);
   }
 
   if (hasRawMetrics) {
-    lines.unshift(event.raw_metrics.trim());
+    lines.unshift(normalizedEvent.raw_metrics.trim());
   }
 
   if (lines.length) {
@@ -2092,8 +2467,23 @@ function setWebsearchToggleState(nextState, { persist = true } = {}) {
   }
 }
 
+function getEnvironmentValue(key) {
+  if (!openclawEnvList) {
+    return "";
+  }
+  const normalized = String(key || "").trim().toUpperCase();
+  if (!normalized) {
+    return "";
+  }
+
+  const envInput = Array.from(openclawEnvList.querySelectorAll("input[data-env-key]")).find(
+    (input) => String(input.dataset.envKey || "").trim().toUpperCase() === normalized
+  );
+  return (envInput?.value || "").trim();
+}
+
 function getBraveApiKey() {
-  return (braveApiKeyInput?.value || "").trim();
+  return getEnvironmentValue("BRAVE_API_KEY");
 }
 
 function buildWebsearchSkeletonPrompt({ apiKeyConfigured, searchSummary }) {
@@ -2141,7 +2531,12 @@ async function maybeInjectWebsearchContext(messages) {
     return messages;
   }
 
-  const apiKey = getBraveApiKey();
+  let apiKey = getBraveApiKey();
+  const hasEnvironmentSnapshot = Boolean(openclawEnvList?.querySelector("input[data-env-key]"));
+  if (!apiKey && !hasEnvironmentSnapshot) {
+    await loadOpenclawEnvironment({ showLoading: false });
+    apiKey = getBraveApiKey();
+  }
   const latestUserMessage = [...messages]
     .reverse()
     .find((entry) => entry.role === "user")
@@ -2164,7 +2559,7 @@ async function maybeInjectWebsearchContext(messages) {
         body: JSON.stringify(payload),
       });
       searchSummary = formatBraveSearchSummary(response.results);
-      keyConfigured = keyConfigured || Boolean(response?.key_source === "server");
+      keyConfigured = keyConfigured || Boolean(response?.key_source);
     } catch (error) {
       addSystemMessage(`WebSearch Brave indisponivel: ${error.message}`);
     }
@@ -2179,13 +2574,19 @@ async function maybeInjectWebsearchContext(messages) {
 }
 
 async function buildChatPayload(messages) {
-  const payloadMessages = await maybeInjectWebsearchContext(messages);
+  const promptMessages = Array.isArray(messages)
+    ? messages
+      .filter((entry) => entry && typeof entry.role === "string" && typeof entry.content === "string")
+      .map((entry) => ({ role: entry.role, content: entry.content }))
+    : [];
+
+  const payloadMessages = await maybeInjectWebsearchContext(promptMessages);
   return {
     model_id: selectedModelId,
     messages: payloadMessages,
     options: {
       temperature: 0.2,
-      max_tokens: 512,
+      max_tokens: resolveChatMaxTokens(selectedModelId),
     },
   };
 }
@@ -2217,6 +2618,9 @@ async function consumeChatClassic(payload, ui, signal) {
   }
 
   await waitForAssistantFlush(ui);
+  if (promoteThinkingToAnswerIfNeeded(ui)) {
+    await waitForAssistantFlush(ui);
+  }
   setAssistantState(ui, "completed");
   renderAssistantMetrics(ui, {
     prompt_tokens: body?.usage?.prompt_tokens,
@@ -2337,6 +2741,9 @@ async function consumeChatStream(payload, ui, signal) {
   }
 
   await waitForAssistantFlush(ui);
+  if (promoteThinkingToAnswerIfNeeded(ui)) {
+    await waitForAssistantFlush(ui);
+  }
   setAssistantState(ui, "completed");
   renderAssistantMetrics(ui, doneEvent || ui.latestMetrics);
 }
@@ -2360,8 +2767,17 @@ async function runAssistantGeneration() {
     await consumeChatStream(payload, assistantUi, activeStreamController.signal);
 
     const finalAnswer = assistantUi.finalAnswer.trim();
-    if (finalAnswer) {
-      appendMessageToActiveThread("assistant", finalAnswer);
+    const finalThinking = String(assistantUi.thinkingText?.textContent || "").trim();
+    const finalMetrics = normalizeAssistantMetrics(assistantUi.latestMetrics);
+    if (finalAnswer || finalThinking || finalMetrics) {
+      appendMessageToActiveThread(
+        "assistant",
+        finalAnswer || "(sem resposta textual)",
+        {
+          thinking: finalThinking,
+          metrics: finalMetrics,
+        },
+      );
     }
 
     setStatus("resposta concluida");
@@ -2371,8 +2787,17 @@ async function runAssistantGeneration() {
       assistantUi.metricsSection.classList.remove("hidden");
       assistantUi.metricsText.textContent = "Geracao interrompida pelo usuario.";
       const partialAnswer = assistantUi.finalAnswer.trim();
-      if (partialAnswer) {
-        appendMessageToActiveThread("assistant", partialAnswer);
+      const partialThinking = String(assistantUi.thinkingText?.textContent || "").trim();
+      const partialMetrics = normalizeAssistantMetrics(assistantUi.latestMetrics);
+      if (partialAnswer || partialThinking || partialMetrics) {
+        appendMessageToActiveThread(
+          "assistant",
+          partialAnswer || "(geracao interrompida sem resposta final)",
+          {
+            thinking: partialThinking,
+            metrics: partialMetrics,
+          },
+        );
       }
       setStatus("geracao interrompida");
       scrollChatToBottom(true);
@@ -2864,7 +3289,8 @@ async function runOpenClawRuntimeAction(action) {
 function addOpenClawChatMessage(role, content, meta = "") {
   const node = document.createElement("article");
   node.className = "message-card";
-  node.classList.add(`role-${roleClassFromValue(role)}`);
+  const roleClass = roleClassFromValue(role);
+  node.classList.add(`role-${roleClass}`);
 
   const roleNode = document.createElement("header");
   roleNode.className = "message-role";
@@ -2872,7 +3298,12 @@ function addOpenClawChatMessage(role, content, meta = "") {
 
   const contentNode = document.createElement("div");
   contentNode.className = "message-content";
-  contentNode.textContent = content;
+  if (roleClass === "assistant") {
+    contentNode.classList.add("markdown-view");
+    renderMarkdownInto(contentNode, content);
+  } else {
+    contentNode.textContent = content;
+  }
 
   node.appendChild(roleNode);
   node.appendChild(contentNode);
@@ -2903,6 +3334,7 @@ function createOpenClawAssistantStreamCard() {
     metricsSection: node.querySelector(".assistant-metrics"),
     metricsText: node.querySelector(".assistant-metrics-text"),
     finalAnswer: "",
+    answerRaw: "",
     thinkingQueue: "",
     answerQueue: "",
     flushTimer: null,
@@ -2946,8 +3378,9 @@ function flushOpenClawAssistantQueues(ui) {
     const chunk = ui.answerQueue.slice(0, STREAM_CHARS_PER_TICK);
     ui.answerQueue = ui.answerQueue.slice(chunk.length);
     ui.answerSection.classList.remove("hidden");
-    ui.answerText.textContent += chunk;
-    ui.finalAnswer = ui.answerText.textContent;
+    ui.answerRaw += chunk;
+    renderMarkdownInto(ui.answerText, ui.answerRaw);
+    ui.finalAnswer = ui.answerRaw;
     changed = true;
   }
 
@@ -3507,9 +3940,6 @@ function switchTab(nextTab) {
 
 saveUrlBtn.addEventListener("click", () => {
   daemonBaseUrl = daemonInput.value.trim().replace(/\/$/, "");
-  if (braveApiKeyInput) {
-    localStorage.setItem(STORAGE_BRAVE_API_KEY, getBraveApiKey());
-  }
   localStorage.setItem(STORAGE_DAEMON_URL, daemonBaseUrl);
   openclawStatusLoaded = false;
   openclawObservabilityLoaded = false;
@@ -3518,12 +3948,6 @@ saveUrlBtn.addEventListener("click", () => {
   setStatus("url salva");
   void bootstrap();
 });
-
-if (braveApiKeyInput) {
-  braveApiKeyInput.addEventListener("change", () => {
-    localStorage.setItem(STORAGE_BRAVE_API_KEY, getBraveApiKey());
-  });
-}
 
 newChatThreadButtons.forEach((button) => {
   button.addEventListener("click", createNewChatThread);
@@ -4109,6 +4533,37 @@ function renderOpenclawEnvironment(payload) {
   });
 }
 
+function isNotFoundError(error) {
+  return Number(error?.status) === 404;
+}
+
+async function fetchEnvironmentWithFallback({ method = "GET", reveal = false, values = null } = {}) {
+  const endpoints = resolvedEnvironmentEndpoint
+    ? [resolvedEnvironmentEndpoint, ...ENVIRONMENT_ENDPOINT_CANDIDATES.filter((item) => item !== resolvedEnvironmentEndpoint)]
+    : [...ENVIRONMENT_ENDPOINT_CANDIDATES];
+  let lastError = null;
+
+  for (const endpoint of endpoints) {
+    const query = method === "GET" ? `?reveal=${reveal ? "true" : "false"}` : "";
+    try {
+      const payload = await fetchJson(`${endpoint}${query}`, {
+        method,
+        headers: method === "POST" ? { "Content-Type": "application/json" } : undefined,
+        body: method === "POST" ? JSON.stringify({ values: values || {} }) : undefined,
+      });
+      resolvedEnvironmentEndpoint = endpoint;
+      return payload;
+    } catch (error) {
+      lastError = error;
+      if (!isNotFoundError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError || new Error("endpoint de environment indisponivel");
+}
+
 async function loadOpenclawEnvironment({ showLoading = true } = {}) {
   if (!openclawEnvList || openclawEnvironmentInFlight) {
     return null;
@@ -4118,15 +4573,18 @@ async function loadOpenclawEnvironment({ showLoading = true } = {}) {
   setOpenclawEnvironmentButtonsDisabled(true);
 
   if (showLoading && openclawEnvFeedback) {
-    openclawEnvFeedback.textContent = "Carregando environment...";
+    openclawEnvFeedback.textContent = "Carregando environment global...";
   }
 
   try {
-    const payload = await fetchJson("/openclaw/environment?reveal=true", { method: "GET" });
+    const payload = await fetchEnvironmentWithFallback({
+      method: "GET",
+      reveal: true,
+    });
     renderOpenclawEnvironment(payload);
     if (openclawEnvFeedback) {
       const count = Array.isArray(payload?.variables) ? payload.variables.length : 0;
-      openclawEnvFeedback.textContent = `Environment carregado (${count} variaveis).`;
+      openclawEnvFeedback.textContent = `Environment global carregado (${count} variaveis).`;
     }
     setOpenclawEnvironmentInputVisibility();
     return payload;
@@ -4173,17 +4631,16 @@ async function saveOpenclawEnvironment() {
   openclawEnvironmentInFlight = true;
   setOpenclawEnvironmentButtonsDisabled(true);
   if (openclawEnvFeedback) {
-    openclawEnvFeedback.textContent = "Salvando environment...";
+    openclawEnvFeedback.textContent = "Salvando environment global...";
   }
 
   try {
-    await fetchJson("/openclaw/environment", {
+    await fetchEnvironmentWithFallback({
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ values }),
+      values,
     });
     if (openclawEnvFeedback) {
-      openclawEnvFeedback.textContent = "Environment salvo e sincronizado com o NanoBot.";
+      openclawEnvFeedback.textContent = "Environment global salvo.";
     }
     await loadOpenclawEnvironment({ showLoading: false });
   } catch (error) {
