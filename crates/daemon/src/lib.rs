@@ -403,6 +403,10 @@ pub async fn run() -> anyhow::Result<()> {
         .route("/openclaw/chat", post(openclaw_chat))
         .route("/openclaw/install", post(openclaw_install))
         .route(
+            "/environment",
+            get(openclaw_environment).post(openclaw_update_environment),
+        )
+        .route(
             "/openclaw/environment",
             get(openclaw_environment).post(openclaw_update_environment),
         )
@@ -579,15 +583,24 @@ async fn brave_web_search(
         .map(str::trim)
         .unwrap_or_default()
         .to_string();
+    let shared_env_api_key = if request_api_key.is_empty() {
+        let env_values = read_openclaw_environment_values()?;
+        resolve_environment_value(&env_values, "BRAVE_API_KEY").unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let server_api_key = state
+        .brave_api_key
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string();
     let api_key = if !request_api_key.is_empty() {
         request_api_key.clone()
+    } else if !shared_env_api_key.is_empty() {
+        shared_env_api_key.clone()
     } else {
-        state
-            .brave_api_key
-            .as_deref()
-            .map(str::trim)
-            .unwrap_or_default()
-            .to_string()
+        server_api_key
     };
     let max_results = request.max_results.unwrap_or(5).clamp(1, 10);
 
@@ -599,12 +612,16 @@ async fn brave_web_search(
 
     if api_key.is_empty() {
         return Err(AppError::Provider(ProviderError::InvalidRequest {
-            details: "api_key Brave nao configurada (UI ou APP_BRAVE_API_KEY)".to_string(),
+            details:
+                "api_key Brave nao configurada (Configuracoes > Environment > BRAVE_API_KEY ou APP_BRAVE_API_KEY)"
+                    .to_string(),
         }));
     }
 
     let key_source = if !request_api_key.is_empty() {
         "request".to_string()
+    } else if !shared_env_api_key.is_empty() {
+        "environment".to_string()
     } else {
         "server".to_string()
     };

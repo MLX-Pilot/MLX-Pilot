@@ -48,8 +48,7 @@
         <summary>Conexao</summary>
         <label class="field-label" for="daemon-url">Daemon URL</label>
         <input id="daemon-url" class="input" value="http://127.0.0.1:11435" />
-        <label class="field-label" for="brave-api-key">Brave API Key (opcional)</label>
-        <input id="brave-api-key" class="input" type="password" placeholder="BSA..." autocomplete="off" />
+        <p class="meta-note" style="margin-top: 8px;">APIs em Configuracoes > Environment.</p>
         <button id="save-url" class="ghost-btn">Salvar</button>
       </details>
     </aside>
@@ -688,8 +687,8 @@
           </div>
 
           <section id="environment-settings-group" class="settings-controls glass">
-            <h3>Environment e Secrets (OpenClaw + NanoBot)</h3>
-            <p class="meta-note">Gerencie chaves e tokens usados pelo OpenClaw e sincronizados com o NanoBot cloud.</p>
+            <h3>Environment e Secrets (Global)</h3>
+            <p class="meta-note">Gerencie chaves e tokens compartilhados por Chat, Agent, OpenClaw e NanoBot.</p>
             <div class="openclaw-config-actions" style="margin-top: 12px;">
               <button id="refresh-openclaw-env-btn" type="button" class="ghost-btn">Atualizar environment</button>
               <button id="save-openclaw-env-btn" type="button" class="primary-btn">Salvar environment</button>
@@ -768,7 +767,7 @@
 
       <section class="assistant-answer hidden">
         <h4>resposta</h4>
-        <pre class="assistant-answer-text"></pre>
+        <div class="assistant-answer-text markdown-view"></div>
       </section>
 
       <section class="assistant-metrics hidden">
