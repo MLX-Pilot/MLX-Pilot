@@ -319,6 +319,161 @@ function delay(ms) {
   });
 }
 
+function showTextPrompt({ title, message = "", defaultValue = "", confirmLabel = "Salvar", cancelLabel = "Cancelar" }) {
+  if (!document?.body) {
+    return Promise.resolve(window.prompt(title || "", defaultValue || ""));
+  }
+
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "app-dialog-backdrop";
+
+    const dialog = document.createElement("div");
+    dialog.className = "app-dialog-card";
+
+    const heading = document.createElement("h3");
+    heading.className = "app-dialog-title";
+    heading.textContent = title || "Atualizar valor";
+
+    const body = document.createElement("p");
+    body.className = "app-dialog-message";
+    body.textContent = message || "";
+
+    const input = document.createElement("input");
+    input.className = "input app-dialog-input";
+    input.value = defaultValue || "";
+    input.autocomplete = "off";
+
+    const actions = document.createElement("div");
+    actions.className = "app-dialog-actions";
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "ghost-btn";
+    cancelBtn.textContent = cancelLabel;
+
+    const confirmBtn = document.createElement("button");
+    confirmBtn.type = "button";
+    confirmBtn.className = "primary-btn";
+    confirmBtn.textContent = confirmLabel;
+
+    const cleanup = (result) => {
+      window.removeEventListener("keydown", onKeydown);
+      backdrop.remove();
+      resolve(result);
+    };
+
+    const onConfirm = () => cleanup(input.value);
+    const onCancel = () => cleanup(null);
+    const onKeydown = (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        onConfirm();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel();
+      }
+    };
+
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) {
+        onCancel();
+      }
+    });
+    cancelBtn.addEventListener("click", onCancel);
+    confirmBtn.addEventListener("click", onConfirm);
+    window.addEventListener("keydown", onKeydown);
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(confirmBtn);
+    dialog.appendChild(heading);
+    if (message) {
+      dialog.appendChild(body);
+    }
+    dialog.appendChild(input);
+    dialog.appendChild(actions);
+    backdrop.appendChild(dialog);
+    document.body.appendChild(backdrop);
+
+    input.focus();
+    input.select();
+  });
+}
+
+function showConfirmDialog({ title, message = "", confirmLabel = "Confirmar", cancelLabel = "Cancelar", danger = false }) {
+  if (!document?.body) {
+    return Promise.resolve(window.confirm(message || title || ""));
+  }
+
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "app-dialog-backdrop";
+
+    const dialog = document.createElement("div");
+    dialog.className = "app-dialog-card";
+
+    const heading = document.createElement("h3");
+    heading.className = "app-dialog-title";
+    heading.textContent = title || "Confirmar";
+
+    const body = document.createElement("p");
+    body.className = "app-dialog-message";
+    body.textContent = message || "";
+
+    const actions = document.createElement("div");
+    actions.className = "app-dialog-actions";
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "ghost-btn";
+    cancelBtn.textContent = cancelLabel;
+
+    const confirmBtn = document.createElement("button");
+    confirmBtn.type = "button";
+    confirmBtn.className = danger ? "ghost-btn danger" : "primary-btn";
+    confirmBtn.textContent = confirmLabel;
+
+    const cleanup = (result) => {
+      window.removeEventListener("keydown", onKeydown);
+      backdrop.remove();
+      resolve(result);
+    };
+
+    const onConfirm = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    const onKeydown = (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        onConfirm();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel();
+      }
+    };
+
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) {
+        onCancel();
+      }
+    });
+    cancelBtn.addEventListener("click", onCancel);
+    confirmBtn.addEventListener("click", onConfirm);
+    window.addEventListener("keydown", onKeydown);
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(confirmBtn);
+    dialog.appendChild(heading);
+    if (message) {
+      dialog.appendChild(body);
+    }
+    dialog.appendChild(actions);
+    backdrop.appendChild(dialog);
+    document.body.appendChild(backdrop);
+
+    confirmBtn.focus();
+  });
+}
+
 function hideSplash() {
   if (splashScreen) {
     splashScreen.classList.add("hidden");
@@ -1329,7 +1484,7 @@ function deriveThreadTitle(content) {
   return `${text.slice(0, 52)}...`;
 }
 
-function renameThread(threadId) {
+async function renameThread(threadId) {
   if (isGenerating) {
     addSystemMessage("Pare a geracao atual antes de renomear uma conversa.");
     return;
@@ -1342,7 +1497,12 @@ function renameThread(threadId) {
     return;
   }
 
-  const proposed = window.prompt("Novo nome da conversa:", thread.title || "Nova conversa");
+  const proposed = await showTextPrompt({
+    title: "Renomear conversa",
+    message: "Defina um novo nome para esse chat.",
+    defaultValue: thread.title || "Nova conversa",
+    confirmLabel: "Salvar",
+  });
   if (proposed === null) {
     return;
   }
@@ -1361,7 +1521,7 @@ function renameThread(threadId) {
   setStatus("conversa renomeada");
 }
 
-function deleteThread(threadId) {
+async function deleteThread(threadId) {
   if (isGenerating) {
     addSystemMessage("Pare a geracao atual antes de apagar uma conversa.");
     return;
@@ -1386,7 +1546,12 @@ function deleteThread(threadId) {
     return;
   }
 
-  const confirmed = window.confirm(`Apagar conversa \"${thread.title || "Nova conversa"}\"?`);
+  const confirmed = await showConfirmDialog({
+    title: "Apagar conversa",
+    message: `Tem certeza que deseja apagar "${thread.title || "Nova conversa"}"?`,
+    confirmLabel: "Apagar",
+    danger: true,
+  });
   if (!confirmed) {
     return;
   }
@@ -1613,7 +1778,7 @@ function renderThreadList() {
       renameBtn.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        renameThread(thread.id);
+        void renameThread(thread.id);
       });
 
       const deleteBtn = document.createElement("button");
@@ -1623,7 +1788,7 @@ function renderThreadList() {
       deleteBtn.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        deleteThread(thread.id);
+        void deleteThread(thread.id);
       });
 
       menu.appendChild(renameBtn);
@@ -4958,7 +5123,12 @@ async function handleAgentRenameSession() {
   if (!activeAgentSessionId) return;
   const activeSessionMeta = agentSessions.find(s => s.id === activeAgentSessionId);
   const currentName = activeSessionMeta ? activeSessionMeta.name : "";
-  const newName = prompt("Novo nome da sessao:", currentName);
+  const newName = await showTextPrompt({
+    title: "Renomear sessao",
+    message: "Defina um novo nome para essa sessao do agent.",
+    defaultValue: currentName,
+    confirmLabel: "Salvar",
+  });
 
   if (newName === null || newName.trim() === "") return;
 
@@ -4978,7 +5148,13 @@ async function handleAgentDeleteSession() {
   if (!activeAgentSessionId) return;
   const activeSessionMeta = agentSessions.find(s => s.id === activeAgentSessionId);
   const currentName = activeSessionMeta ? activeSessionMeta.name : "";
-  if (!confirm(`Tem certeza que deseja apagar a sessao "${currentName}"?`)) return;
+  const confirmed = await showConfirmDialog({
+    title: "Apagar sessao",
+    message: `Tem certeza que deseja apagar a sessao "${currentName}"?`,
+    confirmLabel: "Apagar",
+    danger: true,
+  });
+  if (!confirmed) return;
 
   try {
     await fetchJson(`/agent/sessions/${activeAgentSessionId}`, {
