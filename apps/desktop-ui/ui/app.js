@@ -3046,7 +3046,7 @@ function renderInstalledModelsList() {
 
   if (!installed.length) {
     const empty = document.createElement("li");
-    empty.className = "meta-note";
+    empty.className = "installed-model-empty";
     empty.textContent = "Nenhum modelo local instalado encontrado no diretorio atual.";
     installedModelsList.appendChild(empty);
     return;
@@ -3054,24 +3054,24 @@ function renderInstalledModelsList() {
 
   installed.forEach((model) => {
     const item = document.createElement("li");
-    item.className = "download-item";
+    item.className = "installed-model-item";
 
     const main = document.createElement("div");
-    main.className = "download-main";
+    main.className = "installed-model-main";
 
     const name = document.createElement("p");
-    name.className = "download-model";
+    name.className = "installed-model-name";
     name.textContent = model.name || model.id || "-";
 
     const meta = document.createElement("p");
-    meta.className = "download-destination";
+    meta.className = "installed-model-meta";
     meta.textContent = `${model.id || "-"} • ${model.path || "-"}`;
 
     main.appendChild(name);
     main.appendChild(meta);
 
     const actions = document.createElement("div");
-    actions.className = "remote-actions";
+    actions.className = "installed-model-actions";
 
     const renameBtn = document.createElement("button");
     renameBtn.type = "button";
