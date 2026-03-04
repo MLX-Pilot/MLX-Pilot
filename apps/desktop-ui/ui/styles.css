@@ -822,6 +822,26 @@ textarea:focus {
   white-space: nowrap;
 }
 
+.model-airllm-btn {
+  border-radius: 999px;
+  padding: 8px 11px;
+  white-space: nowrap;
+  min-width: 104px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.model-airllm-btn.enabled {
+  border-color: rgba(116, 206, 163, 0.72);
+  background: rgba(23, 88, 62, 0.6);
+  color: #dcffef;
+}
+
+.model-airllm-btn.enabled:hover:not(:disabled) {
+  border-color: rgba(150, 236, 193, 0.9);
+  background: rgba(34, 111, 80, 0.72);
+}
+
 .status-pill {
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.1);

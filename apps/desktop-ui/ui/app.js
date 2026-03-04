@@ -4,6 +4,7 @@ const STORAGE_DAEMON_URL = "mlxPilotDaemonUrl";
 const STORAGE_CHAT_THREADS = "mlxPilotChatThreadsV2";
 const STORAGE_AGENT_OBSERVABILITY_PREFIX = "mlxPilotAgentObservabilityV2";
 const STORAGE_CHAT_WEBSEARCH_ENABLED = "mlxPilotWebsearchEnabled";
+const STORAGE_CHAT_AIRLLM_ENABLED = "mlxPilotChatAirllmEnabled";
 
 const STREAM_CHARS_PER_TICK = 22;
 const STREAM_TICK_MS = 20;
@@ -40,6 +41,7 @@ const chatModelTrigger = document.getElementById("chat-model-trigger");
 const chatModelCurrent = document.getElementById("chat-model-current");
 const chatModelMenu = document.getElementById("chat-model-menu");
 const chatModelSelect = document.getElementById("chat-model-select");
+const chatAirllmToggleBtn = document.getElementById("chat-airllm-toggle");
 const refreshModelsBtn = document.getElementById("refresh-models");
 const newChatThreadTopBtn = document.getElementById("new-chat-thread-top");
 
@@ -219,6 +221,8 @@ const agentDeleteSessionBtn = document.getElementById("agent-delete-session-btn"
 let daemonBaseUrl = localStorage.getItem(STORAGE_DAEMON_URL) || "http://127.0.0.1:11435";
 let selectedModelId = null;
 let localModels = [];
+let chatAirllmEnabled = true;
+let chatAirllmPersistInFlight = false;
 
 let chatThreads = [];
 let activeThreadId = null;
@@ -2722,6 +2726,51 @@ function setWebsearchToggleState(nextState, { persist = true } = {}) {
   }
 }
 
+function setChatAirllmToggleState(nextState, { persist = true } = {}) {
+  const enabled = Boolean(nextState);
+  chatAirllmEnabled = enabled;
+  if (chatAirllmToggleBtn) {
+    chatAirllmToggleBtn.classList.toggle("enabled", enabled);
+    chatAirllmToggleBtn.setAttribute("aria-pressed", enabled ? "true" : "false");
+    chatAirllmToggleBtn.textContent = enabled ? "AIRLLM ON" : "AIRLLM OFF";
+  }
+  if (persist) {
+    localStorage.setItem(STORAGE_CHAT_AIRLLM_ENABLED, enabled ? "1" : "0");
+  }
+}
+
+async function persistChatAirllmToggle(nextState) {
+  if (chatAirllmPersistInFlight) {
+    return;
+  }
+
+  chatAirllmPersistInFlight = true;
+  if (chatAirllmToggleBtn) {
+    chatAirllmToggleBtn.disabled = true;
+  }
+
+  try {
+    const payload = await fetchJson("/config", { method: "GET" });
+    payload.mlx_airllm_enabled = Boolean(nextState);
+
+    await fetchJson("/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    console.error("Falha ao persistir toggle AIRLLM", error);
+    addSystemMessage(
+      `AIRLLM mudou localmente, mas nao foi possivel salvar no backend: ${error.message}`,
+    );
+  } finally {
+    chatAirllmPersistInFlight = false;
+    if (chatAirllmToggleBtn) {
+      chatAirllmToggleBtn.disabled = false;
+    }
+  }
+}
+
 function getEnvironmentValue(key) {
   if (!openclawEnvList) {
     return "";
@@ -2842,6 +2891,7 @@ async function buildChatPayload(messages) {
     options: {
       temperature: 0.2,
       max_tokens: resolveChatMaxTokens(selectedModelId),
+      airllm_enabled: chatAirllmEnabled,
     },
   };
 }
@@ -4539,6 +4589,14 @@ if (chatWebsearchBtn) {
   });
 }
 
+if (chatAirllmToggleBtn) {
+  chatAirllmToggleBtn.addEventListener("click", () => {
+    const nextState = !chatAirllmEnabled;
+    setChatAirllmToggleState(nextState);
+    void persistChatAirllmToggle(nextState);
+  });
+}
+
 stopGenerationBtn.addEventListener("click", () => {
   if (!activeStreamController || !isGenerating) {
     return;
@@ -4805,6 +4863,9 @@ async function loadConfig() {
     if (settingOpenclawCli) settingOpenclawCli.value = cfg.openclaw_cli_path || "";
     if (settingOpenclawState) settingOpenclawState.value = cfg.openclaw_state_dir || "";
     if (settingNanobotCli) settingNanobotCli.value = cfg.nanobot_cli_path || "";
+    if (cfg?.mlx_airllm_enabled != null) {
+      setChatAirllmToggleState(Boolean(cfg.mlx_airllm_enabled));
+    }
 
     const activeFramework = cfg.active_agent_framework === "nanobot" ? "nanobot" : "openclaw";
     applyAgentFramework(activeFramework, { syncRadio: true, refreshPanel: false });
@@ -6189,6 +6250,12 @@ async function bootstrap() {
   try {
     const storedWebsearch = localStorage.getItem(STORAGE_CHAT_WEBSEARCH_ENABLED);
     setWebsearchToggleState(storedWebsearch === "1", { persist: false });
+    const storedAirllm = localStorage.getItem(STORAGE_CHAT_AIRLLM_ENABLED);
+    if (storedAirllm == null) {
+      setChatAirllmToggleState(true, { persist: false });
+    } else {
+      setChatAirllmToggleState(storedAirllm === "1", { persist: false });
+    }
     setChatModelMenuOpen(false);
 
     loadThreads();
