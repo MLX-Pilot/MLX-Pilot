@@ -1884,6 +1884,7 @@ async fn nanobot_chat(
                     temperature: Some(0.15),
                     max_tokens: Some(1024),
                     top_p: None,
+                    airllm_enabled: None,
                 },
             })
             .await

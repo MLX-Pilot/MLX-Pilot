@@ -100,6 +100,8 @@ pub struct GenerationOptions {
     pub max_tokens: Option<u32>,
     #[serde(default)]
     pub top_p: Option<f32>,
+    #[serde(default)]
+    pub airllm_enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
