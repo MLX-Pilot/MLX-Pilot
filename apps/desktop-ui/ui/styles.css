@@ -1171,6 +1171,23 @@ textarea:focus {
   padding: 8px 10px;
 }
 
+.assistant-runtime-badge {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border: 1px solid rgba(126, 193, 255, 0.35);
+  background: rgba(53, 130, 218, 0.18);
+  color: #cbe6ff;
+}
+
+.assistant-runtime-badge.airllm-used {
+  border-color: rgba(255, 188, 111, 0.55);
+  background: rgba(224, 139, 48, 0.24);
+  color: #ffd9ad;
+}
+
 .assistant-state-label {
   font-size: 0.8rem;
   text-transform: uppercase;
