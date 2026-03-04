@@ -1233,20 +1233,20 @@ pub async fn agent_get_config() -> Result<Json<super::config::AgentUiConfig>, Ag
             .filter(|v| !v.is_empty())
             .is_some()
     {
-            let vault = open_secrets_vault()?;
-            if let Some(secret) = vault
-                .get_secret(AGENT_API_KEY_SECRET_KEY)
-                .map_err(|error| {
-                    AgentApiError::new(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "secrets_vault_error",
-                        Some(error.to_string()),
-                    )
-                })?
-            {
-                cfg.agent.api_key = secret;
-            }
+        let vault = open_secrets_vault()?;
+        if let Some(secret) = vault
+            .get_secret(AGENT_API_KEY_SECRET_KEY)
+            .map_err(|error| {
+                AgentApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "secrets_vault_error",
+                    Some(error.to_string()),
+                )
+            })?
+        {
+            cfg.agent.api_key = secret;
         }
+    }
     Ok(Json(cfg.agent))
 }
 
@@ -1436,7 +1436,7 @@ pub async fn agent_audit_get_id(
         tool_name: None,
         status: None,
     };
-    
+
     let entries = read_recent_audit_entries(&state.agent_state.audit.log_dir, limit, &query)
         .map_err(|e| {
             AgentApiError::new(
@@ -1451,7 +1451,7 @@ pub async fn agent_audit_get_id(
             return Ok(Json(entry));
         }
     }
-    
+
     Err(AgentApiError::new(
         StatusCode::NOT_FOUND,
         "entry_not_found",
@@ -1547,7 +1547,11 @@ pub async fn agent_create_session(
         })?;
 
     // Fetch the newly created meta
-    let sessions = state.session_store.list_sessions().await.unwrap_or_default();
+    let sessions = state
+        .session_store
+        .list_sessions()
+        .await
+        .unwrap_or_default();
     let meta = sessions
         .into_iter()
         .find(|s| s.id == session_id)
@@ -1580,13 +1584,17 @@ pub async fn agent_rename_session(
     axum::extract::Path(id): axum::extract::Path<String>,
     Json(req): Json<RenameSessionRequest>,
 ) -> Result<Json<serde_json::Value>, AgentApiError> {
-    state.session_store.rename(&id, &req.name).await.map_err(|e| {
-        AgentApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "session_error",
-            Some(format!("Failed to rename session: {e}")),
-        )
-    })?;
+    state
+        .session_store
+        .rename(&id, &req.name)
+        .await
+        .map_err(|e| {
+            AgentApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "session_error",
+                Some(format!("Failed to rename session: {e}")),
+            )
+        })?;
     Ok(Json(serde_json::json!({ "success": true })))
 }
 
@@ -1709,7 +1717,7 @@ fn read_recent_audit_entries(
                 if let Some(status) = query.status.as_deref().filter(|s| !s.is_empty()) {
                     let has_error = entry.error.is_some() || entry.error_summary.is_some();
                     let is_denied = entry.decision.as_deref() == Some("deny");
-                    
+
                     match status {
                         "error" if !has_error => continue,
                         "success" if has_error || is_denied => continue,
