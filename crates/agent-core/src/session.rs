@@ -96,7 +96,11 @@ impl SessionStore {
     }
 
     /// Creates a new session in the index if it doesn't exist.
-    pub async fn ensure_session(&self, session_id: &str, initial_name: Option<String>) -> std::io::Result<()> {
+    pub async fn ensure_session(
+        &self,
+        session_id: &str,
+        initial_name: Option<String>,
+    ) -> std::io::Result<()> {
         let mut index = self.index_cache.write().await;
         if !index.contains_key(session_id) {
             let name = initial_name.unwrap_or_else(|| "Nova conversa".to_string());
@@ -141,7 +145,7 @@ impl SessionStore {
         if let Some(meta) = index.get_mut(session_id) {
             meta.updated_at = message.timestamp;
             meta.message_count += 1;
-            
+
             // Auto-generate name from first user message if name is default
             if meta.message_count == 1 && meta.name == "Nova conversa" && message.role == "user" {
                 // Take first 30 chars
@@ -201,7 +205,10 @@ impl SessionStore {
             self.save_index().await?;
             Ok(())
         } else {
-            Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Sessão não encontrada"))
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Sessão não encontrada",
+            ))
         }
     }
 
@@ -220,7 +227,7 @@ impl SessionStore {
 
         Ok(())
     }
-    
+
     /// Export session to JSON string
     pub async fn export(&self, session_id: &str) -> std::io::Result<String> {
         let messages = self.load(session_id).await?;
@@ -244,15 +251,17 @@ mod tests {
     #[tokio::test]
     async fn session_store_operations() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = SessionStore::new(temp_dir.path().to_path_buf()).await.unwrap();
-        
+        let store = SessionStore::new(temp_dir.path().to_path_buf())
+            .await
+            .unwrap();
+
         // 1. Load empty
         let messages = store.load("nonexistent").await.unwrap();
         assert!(messages.is_empty());
 
         let sessions = store.list_sessions().await.unwrap();
         assert!(sessions.is_empty());
-        
+
         // 2. Append message
         let session_id = SessionStore::new_session_id();
         let msg1 = SessionMessage {
@@ -263,21 +272,21 @@ mod tests {
             timestamp: chrono::Utc::now(),
         };
         store.append(&session_id, &msg1).await.unwrap();
-        
+
         let loaded = store.load(&session_id).await.unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].content, "Hello agent");
-        
+
         let sessions = store.list_sessions().await.unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].message_count, 1);
         assert_eq!(sessions[0].name, "Hello agent");
-        
+
         // 3. Rename
         store.rename(&session_id, "Greeting test").await.unwrap();
         let sessions = store.list_sessions().await.unwrap();
         assert_eq!(sessions[0].name, "Greeting test");
-        
+
         // 4. Delete
         store.delete(&session_id).await.unwrap();
         let sessions = store.list_sessions().await.unwrap();
