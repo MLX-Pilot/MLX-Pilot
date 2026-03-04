@@ -268,7 +268,7 @@ async fn run_chat_stream(
     }
 
     let memory_profile = memory_profile(model_scan.safetensors_bytes);
-    let should_try_airllm = should_try_airllm(&cfg, memory_profile);
+    let should_try_airllm = should_try_airllm(&cfg, memory_profile, request.options.airllm_enabled);
 
     let prompt = build_prompt(&request.messages);
     let mut args = cfg.command_prefix_args.clone();
@@ -554,9 +554,17 @@ fn memory_profile(model_bytes: u64) -> Option<MemoryProfile> {
     })
 }
 
-fn should_try_airllm(cfg: &ChatRuntimeConfig, profile: Option<MemoryProfile>) -> bool {
-    if !cfg.airllm_enabled {
+fn should_try_airllm(
+    cfg: &ChatRuntimeConfig,
+    profile: Option<MemoryProfile>,
+    request_override: Option<bool>,
+) -> bool {
+    let enabled = request_override.unwrap_or(cfg.airllm_enabled);
+    if !enabled {
         return false;
+    }
+    if request_override == Some(true) {
+        return true;
     }
     let Some(profile) = profile else { return false };
     let threshold = (cfg.airllm_threshold_percent as f64 / 100.0).clamp(0.0, 1.0);

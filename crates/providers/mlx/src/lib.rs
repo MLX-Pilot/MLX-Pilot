@@ -261,9 +261,17 @@ impl MlxProvider {
         })
     }
 
-    fn should_try_airllm(&self, profile: Option<MemoryProfile>) -> bool {
-        if !self.cfg.airllm_enabled {
+    fn should_try_airllm(
+        &self,
+        profile: Option<MemoryProfile>,
+        request_override: Option<bool>,
+    ) -> bool {
+        let enabled = request_override.unwrap_or(self.cfg.airllm_enabled);
+        if !enabled {
             return false;
+        }
+        if request_override == Some(true) {
+            return true;
         }
         let Some(profile) = profile else { return false };
         let threshold = (self.cfg.airllm_threshold_percent as f64 / 100.0).clamp(0.0, 1.0);
@@ -537,7 +545,8 @@ impl ModelProvider for MlxProvider {
         }
 
         let memory_profile = Self::memory_profile(model_scan.safetensors_bytes);
-        let should_try_airllm = self.should_try_airllm(memory_profile);
+        let should_try_airllm =
+            self.should_try_airllm(memory_profile, request.options.airllm_enabled);
         if let Some(profile) = memory_profile {
             debug!(
                 "model memory profile: model={} system={} ratio={:.2}%",

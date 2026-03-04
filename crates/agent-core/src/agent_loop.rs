@@ -268,6 +268,7 @@ impl AgentLoop {
                             ),
                             max_tokens: Some(self.config.max_tokens_per_turn),
                             top_p: None,
+                            airllm_enabled: None,
                         },
                     },
                     self.config.provider_runtime.clone(),
