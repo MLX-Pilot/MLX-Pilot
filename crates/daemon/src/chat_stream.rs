@@ -573,11 +573,30 @@ fn should_try_airllm(
 
 fn is_memory_pressure_error(text: &str) -> bool {
     let normalized = text.to_ascii_lowercase();
-    normalized.contains("insufficient memory")
+    // Explicit memory pressure keywords
+    if normalized.contains("insufficient memory")
         || normalized.contains("out of memory")
         || normalized.contains("outofmemory")
         || normalized.contains("kiogpucommandbuffercallbackerroroutofmemory")
         || normalized.contains("max_recommended_working_set_size")
+    {
+        return true;
+    }
+
+    // Signal termination with Metal/GPU crash indicators — stderr may not have
+    // flushed the explicit memory error text before the process was killed.
+    let signal_terminated = normalized.contains("terminated by signal")
+        || normalized.contains("libc++abi")
+        || normalized.contains("uncaught exception");
+    let gpu_crash = normalized.contains("[metal]")
+        || normalized.contains("command buffer")
+        || normalized.contains("iokit")
+        || normalized.contains("iogpu");
+    if signal_terminated && gpu_crash {
+        return true;
+    }
+
+    false
 }
 
 async fn run_airllm_bridge(
