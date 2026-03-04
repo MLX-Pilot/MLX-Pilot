@@ -2154,6 +2154,14 @@ function normalizeAssistantMetrics(value) {
     normalized.raw_metrics = value.raw_metrics.trim();
   }
 
+  if (value.airllm_required != null) {
+    normalized.airllm_required = Boolean(value.airllm_required);
+  }
+
+  if (value.airllm_used != null) {
+    normalized.airllm_used = Boolean(value.airllm_used);
+  }
+
   return Object.keys(normalized).length ? normalized : null;
 }
 
@@ -2338,6 +2346,7 @@ function createAssistantStreamCard({ forceScroll = true } = {}) {
   const ui = {
     node,
     stateLabel: node.querySelector(".assistant-state-label"),
+    runtimeBadge: node.querySelector(".assistant-runtime-badge"),
     typingIndicator: node.querySelector(".typing-indicator"),
     thinkingSection: node.querySelector(".assistant-thinking"),
     thinkingText: node.querySelector(".assistant-thinking-text"),
@@ -2351,6 +2360,8 @@ function createAssistantStreamCard({ forceScroll = true } = {}) {
     answerQueue: "",
     flushTimer: null,
     latestMetrics: null,
+    airllmRequired: false,
+    airllmUsed: false,
   };
 
   chatLog.appendChild(node);
@@ -2365,6 +2376,11 @@ function addAssistantHistoryCard(message, { forceScroll = true } = {}) {
   const savedThinking = typeof message?.thinking === "string" ? message.thinking.trim() : "";
   const savedAnswer = String(message?.content || "").trim();
   const savedMetrics = normalizeAssistantMetrics(message?.metrics);
+
+  setAssistantRuntimeBadge(ui, {
+    airllmRequired: Boolean(savedMetrics?.airllm_required),
+    airllmUsed: Boolean(savedMetrics?.airllm_used),
+  });
 
   if (savedThinking) {
     ui.thinkingSection.classList.remove("hidden");
@@ -2395,6 +2411,8 @@ function addAssistantHistoryCard(message, { forceScroll = true } = {}) {
 function setAssistantState(ui, status) {
   const labels = {
     waiting: "aguardando modelo",
+    airllm_required: "AIRLLM necessario",
+    fallback_airllm: "AIRLLM em uso",
     thinking: "thinking",
     answering: "respondendo",
     completed: "finalizado",
@@ -2404,7 +2422,7 @@ function setAssistantState(ui, status) {
 
   ui.stateLabel.textContent = labels[status] || status;
 
-  if (status === "waiting") {
+  if (["waiting", "airllm_required", "fallback_airllm"].includes(status)) {
     ui.typingIndicator.classList.remove("hidden");
   } else {
     ui.typingIndicator.classList.add("hidden");
@@ -2417,6 +2435,30 @@ function setAssistantState(ui, status) {
   if (["answering", "completed", "cancelled"].includes(status)) {
     ui.answerSection.classList.remove("hidden");
   }
+}
+
+function setAssistantRuntimeBadge(ui, { airllmRequired = false, airllmUsed = false } = {}) {
+  if (!ui?.runtimeBadge) {
+    return;
+  }
+
+  ui.airllmRequired = Boolean(airllmRequired);
+  ui.airllmUsed = Boolean(airllmUsed);
+  ui.runtimeBadge.classList.remove("hidden", "airllm-used");
+
+  if (!ui.airllmRequired && !ui.airllmUsed) {
+    ui.runtimeBadge.classList.add("hidden");
+    ui.runtimeBadge.textContent = "";
+    return;
+  }
+
+  if (ui.airllmUsed) {
+    ui.runtimeBadge.textContent = "AIRLLM em uso";
+    ui.runtimeBadge.classList.add("airllm-used");
+    return;
+  }
+
+  ui.runtimeBadge.textContent = "AIRLLM necessario";
 }
 
 function flushAssistantQueues(ui) {
@@ -2515,6 +2557,25 @@ function extractRawMetrics(rawOutput) {
   return metrics || null;
 }
 
+function extractMlxPilotRuntimeMeta(rawOutput) {
+  if (typeof rawOutput !== "string" || !rawOutput.trim()) {
+    return null;
+  }
+
+  const firstLine = rawOutput.replace(/\r\n/g, "\n").split("\n", 1)[0]?.trim() || "";
+  if (!firstLine.startsWith("[[MLX-PILOT-META")) {
+    return null;
+  }
+
+  const requiredMatch = firstLine.match(/airllm_required=(\d+)/i);
+  const usedMatch = firstLine.match(/airllm_used=(\d+)/i);
+
+  return {
+    airllm_required: requiredMatch ? requiredMatch[1] === "1" : false,
+    airllm_used: usedMatch ? usedMatch[1] === "1" : false,
+  };
+}
+
 function splitThinkingAndAnswer(content) {
   if (!content) {
     return { thinking: "", answer: "" };
@@ -2582,7 +2643,23 @@ function renderAssistantMetrics(ui, event) {
     return;
   }
 
-  ui.latestMetrics = normalizedEvent;
+  const airllmRequired = normalizedEvent.airllm_required != null
+    ? Boolean(normalizedEvent.airllm_required)
+    : Boolean(ui.airllmRequired);
+  const airllmUsed = normalizedEvent.airllm_used != null
+    ? Boolean(normalizedEvent.airllm_used)
+    : Boolean(ui.airllmUsed);
+
+  setAssistantRuntimeBadge(ui, {
+    airllmRequired,
+    airllmUsed,
+  });
+
+  ui.latestMetrics = {
+    ...normalizedEvent,
+    airllm_required: airllmRequired,
+    airllm_used: airllmUsed,
+  };
 
   const lines = [];
   const hasRawMetrics = typeof normalizedEvent.raw_metrics === "string" && normalizedEvent.raw_metrics.trim().length > 0;
@@ -2607,6 +2684,12 @@ function renderAssistantMetrics(ui, event) {
   }
   if (normalizedEvent.latency_ms != null) {
     lines.push(`Latency: ${normalizedEvent.latency_ms} ms`);
+  }
+  if (airllmRequired) {
+    lines.push(`AIRLLM necessario: sim`);
+  }
+  if (airllmUsed) {
+    lines.push(`AIRLLM usado: sim`);
   }
 
   if (hasRawMetrics) {
@@ -2778,6 +2861,7 @@ async function consumeChatClassic(payload, ui, signal) {
 
   const body = await response.json();
   const split = splitThinkingAndAnswer(body?.message?.content || "");
+  const runtimeMeta = extractMlxPilotRuntimeMeta(body?.raw_output);
 
   if (split.thinking) {
     setAssistantState(ui, "thinking");
@@ -2793,6 +2877,12 @@ async function consumeChatClassic(payload, ui, signal) {
   if (promoteThinkingToAnswerIfNeeded(ui)) {
     await waitForAssistantFlush(ui);
   }
+
+  setAssistantRuntimeBadge(ui, {
+    airllmRequired: Boolean(runtimeMeta?.airllm_required),
+    airllmUsed: Boolean(runtimeMeta?.airllm_used),
+  });
+
   setAssistantState(ui, "completed");
   renderAssistantMetrics(ui, {
     prompt_tokens: body?.usage?.prompt_tokens,
@@ -2800,6 +2890,8 @@ async function consumeChatClassic(payload, ui, signal) {
     total_tokens: body?.usage?.total_tokens,
     latency_ms: body?.latency_ms,
     raw_metrics: extractRawMetrics(body?.raw_output),
+    airllm_required: runtimeMeta?.airllm_required,
+    airllm_used: runtimeMeta?.airllm_used,
   });
 }
 
@@ -2861,7 +2953,20 @@ async function consumeChatStream(payload, ui, signal) {
       }
 
       if (event.event === "status") {
-        setAssistantState(ui, event.status || "waiting");
+        const streamStatus = event.status || "waiting";
+        if (streamStatus === "airllm_required") {
+          setAssistantRuntimeBadge(ui, {
+            airllmRequired: true,
+            airllmUsed: Boolean(ui.airllmUsed),
+          });
+        }
+        if (streamStatus === "fallback_airllm") {
+          setAssistantRuntimeBadge(ui, {
+            airllmRequired: true,
+            airllmUsed: true,
+          });
+        }
+        setAssistantState(ui, streamStatus);
         continue;
       }
 
@@ -2883,6 +2988,12 @@ async function consumeChatStream(payload, ui, signal) {
       }
 
       if (event.event === "done") {
+        if (event.airllm_required != null || event.airllm_used != null) {
+          setAssistantRuntimeBadge(ui, {
+            airllmRequired: Boolean(event.airllm_required),
+            airllmUsed: Boolean(event.airllm_used),
+          });
+        }
         doneEvent = event;
         break outer;
       }
@@ -2897,6 +3008,12 @@ async function consumeChatStream(payload, ui, signal) {
     try {
       const trailing = JSON.parse(buffer.trim());
       if (trailing.event === "done") {
+        if (trailing.airllm_required != null || trailing.airllm_used != null) {
+          setAssistantRuntimeBadge(ui, {
+            airllmRequired: Boolean(trailing.airllm_required),
+            airllmUsed: Boolean(trailing.airllm_used),
+          });
+        }
         doneEvent = trailing;
       } else if (trailing.event === "metrics") {
         ui.latestMetrics = trailing;
@@ -2940,7 +3057,11 @@ async function runAssistantGeneration() {
 
     const finalAnswer = assistantUi.finalAnswer.trim();
     const finalThinking = String(assistantUi.thinkingText?.textContent || "").trim();
-    const finalMetrics = normalizeAssistantMetrics(assistantUi.latestMetrics);
+    const finalMetrics = normalizeAssistantMetrics({
+      ...(assistantUi.latestMetrics || {}),
+      airllm_required: assistantUi.airllmRequired,
+      airllm_used: assistantUi.airllmUsed,
+    });
     if (finalAnswer || finalThinking || finalMetrics) {
       appendMessageToActiveThread(
         "assistant",
@@ -2960,7 +3081,11 @@ async function runAssistantGeneration() {
       assistantUi.metricsText.textContent = "Geracao interrompida pelo usuario.";
       const partialAnswer = assistantUi.finalAnswer.trim();
       const partialThinking = String(assistantUi.thinkingText?.textContent || "").trim();
-      const partialMetrics = normalizeAssistantMetrics(assistantUi.latestMetrics);
+      const partialMetrics = normalizeAssistantMetrics({
+        ...(assistantUi.latestMetrics || {}),
+        airllm_required: assistantUi.airllmRequired,
+        airllm_used: assistantUi.airllmUsed,
+      });
       if (partialAnswer || partialThinking || partialMetrics) {
         appendMessageToActiveThread(
           "assistant",
