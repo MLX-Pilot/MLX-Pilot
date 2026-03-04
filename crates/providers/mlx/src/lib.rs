@@ -280,11 +280,30 @@ impl MlxProvider {
 
     fn is_memory_pressure_error(stdout: &str, stderr: &str) -> bool {
         let text = format!("{stdout}\n{stderr}").to_ascii_lowercase();
-        text.contains("insufficient memory")
+        // Explicit memory pressure keywords
+        if text.contains("insufficient memory")
             || text.contains("out of memory")
             || text.contains("outofmemory")
             || text.contains("kiogpucommandbuffercallbackerroroutofmemory")
             || text.contains("max_recommended_working_set_size")
+        {
+            return true;
+        }
+
+        // Signal termination with Metal/GPU crash indicators — stderr may not
+        // have flushed the explicit memory error text before abort().
+        let signal_terminated = text.contains("terminated by signal")
+            || text.contains("libc++abi")
+            || text.contains("uncaught exception");
+        let gpu_crash = text.contains("[metal]")
+            || text.contains("command buffer")
+            || text.contains("iokit")
+            || text.contains("iogpu");
+        if signal_terminated && gpu_crash {
+            return true;
+        }
+
+        false
     }
 
     fn failure_details(stdout: &str, stderr: &str, status: &ExitStatus) -> String {
