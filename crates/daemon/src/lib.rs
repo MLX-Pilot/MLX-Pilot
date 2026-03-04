@@ -890,6 +890,8 @@ fn spawn_provider_compat_stream(
                     peak_memory_gb: None,
                     latency_ms: Some(latency_ms),
                     raw_metrics: None,
+                    airllm_required: None,
+                    airllm_used: None,
                 };
                 let _ = tx.send(done_event).await;
             }

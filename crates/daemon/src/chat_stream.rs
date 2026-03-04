@@ -49,6 +49,10 @@ pub struct ChatStreamEvent {
     pub latency_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_metrics: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub airllm_required: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub airllm_used: Option<bool>,
 }
 
 impl ChatStreamEvent {
@@ -66,6 +70,8 @@ impl ChatStreamEvent {
             peak_memory_gb: None,
             latency_ms: None,
             raw_metrics: None,
+            airllm_required: None,
+            airllm_used: None,
         }
     }
 
@@ -83,6 +89,8 @@ impl ChatStreamEvent {
             peak_memory_gb: None,
             latency_ms: None,
             raw_metrics: None,
+            airllm_required: None,
+            airllm_used: None,
         }
     }
 
@@ -100,6 +108,8 @@ impl ChatStreamEvent {
             peak_memory_gb: None,
             latency_ms: None,
             raw_metrics: None,
+            airllm_required: None,
+            airllm_used: None,
         }
     }
 
@@ -120,6 +130,8 @@ impl ChatStreamEvent {
                 .as_lines()
                 .filter(|value| !value.is_empty())
                 .map(|value| value.to_string()),
+            airllm_required: None,
+            airllm_used: None,
         }
     }
 
@@ -128,6 +140,8 @@ impl ChatStreamEvent {
         prompt_tokens: usize,
         completion_tokens: usize,
         metrics: &ParsedMetrics,
+        airllm_required: bool,
+        airllm_used: bool,
     ) -> Self {
         Self {
             event: "done".to_string(),
@@ -145,6 +159,8 @@ impl ChatStreamEvent {
                 .as_lines()
                 .filter(|value| !value.is_empty())
                 .map(|value| value.to_string()),
+            airllm_required: if airllm_required { Some(true) } else { None },
+            airllm_used: if airllm_used { Some(true) } else { None },
         }
     }
 
@@ -162,6 +178,8 @@ impl ChatStreamEvent {
             peak_memory_gb: None,
             latency_ms: None,
             raw_metrics: None,
+            airllm_required: None,
+            airllm_used: None,
         }
     }
 }
@@ -282,6 +300,9 @@ async fn run_chat_stream(
     let prompt_for_command = prompt.clone();
 
     send_event(&tx, ChatStreamEvent::status("waiting")).await?;
+    if should_try_airllm {
+        send_event(&tx, ChatStreamEvent::status("airllm_required")).await?;
+    }
 
     let started = Instant::now();
 
@@ -421,6 +442,7 @@ async fn run_chat_stream(
         .await
         .map_err(|_| ChatStreamError::Timeout(cfg.timeout.as_secs()))?;
 
+    let airllm_required = should_try_airllm;
     let (raw_output, prompt_text, latency_ms, used_fallback) = match primary_result {
         Ok((raw_output, prompt_text, latency_ms)) => (raw_output, prompt_text, latency_ms, false),
         Err(ChatStreamError::CommandFailed(message))
@@ -476,6 +498,8 @@ async fn run_chat_stream(
             prompt_tokens,
             completion_tokens,
             &parsed.metrics,
+            airllm_required,
+            used_fallback,
         ),
     )
     .await?;
