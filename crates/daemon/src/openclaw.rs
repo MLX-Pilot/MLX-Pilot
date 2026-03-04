@@ -1141,11 +1141,15 @@ impl OpenClawRuntime {
             .unwrap_or(self.cfg.timeout.as_millis() as u64)
             .clamp(1000, 900000);
         let timeout_limit = Duration::from_millis(timeout_ms + 2000);
+        let timeout_secs = timeout_ms / 1000;
+        let agent_timeout_secs = timeout_secs.saturating_sub(5).max(1);
 
         let params = json!({
             "message": message,
             "idempotencyKey": idempotency_key,
             "sessionKey": session_key,
+            "channel": "webchat",
+            "timeout": agent_timeout_secs,
         });
         let params_json = serde_json::to_string(&params).map_err(|error| OpenClawError::Parse {
             details: format!("falha serializando params: {error}"),
