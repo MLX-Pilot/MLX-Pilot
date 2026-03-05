@@ -825,7 +825,7 @@ fn resolve_mlx_airllm_runner(raw: &str) -> String {
     }
 
     let input = PathBuf::from(trimmed);
-    if input.is_absolute() {
+    if input.is_absolute() && input.exists() {
         return input.display().to_string();
     }
 
@@ -833,13 +833,22 @@ fn resolve_mlx_airllm_runner(raw: &str) -> String {
         .file_name()
         .map(|value| value.to_string_lossy().to_string())
         .unwrap_or_else(|| "mlx_airllm_bridge.py".to_string());
-    let relative = if input.components().count() > 1 {
+    let relative = if input.is_absolute() {
+        PathBuf::from("scripts").join(script_name.as_str())
+    } else if input.components().count() > 1 {
         input.clone()
     } else {
         PathBuf::from("scripts").join(script_name.as_str())
     };
 
     let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if input.is_absolute() {
+        if let Some(parent) = input.parent() {
+            candidates.push(parent.join(script_name.as_str()));
+            candidates.push(parent.join("scripts").join(script_name.as_str()));
+        }
+    }
 
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
