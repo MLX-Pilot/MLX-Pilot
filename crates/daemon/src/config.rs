@@ -713,12 +713,28 @@ fn default_mlx_command() -> String {
 
 fn default_mlx_airllm_python_command() -> String {
     let preferred = home_dir()
-        .map(|home| home.join("mlx-env").join("bin").join("python"))
-        .unwrap_or_else(|| PathBuf::from("python3"));
+        .map(|home| {
+            if cfg!(windows) {
+                home.join("mlx-env").join("Scripts").join("python.exe")
+            } else {
+                home.join("mlx-env").join("bin").join("python")
+            }
+        })
+        .unwrap_or_else(|| {
+            if cfg!(windows) {
+                PathBuf::from("python")
+            } else {
+                PathBuf::from("python3")
+            }
+        });
     if preferred.exists() {
         preferred.display().to_string()
     } else {
-        "python3".to_string()
+        if cfg!(windows) {
+            "python".to_string()
+        } else {
+            "python3".to_string()
+        }
     }
 }
 

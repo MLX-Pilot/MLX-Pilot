@@ -460,12 +460,28 @@ fn default_airllm_python_command() -> String {
         .or_else(|_| std::env::var("USERPROFILE"))
         .ok()
         .map(PathBuf::from)
-        .map(|home| home.join("mlx-env").join("bin").join("python"))
-        .unwrap_or_else(|| PathBuf::from("python3"));
+        .map(|home| {
+            if cfg!(windows) {
+                home.join("mlx-env").join("Scripts").join("python.exe")
+            } else {
+                home.join("mlx-env").join("bin").join("python")
+            }
+        })
+        .unwrap_or_else(|| {
+            if cfg!(windows) {
+                PathBuf::from("python")
+            } else {
+                PathBuf::from("python3")
+            }
+        });
     if preferred.exists() {
         preferred.display().to_string()
     } else {
-        "python3".to_string()
+        if cfg!(windows) {
+            "python".to_string()
+        } else {
+            "python3".to_string()
+        }
     }
 }
 
@@ -523,7 +539,11 @@ fn resolve_airllm_runner(raw: &str) -> String {
     if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
         let trimmed_home = home.trim();
         if !trimmed_home.is_empty() {
-            candidates.push(PathBuf::from(trimmed_home).join("mlx-ollama-pilot").join(&relative));
+            candidates.push(
+                PathBuf::from(trimmed_home)
+                    .join("mlx-ollama-pilot")
+                    .join(&relative),
+            );
         }
     }
 
