@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
-"""
-Rust-owned AIRLLM bridge for MLX-Pilot.
+"""AIRLLM bridge for MLX-Pilot.
 
-This keeps decision/policy in Rust and uses Python only for MLX runtime calls
-that are not available natively in Rust yet.
+Supports:
+- original AirLLM AutoModel flow (layered loading strategy)
+- legacy mlx_lm.generate flow
 """
 
 from __future__ import annotations
 
 import argparse
+import platform
 import sys
-
-import mlx.core as mx
 
 
 def log(message: str) -> None:
@@ -24,11 +23,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", required=True, help="Model path or repo id")
     parser.add_argument("--prompt", required=True, help="Prompt text")
     parser.add_argument(
+        "--backend",
+        default="auto",
+        choices=("auto", "original", "legacy"),
+        help="Execution backend. 'original' mirrors upstream AirLLM AutoModel flow.",
+    )
+    parser.add_argument(
         "--device",
         default="auto",
         choices=("auto", "cpu"),
-        help="Execution device. Use cpu for memory-constrained fallback.",
+        help="Execution device hint.",
     )
+    parser.add_argument("--max-seq-len", type=int, default=2048, help="Tokenizer truncation max length")
     parser.add_argument("--max-tokens", type=int, default=256, help="Max new tokens")
     parser.add_argument("--temp", type=float, default=0.2, help="Sampling temperature")
     parser.add_argument("--top-p", type=float, default=1.0, help="Top-p sampling")
@@ -44,11 +50,10 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> int:
-    args = parse_args()
-    log(f"start device={args.device} max_tokens={max(1, args.max_tokens)}")
-    log(f"model={args.model}")
+def run_legacy_backend(args: argparse.Namespace) -> str:
+    import mlx.core as mx
 
+    log("backend=legacy (mlx_lm.generate)")
     if args.device == "cpu":
         mx.set_default_device(mx.cpu)
         log("default device set to cpu")
@@ -74,7 +79,136 @@ def main() -> int:
         verbose=False,
     )
     log("generation finished")
+    return text.strip()
 
+
+def _decode_sequences(model, generation_output) -> str:
+    sequences = None
+    if hasattr(generation_output, "sequences"):
+        sequences = generation_output.sequences
+    elif isinstance(generation_output, dict):
+        sequences = generation_output.get("sequences")
+
+    if sequences is None:
+        return str(generation_output).strip()
+
+    if hasattr(sequences, "__getitem__"):
+        first = sequences[0]
+    else:
+        return str(generation_output).strip()
+
+    return model.tokenizer.decode(first, skip_special_tokens=True).strip()
+
+
+def run_original_backend(args: argparse.Namespace) -> str:
+    from airllm import AutoModel
+
+    log("backend=original (airllm AutoModel)")
+    model_kwargs: dict[str, str] = {}
+    if args.device == "cpu":
+        model_kwargs["device"] = "cpu"
+    elif platform.system().lower() != "darwin":
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                # AutoModel defaults to cuda:0; on hosts without CUDA force CPU explicitly.
+                model_kwargs["device"] = "cpu"
+                log("cuda unavailable; forcing original backend to cpu")
+        except Exception:
+            # Keep upstream default behavior if torch probing fails.
+            pass
+
+    model = AutoModel.from_pretrained(args.model, **model_kwargs)
+    max_seq_len = max(64, int(args.max_seq_len))
+    max_new_tokens = max(1, int(args.max_tokens))
+    prompt_batch = [args.prompt]
+
+    if platform.system().lower() == "darwin":
+        import mlx.core as mx
+
+        tokens = model.tokenizer(
+            prompt_batch,
+            return_tensors="np",
+            return_attention_mask=False,
+            truncation=True,
+            max_length=max_seq_len,
+            padding=False,
+        )
+        log("tokenized with return_tensors=np for macOS AirLLM")
+        output = model.generate(
+            mx.array(tokens["input_ids"]),
+            max_new_tokens=max_new_tokens,
+            use_cache=True,
+            return_dict_in_generate=True,
+        )
+        text = str(output).strip()
+        if text.startswith(args.prompt):
+            text = text[len(args.prompt) :].strip()
+        return text
+
+    tokens = model.tokenizer(
+        prompt_batch,
+        return_tensors="pt",
+        return_attention_mask=False,
+        truncation=True,
+        max_length=max_seq_len,
+        padding=False,
+    )
+
+    input_ids = tokens["input_ids"]
+    if args.device != "cpu" and hasattr(input_ids, "cuda"):
+        try:
+            input_ids = input_ids.cuda()
+        except Exception:
+            log("cuda unavailable; keeping input_ids on current device")
+
+    output = model.generate(
+        input_ids,
+        max_new_tokens=max_new_tokens,
+        use_cache=True,
+        return_dict_in_generate=True,
+    )
+    text = _decode_sequences(model, output)
+
+    if text.startswith(args.prompt):
+        text = text[len(args.prompt) :].strip()
+
+    return text.strip()
+
+
+def run_backend(args: argparse.Namespace) -> str:
+    backend = (args.backend or "auto").strip().lower()
+    if backend not in {"auto", "original", "legacy"}:
+        backend = "auto"
+
+    if backend in {"auto", "original"}:
+        try:
+            return run_original_backend(args)
+        except Exception as exc:
+            if backend == "original":
+                raise
+            log(f"original backend failed ({type(exc).__name__}: {exc}); falling back to legacy")
+
+    legacy_args = argparse.Namespace(**vars(args))
+    if backend == "auto":
+        legacy_args.device = "cpu"
+    return run_legacy_backend(legacy_args)
+
+
+def main() -> int:
+    args = parse_args()
+    log(
+        "start backend={} device={} max_tokens={} max_seq_len={}".format(
+            args.backend,
+            args.device,
+            max(1, args.max_tokens),
+            max(64, args.max_seq_len),
+        )
+    )
+    log(f"model={args.model}")
+
+    text = run_backend(args)
     sys.stdout.write(text.strip())
     return 0
 

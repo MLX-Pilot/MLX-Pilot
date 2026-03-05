@@ -479,14 +479,12 @@ async fn run_chat_stream(
             .await?;
             send_event(
                 &tx,
-                ChatStreamEvent::airllm_log(format!(
-                    "Runner AIRLLM: {}",
-                    cfg.airllm_runner
-                )),
+                ChatStreamEvent::airllm_log(format!("Runner AIRLLM: {}", cfg.airllm_runner)),
             )
             .await?;
             let started_fallback = Instant::now();
-            let fallback_output = run_airllm_bridge(&cfg, &model_path, &request, &prompt, &tx).await?;
+            let fallback_output =
+                run_airllm_bridge(&cfg, &model_path, &request, &prompt, &tx).await?;
             (
                 fallback_output,
                 prompt.clone(),
@@ -742,9 +740,7 @@ async fn run_airllm_bridge(
         let mut reader = BufReader::new(stdout);
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await.map_err(|error| {
-            ChatStreamError::Io(format!(
-                "falha lendo stdout do fallback airllm: {error}"
-            ))
+            ChatStreamError::Io(format!("falha lendo stdout do fallback airllm: {error}"))
         })?;
         Ok::<String, ChatStreamError>(String::from_utf8_lossy(&bytes).to_string())
     });
@@ -776,9 +772,7 @@ async fn run_airllm_bridge(
 
     let status = match timeout(fallback_timeout, child.wait()).await {
         Ok(wait_result) => wait_result.map_err(|error| {
-            ChatStreamError::Io(format!(
-                "falha aguardando fallback airllm: {error}"
-            ))
+            ChatStreamError::Io(format!("falha aguardando fallback airllm: {error}"))
         })?,
         Err(_) => {
             let _ = child.start_kill();
