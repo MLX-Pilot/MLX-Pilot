@@ -635,6 +635,24 @@ fn is_memory_pressure_error(text: &str) -> bool {
     false
 }
 
+fn normalize_airllm_backend(raw: &str) -> &'static str {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "original" | "airllm" | "airllm-original" => "original",
+        "legacy" | "legacy-bridge" | "mlx-lm" => "legacy",
+        _ => "auto",
+    }
+}
+
+fn bridge_device_hint(backend: &str) -> &'static str {
+    if backend == "legacy" {
+        // Legacy bridge path can hit the same MLX memory pressure; keep CPU fallback there.
+        "cpu"
+    } else {
+        // Original AirLLM should keep automatic device selection (GPU/MLX when available).
+        "auto"
+    }
+}
+
 async fn run_airllm_bridge(
     cfg: &ChatRuntimeConfig,
     model_path: &Path,
@@ -656,6 +674,17 @@ async fn run_airllm_bridge(
     }
 
     let fallback_timeout = cfg.timeout.min(Duration::from_secs(300));
+    let backend = normalize_airllm_backend(&cfg.airllm_backend);
+    let device_hint = bridge_device_hint(backend);
+
+    send_event(
+        tx,
+        ChatStreamEvent::airllm_log(format!(
+            "Bridge AIRLLM backend='{}' device='{}'",
+            backend, device_hint
+        )),
+    )
+    .await?;
 
     let mut args = vec![
         cfg.airllm_runner.clone(),
@@ -663,8 +692,10 @@ async fn run_airllm_bridge(
         model_path.display().to_string(),
         "--prompt".to_string(),
         prompt.to_string(),
+        "--backend".to_string(),
+        backend.to_string(),
         "--device".to_string(),
-        "cpu".to_string(),
+        device_hint.to_string(),
     ];
 
     if let Some(temp) = request.options.temperature {

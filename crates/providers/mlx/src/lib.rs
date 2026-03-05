@@ -328,14 +328,18 @@ impl MlxProvider {
         prompt: &str,
         request: &ChatRequest,
     ) -> Vec<String> {
+        let backend = self.normalized_airllm_backend();
+        let device_hint = Self::bridge_device_hint(backend);
         let mut args = vec![
             self.cfg.airllm_runner.clone(),
             "--model".to_string(),
             model_path.display().to_string(),
             "--prompt".to_string(),
             prompt.to_string(),
+            "--backend".to_string(),
+            backend.to_string(),
             "--device".to_string(),
-            "cpu".to_string(),
+            device_hint.to_string(),
         ];
 
         if let Some(temp) = request.options.temperature {
@@ -355,6 +359,24 @@ impl MlxProvider {
         }
 
         args
+    }
+
+    fn normalized_airllm_backend(&self) -> &'static str {
+        match self.cfg.airllm_backend.trim().to_ascii_lowercase().as_str() {
+            "original" | "airllm" | "airllm-original" => "original",
+            "legacy" | "legacy-bridge" | "mlx-lm" => "legacy",
+            _ => "auto",
+        }
+    }
+
+    fn bridge_device_hint(backend: &str) -> &'static str {
+        if backend == "legacy" {
+            // Legacy fallback can trigger the same MLX memory pressure; keep CPU there.
+            "cpu"
+        } else {
+            // Original AirLLM backend should pick the best available accelerator.
+            "auto"
+        }
     }
 
     async fn run_command_capture(
