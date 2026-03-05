@@ -22,6 +22,7 @@ pub struct ChatRuntimeConfig {
     pub airllm_threshold_percent: u8,
     pub airllm_python_command: String,
     pub airllm_runner: String,
+    pub airllm_backend: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

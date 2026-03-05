@@ -23,6 +23,7 @@ pub struct MlxProviderConfig {
     pub airllm_threshold_percent: u8,
     pub airllm_python_command: String,
     pub airllm_runner: String,
+    pub airllm_backend: String,
 }
 
 impl Default for MlxProviderConfig {
@@ -37,6 +38,7 @@ impl Default for MlxProviderConfig {
             airllm_threshold_percent: 70,
             airllm_python_command: default_airllm_python_command(),
             airllm_runner: default_airllm_runner(),
+            airllm_backend: "auto".to_string(),
         }
     }
 }

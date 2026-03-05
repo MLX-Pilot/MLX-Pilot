@@ -175,6 +175,8 @@ pub struct AppConfig {
     pub mlx_airllm_python_command: String,
     #[serde(default = "default_mlx_airllm_runner")]
     pub mlx_airllm_runner: String,
+    #[serde(default = "default_mlx_airllm_backend")]
+    pub mlx_airllm_backend: String,
     pub llamacpp_server_binary: String,
     pub llamacpp_base_url: String,
     pub llamacpp_timeout: Duration,
@@ -229,6 +231,7 @@ impl Default for AppConfig {
             mlx_airllm_threshold_percent: default_mlx_airllm_threshold_percent(),
             mlx_airllm_python_command: default_mlx_airllm_python_command(),
             mlx_airllm_runner: default_mlx_airllm_runner(),
+            mlx_airllm_backend: default_mlx_airllm_backend(),
             llamacpp_server_binary: default_llamacpp_server_binary(),
             llamacpp_base_url: "http://127.0.0.1:11439".to_string(),
             llamacpp_timeout: Duration::from_secs(900),
@@ -377,6 +380,12 @@ impl AppConfig {
         if let Ok(value) = env::var("APP_MLX_AIRLLM_RUNNER") {
             if !value.trim().is_empty() {
                 self.mlx_airllm_runner = value;
+            }
+        }
+
+        if let Ok(value) = env::var("APP_MLX_AIRLLM_BACKEND") {
+            if !value.trim().is_empty() {
+                self.mlx_airllm_backend = value;
             }
         }
 
@@ -632,6 +641,7 @@ impl AppConfig {
         }
 
         self.mlx_airllm_runner = resolve_mlx_airllm_runner(&self.mlx_airllm_runner);
+        self.mlx_airllm_backend = normalize_mlx_airllm_backend(&self.mlx_airllm_backend);
 
         normalize_mlx_command(&mut self);
 
@@ -714,6 +724,10 @@ fn default_mlx_airllm_python_command() -> String {
 
 fn default_mlx_airllm_runner() -> String {
     resolve_mlx_airllm_runner("scripts/mlx_airllm_bridge.py")
+}
+
+fn default_mlx_airllm_backend() -> String {
+    "auto".to_string()
 }
 
 fn default_mlx_airllm_threshold_percent() -> u8 {
@@ -847,6 +861,16 @@ fn resolve_mlx_airllm_runner(raw: &str) -> String {
     }
 
     relative.display().to_string()
+}
+
+fn normalize_mlx_airllm_backend(raw: &str) -> String {
+    let normalized = raw.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "airllm" | "original" | "airllm-original" => "original".to_string(),
+        "legacy" | "legacy-bridge" | "mlx-lm" => "legacy".to_string(),
+        "auto" => "auto".to_string(),
+        _ => "auto".to_string(),
+    }
 }
 
 fn parse_bool(value: &str, fallback: bool) -> bool {
