@@ -9,6 +9,8 @@ Supports:
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import platform
 import sys
 
@@ -66,18 +68,25 @@ def run_legacy_backend(args: argparse.Namespace) -> str:
     log("model/tokenizer loaded")
     sampler = make_sampler(args.temp, args.top_p, 0.0, 1, top_k=0)
     log("generating")
-    text = generate(
-        model,
-        tokenizer,
-        prompt=args.prompt,
-        max_tokens=max(1, args.max_tokens),
-        sampler=sampler,
-        max_kv_size=max(128, args.max_kv_size),
-        kv_bits=max(1, args.kv_bits),
-        kv_group_size=max(1, args.kv_group_size),
-        quantized_kv_start=max(0, args.quantized_kv_start),
-        verbose=False,
-    )
+    base_kwargs = {
+        "prompt": args.prompt,
+        "max_tokens": max(1, args.max_tokens),
+        "sampler": sampler,
+        "verbose": False,
+    }
+    kv_kwargs = {
+        "max_kv_size": max(128, args.max_kv_size),
+        "kv_bits": max(1, args.kv_bits),
+        "kv_group_size": max(1, args.kv_group_size),
+        "quantized_kv_start": max(0, args.quantized_kv_start),
+    }
+    try:
+        text = generate(model, tokenizer, **base_kwargs, **kv_kwargs)
+    except Exception as exc:
+        if "RotatingKVCache Quantization NYI" not in str(exc):
+            raise
+        log("kv quantization unsupported by this model; retrying without kv quantization args")
+        text = generate(model, tokenizer, **base_kwargs)
     log("generation finished")
     return text.strip()
 
@@ -178,13 +187,19 @@ def run_original_backend(args: argparse.Namespace) -> str:
 
 
 def run_backend(args: argparse.Namespace) -> str:
+    def invoke_silenced(fn, fn_args: argparse.Namespace) -> str:
+        # AirLLM/mlx_lm may print setup/progress noise to stdout.
+        # Keep stdout reserved for the final answer payload only.
+        with contextlib.redirect_stdout(io.StringIO()):
+            return fn(fn_args)
+
     backend = (args.backend or "auto").strip().lower()
     if backend not in {"auto", "original", "legacy"}:
         backend = "auto"
 
     if backend in {"auto", "original"}:
         try:
-            return run_original_backend(args)
+            return invoke_silenced(run_original_backend, args)
         except Exception as exc:
             if backend == "original":
                 raise
@@ -193,7 +208,7 @@ def run_backend(args: argparse.Namespace) -> str:
     legacy_args = argparse.Namespace(**vars(args))
     if backend == "auto":
         legacy_args.device = "cpu"
-    return run_legacy_backend(legacy_args)
+    return invoke_silenced(run_legacy_backend, legacy_args)
 
 
 def main() -> int:
