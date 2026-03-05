@@ -297,8 +297,9 @@ Fluxo de produto recomendado:
 | `APP_MLX_TIMEOUT_SECS` | `900` | Timeout da inferencia |
 | `APP_MLX_AIRLLM_ENABLED` | `true` | Ativa fallback de memoria para modelos grandes (orquestrado no Rust) |
 | `APP_MLX_AIRLLM_THRESHOLD_PERCENT` | `70` | Percentual RAM fisica para ativar o fallback |
-| `APP_MLX_AIRLLM_PYTHON_COMMAND` | `~/mlx-env/bin/python` | Python usado pelo bridge do fallback |
+| `APP_MLX_AIRLLM_PYTHON_COMMAND` | `~/mlx-env/bin/python` (`python` no Windows) | Python usado pelo bridge do fallback |
 | `APP_MLX_AIRLLM_RUNNER` | `scripts/mlx_airllm_bridge.py` | Script bridge executado no fallback |
+| `APP_MLX_AIRLLM_BACKEND` | `auto` | Backend do bridge: `auto`, `original` (AirLLM) ou `legacy` (mlx_lm) |
 | `APP_LLAMACPP_SERVER_BINARY` | `llama-server` | Binario do llama.cpp |
 | `APP_LLAMACPP_BASE_URL` | `http://127.0.0.1:11439` | URL do servidor llama.cpp |
 | `APP_LLAMACPP_AUTO_START` | `true` | Sobe `llama-server` automaticamente |

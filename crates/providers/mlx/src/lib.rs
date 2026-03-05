@@ -674,6 +674,7 @@ impl ModelProvider for MlxProvider {
         let memory_profile = Self::memory_profile(model_scan.safetensors_bytes);
         let should_try_airllm =
             self.should_try_airllm(memory_profile, request.options.airllm_enabled);
+        let force_airllm = request.options.airllm_enabled == Some(true);
         if let Some(profile) = memory_profile {
             debug!(
                 "model memory profile: model={} system={} ratio={:.2}%",
@@ -713,24 +714,14 @@ impl ModelProvider for MlxProvider {
         }
 
         let started = Instant::now();
-        let primary = self
-            .run_command_capture(&self.cfg.command, &primary_args)
-            .await?;
-
         let mut airllm_used = false;
-        let raw = if primary.status.success() {
-            primary.stdout
-        } else if should_try_airllm
-            && Self::is_memory_pressure_error(&primary.stdout, &primary.stderr)
-        {
+        let raw = if should_try_airllm && force_airllm {
             let runner_path = PathBuf::from(&self.cfg.airllm_runner);
             if !runner_path.exists() {
-                let primary_details =
-                    Self::failure_details(&primary.stdout, &primary.stderr, &primary.status);
                 return Err(ProviderError::CommandFailed {
-                    command: primary.command_debug,
+                    command: self.cfg.airllm_python_command.clone(),
                     stderr: format!(
-                        "mlx falhou por memoria: {primary_details}; fallback airllm runner nao encontrado: {}",
+                        "fallback airllm runner nao encontrado: {}",
                         runner_path.display()
                     ),
                 });
@@ -745,22 +736,66 @@ impl ModelProvider for MlxProvider {
                 airllm_used = true;
                 airllm.stdout
             } else {
-                let primary_details =
-                    Self::failure_details(&primary.stdout, &primary.stderr, &primary.status);
                 let fallback_details =
                     Self::failure_details(&airllm.stdout, &airllm.stderr, &airllm.status);
                 return Err(ProviderError::CommandFailed {
-                    command: format!("{} || {}", primary.command_debug, airllm.command_debug),
-                    stderr: format!(
-                        "mlx falhou por memoria: {primary_details}; fallback airllm falhou: {fallback_details}"
-                    ),
+                    command: airllm.command_debug,
+                    stderr: format!("fallback airllm falhou: {fallback_details}"),
                 });
             }
         } else {
-            return Err(ProviderError::CommandFailed {
-                command: primary.command_debug,
-                stderr: Self::failure_details(&primary.stdout, &primary.stderr, &primary.status),
-            });
+            let primary = self
+                .run_command_capture(&self.cfg.command, &primary_args)
+                .await?;
+
+            if primary.status.success() {
+                primary.stdout
+            } else if should_try_airllm
+                && Self::is_memory_pressure_error(&primary.stdout, &primary.stderr)
+            {
+                let runner_path = PathBuf::from(&self.cfg.airllm_runner);
+                if !runner_path.exists() {
+                    let primary_details =
+                        Self::failure_details(&primary.stdout, &primary.stderr, &primary.status);
+                    return Err(ProviderError::CommandFailed {
+                        command: primary.command_debug,
+                        stderr: format!(
+                            "mlx falhou por memoria: {primary_details}; fallback airllm runner nao encontrado: {}",
+                            runner_path.display()
+                        ),
+                    });
+                }
+
+                let airllm_args = self.build_airllm_args(&model_path, &prompt, &request);
+                let airllm = self
+                    .run_command_capture(&self.cfg.airllm_python_command, &airllm_args)
+                    .await?;
+
+                if airllm.status.success() {
+                    airllm_used = true;
+                    airllm.stdout
+                } else {
+                    let primary_details =
+                        Self::failure_details(&primary.stdout, &primary.stderr, &primary.status);
+                    let fallback_details =
+                        Self::failure_details(&airllm.stdout, &airllm.stderr, &airllm.status);
+                    return Err(ProviderError::CommandFailed {
+                        command: format!("{} || {}", primary.command_debug, airllm.command_debug),
+                        stderr: format!(
+                            "mlx falhou por memoria: {primary_details}; fallback airllm falhou: {fallback_details}"
+                        ),
+                    });
+                }
+            } else {
+                return Err(ProviderError::CommandFailed {
+                    command: primary.command_debug,
+                    stderr: Self::failure_details(
+                        &primary.stdout,
+                        &primary.stderr,
+                        &primary.status,
+                    ),
+                });
+            }
         };
 
         let raw = Self::inject_runtime_meta(raw, should_try_airllm, airllm_used);

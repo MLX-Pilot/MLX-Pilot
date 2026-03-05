@@ -289,6 +289,7 @@ async fn run_chat_stream(
 
     let memory_profile = memory_profile(model_scan.safetensors_bytes);
     let should_try_airllm = should_try_airllm(&cfg, memory_profile, request.options.airllm_enabled);
+    let force_airllm = request.options.airllm_enabled == Some(true);
 
     let prompt = build_prompt(&request.messages);
     let mut args = cfg.command_prefix_args.clone();
@@ -324,175 +325,178 @@ async fn run_chat_stream(
         send_event(&tx, ChatStreamEvent::status("airllm_required")).await?;
     }
 
-    let started = Instant::now();
-
-    let command_future = async {
-        let mut command = Command::new(&cfg.command);
-        command
-            .args(&args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-
-        let mut child = command
-            .spawn()
-            .map_err(|error| ChatStreamError::Io(format!("falha ao executar comando: {error}")))?;
-
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| ChatStreamError::Io("stdout indisponivel".to_string()))?;
-
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| ChatStreamError::Io("stderr indisponivel".to_string()))?;
-
-        let stderr_task = tokio::spawn(async move {
-            let mut reader = BufReader::new(stderr);
-            let mut collected = Vec::new();
-            let _ = reader.read_to_end(&mut collected).await;
-            String::from_utf8_lossy(&collected).to_string()
-        });
-
-        let mut reader = BufReader::new(stdout);
-        let mut buffer = [0_u8; 4096];
-        let mut collected = String::new();
-
-        let mut sent_thinking = 0_usize;
-        let mut sent_answer = 0_usize;
-        let mut sent_metrics: Option<ParsedMetrics> = None;
-
-        let mut announced_thinking = false;
-        let mut announced_answering = false;
-
-        loop {
-            let read = tokio::select! {
-                _ = tx.closed() => {
-                    let _ = child.start_kill();
-                    let _ = child.wait().await;
-                    return Err(ChatStreamError::ClientDisconnected);
-                }
-                read = reader.read(&mut buffer) => {
-                    read.map_err(|error| ChatStreamError::Io(format!("falha lendo stdout: {error}")))?
-                }
-            };
-
-            if read == 0 {
-                break;
-            }
-
-            collected.push_str(&String::from_utf8_lossy(&buffer[..read]));
-            let parsed = ParsedOutput::parse(&collected);
-
-            if parsed.thinking.len() > sent_thinking {
-                if !announced_thinking {
-                    send_event(&tx, ChatStreamEvent::status("thinking")).await?;
-                    announced_thinking = true;
-                }
-
-                if let Some(delta) = parsed.thinking.get(sent_thinking..) {
-                    send_event(&tx, ChatStreamEvent::thinking_delta(delta.to_string())).await?;
-                }
-                sent_thinking = parsed.thinking.len();
-            }
-
-            if parsed.answer.len() > sent_answer {
-                if !announced_answering {
-                    send_event(&tx, ChatStreamEvent::status("answering")).await?;
-                    announced_answering = true;
-                }
-
-                if let Some(delta) = parsed.answer.get(sent_answer..) {
-                    send_event(&tx, ChatStreamEvent::answer_delta(delta.to_string())).await?;
-                }
-                sent_answer = parsed.answer.len();
-            }
-
-            if parsed.metrics.has_any() {
-                let should_emit = sent_metrics
-                    .as_ref()
-                    .map(|previous| previous != &parsed.metrics)
-                    .unwrap_or(true);
-
-                if should_emit {
-                    send_event(&tx, ChatStreamEvent::metrics(&parsed.metrics)).await?;
-                    sent_metrics = Some(parsed.metrics.clone());
-                }
-            }
-        }
-
-        let status = child
-            .wait()
-            .await
-            .map_err(|error| ChatStreamError::Io(format!("falha aguardando comando: {error}")))?;
-
-        let stderr_output = stderr_task
-            .await
-            .map_err(|error| ChatStreamError::Io(format!("falha ao aguardar stderr: {error}")))?;
-
-        if !status.success() {
-            let mut failure_details = describe_exit_status(status);
-            let trimmed_stderr = stderr_output.trim();
-            if !trimmed_stderr.is_empty() {
-                failure_details.push_str("; ");
-                failure_details.push_str(trimmed_stderr);
-            } else {
-                let stdout_tail = tail_text(&collected, 700);
-                if !stdout_tail.is_empty() {
-                    failure_details.push_str("; stdout: ");
-                    failure_details.push_str(&stdout_tail);
-                }
-            }
-
-            return Err(ChatStreamError::CommandFailed(format!(
-                "comando '{}' falhou: {}",
-                command_preview, failure_details
-            )));
-        }
-
-        Ok((
-            collected,
-            prompt_for_command,
-            started.elapsed().as_millis() as u64,
-        ))
-    };
-
-    let primary_result = timeout(cfg.timeout, command_future)
-        .await
-        .map_err(|_| ChatStreamError::Timeout(cfg.timeout.as_secs()))?;
-
     let airllm_required = should_try_airllm;
-    let (raw_output, prompt_text, latency_ms, used_fallback) = match primary_result {
-        Ok((raw_output, prompt_text, latency_ms)) => (raw_output, prompt_text, latency_ms, false),
-        Err(ChatStreamError::CommandFailed(message))
-            if should_try_airllm && is_memory_pressure_error(&message) =>
-        {
-            send_event(&tx, ChatStreamEvent::status("fallback_airllm")).await?;
-            send_event(
-                &tx,
-                ChatStreamEvent::airllm_log(format!(
-                    "Fallback AIRLLM iniciado com python '{}'",
-                    cfg.airllm_python_command
-                )),
-            )
-            .await?;
-            send_event(
-                &tx,
-                ChatStreamEvent::airllm_log(format!("Runner AIRLLM: {}", cfg.airllm_runner)),
-            )
-            .await?;
-            let started_fallback = Instant::now();
-            let fallback_output =
-                run_airllm_bridge(&cfg, &model_path, &request, &prompt, &tx).await?;
-            (
-                fallback_output,
-                prompt.clone(),
-                started_fallback.elapsed().as_millis() as u64,
-                true,
-            )
+    let (raw_output, prompt_text, latency_ms, used_fallback) = if should_try_airllm && force_airllm
+    {
+        send_event(&tx, ChatStreamEvent::status("fallback_airllm")).await?;
+        announce_airllm_start(&cfg, &tx).await?;
+        let started_fallback = Instant::now();
+        let fallback_output = run_airllm_bridge(&cfg, &model_path, &request, &prompt, &tx).await?;
+        (
+            fallback_output,
+            prompt.clone(),
+            started_fallback.elapsed().as_millis() as u64,
+            true,
+        )
+    } else {
+        let started = Instant::now();
+
+        let command_future = async {
+            let mut command = Command::new(&cfg.command);
+            command
+                .args(&args)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true);
+
+            let mut child = command.spawn().map_err(|error| {
+                ChatStreamError::Io(format!("falha ao executar comando: {error}"))
+            })?;
+
+            let stdout = child
+                .stdout
+                .take()
+                .ok_or_else(|| ChatStreamError::Io("stdout indisponivel".to_string()))?;
+
+            let stderr = child
+                .stderr
+                .take()
+                .ok_or_else(|| ChatStreamError::Io("stderr indisponivel".to_string()))?;
+
+            let stderr_task = tokio::spawn(async move {
+                let mut reader = BufReader::new(stderr);
+                let mut collected = Vec::new();
+                let _ = reader.read_to_end(&mut collected).await;
+                String::from_utf8_lossy(&collected).to_string()
+            });
+
+            let mut reader = BufReader::new(stdout);
+            let mut buffer = [0_u8; 4096];
+            let mut collected = String::new();
+
+            let mut sent_thinking = 0_usize;
+            let mut sent_answer = 0_usize;
+            let mut sent_metrics: Option<ParsedMetrics> = None;
+
+            let mut announced_thinking = false;
+            let mut announced_answering = false;
+
+            loop {
+                let read = tokio::select! {
+                    _ = tx.closed() => {
+                        let _ = child.start_kill();
+                        let _ = child.wait().await;
+                        return Err(ChatStreamError::ClientDisconnected);
+                    }
+                    read = reader.read(&mut buffer) => {
+                        read.map_err(|error| ChatStreamError::Io(format!("falha lendo stdout: {error}")))?
+                    }
+                };
+
+                if read == 0 {
+                    break;
+                }
+
+                collected.push_str(&String::from_utf8_lossy(&buffer[..read]));
+                let parsed = ParsedOutput::parse(&collected);
+
+                if parsed.thinking.len() > sent_thinking {
+                    if !announced_thinking {
+                        send_event(&tx, ChatStreamEvent::status("thinking")).await?;
+                        announced_thinking = true;
+                    }
+
+                    if let Some(delta) = parsed.thinking.get(sent_thinking..) {
+                        send_event(&tx, ChatStreamEvent::thinking_delta(delta.to_string())).await?;
+                    }
+                    sent_thinking = parsed.thinking.len();
+                }
+
+                if parsed.answer.len() > sent_answer {
+                    if !announced_answering {
+                        send_event(&tx, ChatStreamEvent::status("answering")).await?;
+                        announced_answering = true;
+                    }
+
+                    if let Some(delta) = parsed.answer.get(sent_answer..) {
+                        send_event(&tx, ChatStreamEvent::answer_delta(delta.to_string())).await?;
+                    }
+                    sent_answer = parsed.answer.len();
+                }
+
+                if parsed.metrics.has_any() {
+                    let should_emit = sent_metrics
+                        .as_ref()
+                        .map(|previous| previous != &parsed.metrics)
+                        .unwrap_or(true);
+
+                    if should_emit {
+                        send_event(&tx, ChatStreamEvent::metrics(&parsed.metrics)).await?;
+                        sent_metrics = Some(parsed.metrics.clone());
+                    }
+                }
+            }
+
+            let status = child.wait().await.map_err(|error| {
+                ChatStreamError::Io(format!("falha aguardando comando: {error}"))
+            })?;
+
+            let stderr_output = stderr_task.await.map_err(|error| {
+                ChatStreamError::Io(format!("falha ao aguardar stderr: {error}"))
+            })?;
+
+            if !status.success() {
+                let mut failure_details = describe_exit_status(status);
+                let trimmed_stderr = stderr_output.trim();
+                if !trimmed_stderr.is_empty() {
+                    failure_details.push_str("; ");
+                    failure_details.push_str(trimmed_stderr);
+                } else {
+                    let stdout_tail = tail_text(&collected, 700);
+                    if !stdout_tail.is_empty() {
+                        failure_details.push_str("; stdout: ");
+                        failure_details.push_str(&stdout_tail);
+                    }
+                }
+
+                return Err(ChatStreamError::CommandFailed(format!(
+                    "comando '{}' falhou: {}",
+                    command_preview, failure_details
+                )));
+            }
+
+            Ok((
+                collected,
+                prompt_for_command,
+                started.elapsed().as_millis() as u64,
+            ))
+        };
+
+        let primary_result = timeout(cfg.timeout, command_future)
+            .await
+            .map_err(|_| ChatStreamError::Timeout(cfg.timeout.as_secs()))?;
+
+        match primary_result {
+            Ok((raw_output, prompt_text, latency_ms)) => {
+                (raw_output, prompt_text, latency_ms, false)
+            }
+            Err(ChatStreamError::CommandFailed(message))
+                if should_try_airllm && is_memory_pressure_error(&message) =>
+            {
+                send_event(&tx, ChatStreamEvent::status("fallback_airllm")).await?;
+                announce_airllm_start(&cfg, &tx).await?;
+                let started_fallback = Instant::now();
+                let fallback_output =
+                    run_airllm_bridge(&cfg, &model_path, &request, &prompt, &tx).await?;
+                (
+                    fallback_output,
+                    prompt.clone(),
+                    started_fallback.elapsed().as_millis() as u64,
+                    true,
+                )
+            }
+            Err(error) => return Err(error),
         }
-        Err(error) => return Err(error),
     };
 
     let parsed = ParsedOutput::parse(&raw_output);
@@ -548,6 +552,26 @@ async fn send_event(
     tx.send(event)
         .await
         .map_err(|_| ChatStreamError::ClientDisconnected)
+}
+
+async fn announce_airllm_start(
+    cfg: &ChatRuntimeConfig,
+    tx: &mpsc::Sender<ChatStreamEvent>,
+) -> Result<(), ChatStreamError> {
+    send_event(
+        tx,
+        ChatStreamEvent::airllm_log(format!(
+            "Fallback AIRLLM iniciado com python '{}'",
+            cfg.airllm_python_command
+        )),
+    )
+    .await?;
+    send_event(
+        tx,
+        ChatStreamEvent::airllm_log(format!("Runner AIRLLM: {}", cfg.airllm_runner)),
+    )
+    .await?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]
