@@ -2166,6 +2166,15 @@ function normalizeAssistantMetrics(value) {
     normalized.airllm_used = Boolean(value.airllm_used);
   }
 
+  if (Array.isArray(value.airllm_logs)) {
+    const logs = value.airllm_logs
+      .map((entry) => String(entry || "").trim())
+      .filter((entry) => entry.length > 0);
+    if (logs.length) {
+      normalized.airllm_logs = logs.slice(-40);
+    }
+  }
+
   return Object.keys(normalized).length ? normalized : null;
 }
 
@@ -2366,6 +2375,7 @@ function createAssistantStreamCard({ forceScroll = true } = {}) {
     latestMetrics: null,
     airllmRequired: false,
     airllmUsed: false,
+    airllmLogs: [],
   };
 
   chatLog.appendChild(node);
@@ -2385,6 +2395,10 @@ function addAssistantHistoryCard(message, { forceScroll = true } = {}) {
     airllmRequired: Boolean(savedMetrics?.airllm_required),
     airllmUsed: Boolean(savedMetrics?.airllm_used),
   });
+  if (Array.isArray(savedMetrics?.airllm_logs)) {
+    ui.airllmLogs = savedMetrics.airllm_logs.slice(-40);
+    updateAssistantRuntimeBadgeTooltip(ui);
+  }
 
   if (savedThinking) {
     ui.thinkingSection.classList.remove("hidden");
@@ -2453,16 +2467,113 @@ function setAssistantRuntimeBadge(ui, { airllmRequired = false, airllmUsed = fal
   if (!ui.airllmRequired && !ui.airllmUsed) {
     ui.runtimeBadge.classList.add("hidden");
     ui.runtimeBadge.textContent = "";
+    ui.runtimeBadge.removeAttribute("title");
+    ui.runtimeBadge.removeAttribute("aria-label");
     return;
   }
 
   if (ui.airllmUsed) {
     ui.runtimeBadge.textContent = "AIRLLM em uso";
     ui.runtimeBadge.classList.add("airllm-used");
+    updateAssistantRuntimeBadgeTooltip(ui);
     return;
   }
 
   ui.runtimeBadge.textContent = "AIRLLM necessario";
+  updateAssistantRuntimeBadgeTooltip(ui);
+}
+
+function updateAssistantRuntimeBadgeTooltip(ui) {
+  if (!ui?.runtimeBadge) {
+    return;
+  }
+
+  if (!ui.airllmRequired && !ui.airllmUsed) {
+    ui.runtimeBadge.removeAttribute("title");
+    ui.runtimeBadge.removeAttribute("aria-label");
+    ui.runtimeBadge.removeAttribute("data-airllm-tooltip");
+    return;
+  }
+
+  const lines = [];
+  if (ui.airllmUsed) {
+    lines.push("AIRLLM em uso.");
+  } else if (ui.airllmRequired) {
+    lines.push("AIRLLM necessario.");
+  }
+
+  if (Array.isArray(ui.airllmLogs) && ui.airllmLogs.length) {
+    lines.push("", "Logs AIRLLM (mais recentes):");
+    lines.push(...ui.airllmLogs.slice(-20));
+  } else {
+    lines.push("", "Sem logs do AIRLLM ainda.");
+  }
+
+  const tooltip = lines.join("\n").trim();
+  if (tooltip) {
+    ui.runtimeBadge.title = tooltip;
+    ui.runtimeBadge.setAttribute("aria-label", tooltip);
+    ui.runtimeBadge.setAttribute("data-airllm-tooltip", tooltip);
+  } else {
+    ui.runtimeBadge.removeAttribute("title");
+    ui.runtimeBadge.removeAttribute("aria-label");
+    ui.runtimeBadge.removeAttribute("data-airllm-tooltip");
+  }
+}
+
+function appendAirllmLog(ui, message) {
+  if (!ui) {
+    return;
+  }
+
+  const clean = String(message || "").trim();
+  if (!clean) {
+    return;
+  }
+
+  const timestamp = new Date().toLocaleTimeString("pt-BR", { hour12: false });
+  const lastRaw = ui.airllmLastLogRaw || "";
+  if (lastRaw === clean) {
+    return;
+  }
+  ui.airllmLastLogRaw = clean;
+
+  if (!Array.isArray(ui.airllmLogs)) {
+    ui.airllmLogs = [];
+  }
+  ui.airllmLogs.push(`[${timestamp}] ${clean}`);
+  if (ui.airllmLogs.length > 40) {
+    ui.airllmLogs = ui.airllmLogs.slice(-40);
+  }
+
+  if (ui.latestMetrics && typeof ui.latestMetrics === "object") {
+    ui.latestMetrics.airllm_logs = ui.airllmLogs.slice(-40);
+  }
+
+  updateAssistantRuntimeBadgeTooltip(ui);
+  renderAirllmLiveLogs(ui);
+}
+
+function renderAirllmLiveLogs(ui) {
+  if (!ui?.metricsSection || !ui?.metricsText) {
+    return;
+  }
+  if (!Array.isArray(ui.airllmLogs) || !ui.airllmLogs.length) {
+    return;
+  }
+
+  const lines = [];
+  if (ui.airllmUsed) {
+    lines.push("AIRLLM em uso.");
+  } else if (ui.airllmRequired) {
+    lines.push("AIRLLM necessario.");
+  }
+  lines.push("", "AIRLLM logs (ao vivo):");
+  lines.push(...ui.airllmLogs.slice(-12));
+
+  ui.metricsText.textContent = lines.join("\n");
+  ui.metricsSection.classList.remove("hidden");
+  scrollChatToBottom();
 }
 
 function flushAssistantQueues(ui) {
@@ -2663,7 +2774,16 @@ function renderAssistantMetrics(ui, event) {
     ...normalizedEvent,
     airllm_required: airllmRequired,
     airllm_used: airllmUsed,
+    airllm_logs: Array.isArray(normalizedEvent.airllm_logs)
+      ? normalizedEvent.airllm_logs.slice(-40)
+      : Array.isArray(ui.airllmLogs)
+        ? ui.airllmLogs.slice(-40)
+        : undefined,
   };
+  if (Array.isArray(ui.latestMetrics.airllm_logs)) {
+    ui.airllmLogs = ui.latestMetrics.airllm_logs.slice(-40);
+    updateAssistantRuntimeBadgeTooltip(ui);
+  }
 
   const lines = [];
   const hasRawMetrics = typeof normalizedEvent.raw_metrics === "string" && normalizedEvent.raw_metrics.trim().length > 0;
@@ -2694,6 +2814,11 @@ function renderAssistantMetrics(ui, event) {
   }
   if (airllmUsed) {
     lines.push(`AIRLLM usado: sim`);
+  }
+  if (Array.isArray(ui.airllmLogs) && ui.airllmLogs.length) {
+    lines.push("");
+    lines.push("AIRLLM logs:");
+    lines.push(...ui.airllmLogs.slice(-8));
   }
 
   if (hasRawMetrics) {
@@ -3037,6 +3162,11 @@ async function consumeChatStream(payload, ui, signal) {
         continue;
       }
 
+      if (event.event === "airllm_log") {
+        appendAirllmLog(ui, event.message || "");
+        continue;
+      }
+
       if (event.event === "done") {
         if (event.airllm_required != null || event.airllm_used != null) {
           setAssistantRuntimeBadge(ui, {
@@ -3111,6 +3241,7 @@ async function runAssistantGeneration() {
       ...(assistantUi.latestMetrics || {}),
       airllm_required: assistantUi.airllmRequired,
       airllm_used: assistantUi.airllmUsed,
+      airllm_logs: Array.isArray(assistantUi.airllmLogs) ? assistantUi.airllmLogs.slice(-40) : undefined,
     });
     if (finalAnswer || finalThinking || finalMetrics) {
       appendMessageToActiveThread(
@@ -3135,6 +3266,7 @@ async function runAssistantGeneration() {
         ...(assistantUi.latestMetrics || {}),
         airllm_required: assistantUi.airllmRequired,
         airllm_used: assistantUi.airllmUsed,
+        airllm_logs: Array.isArray(assistantUi.airllmLogs) ? assistantUi.airllmLogs.slice(-40) : undefined,
       });
       if (partialAnswer || partialThinking || partialMetrics) {
         appendMessageToActiveThread(

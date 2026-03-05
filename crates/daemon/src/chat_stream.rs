@@ -4,7 +4,7 @@ use std::process::{Command as StdCommand, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use tokio::io::{AsyncReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
@@ -168,6 +168,25 @@ impl ChatStreamEvent {
         Self {
             event: "error".to_string(),
             status: Some("error".to_string()),
+            delta: None,
+            message: Some(message),
+            prompt_tokens: None,
+            completion_tokens: None,
+            total_tokens: None,
+            prompt_tps: None,
+            generation_tps: None,
+            peak_memory_gb: None,
+            latency_ms: None,
+            raw_metrics: None,
+            airllm_required: None,
+            airllm_used: None,
+        }
+    }
+
+    pub fn airllm_log(message: String) -> Self {
+        Self {
+            event: "airllm_log".to_string(),
+            status: None,
             delta: None,
             message: Some(message),
             prompt_tokens: None,
@@ -449,8 +468,24 @@ async fn run_chat_stream(
             if should_try_airllm && is_memory_pressure_error(&message) =>
         {
             send_event(&tx, ChatStreamEvent::status("fallback_airllm")).await?;
+            send_event(
+                &tx,
+                ChatStreamEvent::airllm_log(format!(
+                    "Fallback AIRLLM iniciado com python '{}'",
+                    cfg.airllm_python_command
+                )),
+            )
+            .await?;
+            send_event(
+                &tx,
+                ChatStreamEvent::airllm_log(format!(
+                    "Runner AIRLLM: {}",
+                    cfg.airllm_runner
+                )),
+            )
+            .await?;
             let started_fallback = Instant::now();
-            let fallback_output = run_airllm_bridge(&cfg, &model_path, &request, &prompt).await?;
+            let fallback_output = run_airllm_bridge(&cfg, &model_path, &request, &prompt, &tx).await?;
             (
                 fallback_output,
                 prompt.clone(),
@@ -604,7 +639,23 @@ async fn run_airllm_bridge(
     model_path: &Path,
     request: &ChatRequest,
     prompt: &str,
+    tx: &mpsc::Sender<ChatStreamEvent>,
 ) -> Result<String, ChatStreamError> {
+    let runner_path = PathBuf::from(&cfg.airllm_runner);
+    if !runner_path.exists() {
+        let cwd = std::env::current_dir()
+            .ok()
+            .map(|dir| dir.display().to_string())
+            .unwrap_or_else(|| "<unknown>".to_string());
+        return Err(ChatStreamError::CommandFailed(format!(
+            "fallback airllm runner nao encontrado: {} (cwd: {})",
+            runner_path.display(),
+            cwd
+        )));
+    }
+
+    let fallback_timeout = cfg.timeout.min(Duration::from_secs(300));
+
     let mut args = vec![
         cfg.airllm_runner.clone(),
         "--model".to_string(),
@@ -621,8 +672,9 @@ async fn run_airllm_bridge(
     }
 
     if let Some(max_tokens) = request.options.max_tokens {
+        let fallback_cap = max_tokens.min(256);
         args.push("--max-tokens".to_string());
-        args.push(max_tokens.to_string());
+        args.push(fallback_cap.to_string());
     }
 
     if let Some(top_p) = request.options.top_p {
@@ -637,29 +689,107 @@ async fn run_airllm_bridge(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    let output = timeout(cfg.timeout, command.output())
-        .await
-        .map_err(|_| ChatStreamError::Timeout(cfg.timeout.as_secs()))?
-        .map_err(|error| {
+    let mut child = command.spawn().map_err(|error| {
+        ChatStreamError::Io(format!(
+            "falha ao iniciar fallback airllm '{}': {error}",
+            cfg.airllm_python_command
+        ))
+    })?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| ChatStreamError::Io("stdout indisponivel no fallback airllm".to_string()))?;
+
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| ChatStreamError::Io("stderr indisponivel no fallback airllm".to_string()))?;
+
+    let stdout_task = tokio::spawn(async move {
+        let mut reader = BufReader::new(stdout);
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).await.map_err(|error| {
             ChatStreamError::Io(format!(
-                "falha ao iniciar fallback airllm '{}': {error}",
-                cfg.airllm_python_command
+                "falha lendo stdout do fallback airllm: {error}"
             ))
         })?;
+        Ok::<String, ChatStreamError>(String::from_utf8_lossy(&bytes).to_string())
+    });
 
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let tx_for_stderr = tx.clone();
+    let stderr_task = tokio::spawn(async move {
+        let mut reader = BufReader::new(stderr);
+        let mut line = String::new();
+        let mut collected = String::new();
+        loop {
+            line.clear();
+            let read = reader.read_line(&mut line).await.map_err(|error| {
+                ChatStreamError::Io(format!("falha lendo stderr do fallback airllm: {error}"))
+            })?;
+            if read == 0 {
+                break;
+            }
+            collected.push_str(&line);
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                let _ = tx_for_stderr
+                    .send(ChatStreamEvent::airllm_log(trimmed.to_string()))
+                    .await;
+            }
+        }
 
-    if !output.status.success() {
+        Ok::<String, ChatStreamError>(collected)
+    });
+
+    let status = match timeout(fallback_timeout, child.wait()).await {
+        Ok(wait_result) => wait_result.map_err(|error| {
+            ChatStreamError::Io(format!(
+                "falha aguardando fallback airllm: {error}"
+            ))
+        })?,
+        Err(_) => {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            let _ = send_event(
+                tx,
+                ChatStreamEvent::airllm_log(format!(
+                    "Fallback AIRLLM expirou apos {}s e foi encerrado.",
+                    fallback_timeout.as_secs()
+                )),
+            )
+            .await;
+            return Err(ChatStreamError::CommandFailed(format!(
+                "fallback airllm expirou apos {}s",
+                fallback_timeout.as_secs()
+            )));
+        }
+    };
+
+    let stdout = stdout_task
+        .await
+        .map_err(|error| ChatStreamError::Io(format!("falha no join de stdout: {error}")))??;
+    let stderr = stderr_task
+        .await
+        .map_err(|error| ChatStreamError::Io(format!("falha no join de stderr: {error}")))??;
+    let stderr = stderr.trim().to_string();
+
+    if !status.success() {
         let details = if stderr.is_empty() {
-            describe_exit_status(output.status)
+            describe_exit_status(status)
         } else {
-            format!("{}; {}", describe_exit_status(output.status), stderr)
+            format!("{}; {}", describe_exit_status(status), stderr)
         };
         return Err(ChatStreamError::CommandFailed(format!(
             "fallback airllm falhou: {details}"
         )));
     }
+
+    send_event(
+        tx,
+        ChatStreamEvent::airllm_log("Fallback AIRLLM concluiu com sucesso.".to_string()),
+    )
+    .await?;
 
     Ok(stdout)
 }

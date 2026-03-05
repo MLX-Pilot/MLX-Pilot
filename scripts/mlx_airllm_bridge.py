@@ -14,6 +14,11 @@ import sys
 import mlx.core as mx
 
 
+def log(message: str) -> None:
+    sys.stderr.write(f"[airllm] {message}\n")
+    sys.stderr.flush()
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="MLX AIRLLM bridge")
     parser.add_argument("--model", required=True, help="Model path or repo id")
@@ -41,15 +46,21 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    log(f"start device={args.device} max_tokens={max(1, args.max_tokens)}")
+    log(f"model={args.model}")
 
     if args.device == "cpu":
         mx.set_default_device(mx.cpu)
+        log("default device set to cpu")
 
     from mlx_lm import generate, load
     from mlx_lm.sample_utils import make_sampler
 
+    log("loading model/tokenizer")
     model, tokenizer = load(args.model, lazy=True)
+    log("model/tokenizer loaded")
     sampler = make_sampler(args.temp, args.top_p, 0.0, 1, top_k=0)
+    log("generating")
     text = generate(
         model,
         tokenizer,
@@ -62,6 +73,7 @@ def main() -> int:
         quantized_kv_start=max(0, args.quantized_kv_start),
         verbose=False,
     )
+    log("generation finished")
 
     sys.stdout.write(text.strip())
     return 0

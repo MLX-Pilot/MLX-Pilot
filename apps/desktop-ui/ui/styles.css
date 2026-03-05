@@ -1200,6 +1200,30 @@ textarea:focus {
   border: 1px solid rgba(126, 193, 255, 0.35);
   background: rgba(53, 130, 218, 0.18);
   color: #cbe6ff;
+  cursor: help;
+  position: relative;
+}
+
+.assistant-runtime-badge[data-airllm-tooltip]:hover::after {
+  content: attr(data-airllm-tooltip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  min-width: 220px;
+  max-width: 460px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(126, 193, 255, 0.28);
+  background: rgba(8, 16, 29, 0.95);
+  color: #d8ebff;
+  text-transform: none;
+  letter-spacing: 0;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  z-index: 30;
+  pointer-events: none;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
 
 .assistant-runtime-badge.airllm-used {

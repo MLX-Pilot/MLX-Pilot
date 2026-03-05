@@ -342,8 +342,9 @@ impl MlxProvider {
         }
 
         if let Some(max_tokens) = request.options.max_tokens {
+            let fallback_cap = max_tokens.min(256);
             args.push("--max-tokens".to_string());
-            args.push(max_tokens.to_string());
+            args.push(fallback_cap.to_string());
         }
 
         if let Some(top_p) = request.options.top_p {
@@ -445,7 +446,70 @@ fn default_airllm_python_command() -> String {
 }
 
 fn default_airllm_runner() -> String {
-    "scripts/mlx_airllm_bridge.py".to_string()
+    resolve_airllm_runner("scripts/mlx_airllm_bridge.py")
+}
+
+fn resolve_airllm_runner(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return "scripts/mlx_airllm_bridge.py".to_string();
+    }
+
+    let input = PathBuf::from(trimmed);
+    if input.is_absolute() {
+        return input.display().to_string();
+    }
+
+    let script_name = input
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| "mlx_airllm_bridge.py".to_string());
+    let relative = if input.components().count() > 1 {
+        input.clone()
+    } else {
+        PathBuf::from("scripts").join(script_name.as_str())
+    };
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join(&relative));
+            candidates.push(exe_dir.join("../Resources").join(&relative));
+            candidates.push(
+                exe_dir
+                    .join("../Resources")
+                    .join("scripts")
+                    .join(script_name.as_str()),
+            );
+            candidates.push(exe_dir.join("../Resources").join(script_name.as_str()));
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join(&relative));
+    }
+
+    let workspace_hint = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join(&relative);
+    candidates.push(workspace_hint);
+
+    if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
+        let trimmed_home = home.trim();
+        if !trimmed_home.is_empty() {
+            candidates.push(PathBuf::from(trimmed_home).join("mlx-ollama-pilot").join(&relative));
+        }
+    }
+
+    for candidate in candidates {
+        if candidate.exists() {
+            return candidate.display().to_string();
+        }
+    }
+
+    relative.display().to_string()
 }
 
 fn default_models_dir() -> PathBuf {
@@ -615,6 +679,19 @@ impl ModelProvider for MlxProvider {
         } else if should_try_airllm
             && Self::is_memory_pressure_error(&primary.stdout, &primary.stderr)
         {
+            let runner_path = PathBuf::from(&self.cfg.airllm_runner);
+            if !runner_path.exists() {
+                let primary_details =
+                    Self::failure_details(&primary.stdout, &primary.stderr, &primary.status);
+                return Err(ProviderError::CommandFailed {
+                    command: primary.command_debug,
+                    stderr: format!(
+                        "mlx falhou por memoria: {primary_details}; fallback airllm runner nao encontrado: {}",
+                        runner_path.display()
+                    ),
+                });
+            }
+
             let airllm_args = self.build_airllm_args(&model_path, &prompt, &request);
             let airllm = self
                 .run_command_capture(&self.cfg.airllm_python_command, &airllm_args)

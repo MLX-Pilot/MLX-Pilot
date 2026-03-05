@@ -267,10 +267,8 @@ impl Default for AppConfig {
 
 impl AppConfig {
     pub fn get_settings_path() -> PathBuf {
-        // Use home dir via env instead of the `dirs` crate
-        let base = if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"))
-        {
-            PathBuf::from(home).join(".config")
+        let base = if let Some(home) = home_dir() {
+            home.join(".config")
         } else if let Ok(app_data) = std::env::var("APPDATA") {
             PathBuf::from(app_data)
         } else {
@@ -633,6 +631,8 @@ impl AppConfig {
             self.agent.security.owner_only = parse_bool(&value, self.agent.security.owner_only);
         }
 
+        self.mlx_airllm_runner = resolve_mlx_airllm_runner(&self.mlx_airllm_runner);
+
         normalize_mlx_command(&mut self);
 
         self
@@ -644,10 +644,32 @@ fn parse_shell_args(value: &str) -> Option<Vec<String>> {
 }
 
 fn home_dir() -> Option<PathBuf> {
-    std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .ok()
-        .map(PathBuf::from)
+    if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
+        let trimmed = home.trim();
+        if !trimmed.is_empty() {
+            return Some(PathBuf::from(trimmed));
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        if let Ok(user) = std::env::var("USER").or_else(|_| std::env::var("LOGNAME")) {
+            let trimmed = user.trim();
+            if !trimmed.is_empty() {
+                let mac_home = PathBuf::from("/Users").join(trimmed);
+                if mac_home.exists() {
+                    return Some(mac_home);
+                }
+
+                let linux_home = PathBuf::from("/home").join(trimmed);
+                if linux_home.exists() {
+                    return Some(linux_home);
+                }
+            }
+        }
+    }
+
+    None
 }
 
 fn default_app_data_dir() -> PathBuf {
@@ -691,7 +713,7 @@ fn default_mlx_airllm_python_command() -> String {
 }
 
 fn default_mlx_airllm_runner() -> String {
-    "scripts/mlx_airllm_bridge.py".to_string()
+    resolve_mlx_airllm_runner("scripts/mlx_airllm_bridge.py")
 }
 
 fn default_mlx_airllm_threshold_percent() -> u8 {
@@ -764,6 +786,67 @@ fn starts_with_legacy_module(values: &[String], expected: &[&str]) -> bool {
         .iter()
         .zip(expected.iter())
         .all(|(left, right)| left == right)
+}
+
+fn resolve_mlx_airllm_runner(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return "scripts/mlx_airllm_bridge.py".to_string();
+    }
+
+    let input = PathBuf::from(trimmed);
+    if input.is_absolute() {
+        return input.display().to_string();
+    }
+
+    let script_name = input
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| "mlx_airllm_bridge.py".to_string());
+    let relative = if input.components().count() > 1 {
+        input.clone()
+    } else {
+        PathBuf::from("scripts").join(script_name.as_str())
+    };
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join(&relative));
+            candidates.push(exe_dir.join("scripts").join(script_name.as_str()));
+            candidates.push(exe_dir.join("../Resources").join(&relative));
+            candidates.push(
+                exe_dir
+                    .join("../Resources")
+                    .join("scripts")
+                    .join(script_name.as_str()),
+            );
+            candidates.push(exe_dir.join("../Resources").join(script_name.as_str()));
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join(&relative));
+    }
+
+    let workspace_hint = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join(&relative);
+    candidates.push(workspace_hint);
+
+    if let Some(home) = home_dir() {
+        candidates.push(home.join("mlx-ollama-pilot").join(&relative));
+    }
+
+    for candidate in candidates {
+        if candidate.exists() {
+            return candidate.display().to_string();
+        }
+    }
+
+    relative.display().to_string()
 }
 
 fn parse_bool(value: &str, fallback: bool) -> bool {
