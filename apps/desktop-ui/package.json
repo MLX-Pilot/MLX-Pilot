@@ -1,0 +1,11 @@
+{
+  "name": "mlx-pilot-desktop-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:e2e:channels-smoke": "node --test e2e/channels-smoke.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}
