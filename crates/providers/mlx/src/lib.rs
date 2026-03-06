@@ -284,7 +284,7 @@ impl MlxProvider {
     }
 
     fn should_force_airllm_safe_cpu(&self, profile: Option<MemoryProfile>) -> bool {
-        if !self.cfg.airllm_safe_mode {
+        if !self.airllm_safe_mode_enabled() {
             return false;
         }
         let Some(profile) = profile else { return false };
@@ -405,7 +405,7 @@ impl MlxProvider {
     }
 
     fn recommended_airllm_max_kv_size(&self, force_cpu: bool) -> usize {
-        if !self.cfg.airllm_safe_mode {
+        if !self.airllm_safe_mode_enabled() {
             return 1024;
         }
         if force_cpu {
@@ -413,6 +413,14 @@ impl MlxProvider {
         } else {
             512
         }
+    }
+
+    fn airllm_safe_mode_enabled(&self) -> bool {
+        self.cfg.airllm_safe_mode && !cfg!(target_os = "windows")
+    }
+
+    fn should_force_legacy_retry(&self) -> bool {
+        !cfg!(target_os = "windows")
     }
 
     async fn run_command_capture(
@@ -795,7 +803,13 @@ impl ModelProvider for MlxProvider {
                 && Self::is_memory_pressure_error(&airllm.stdout, &airllm.stderr)
                 && !safe_cpu_preferred
             {
-                let retry_args = self.build_airllm_args(&model_path, &prompt, &request, true, true);
+                let retry_args = self.build_airllm_args(
+                    &model_path,
+                    &prompt,
+                    &request,
+                    true,
+                    self.should_force_legacy_retry(),
+                );
                 airllm = self
                     .run_command_capture(&self.cfg.airllm_python_command, &retry_args)
                     .await?;
@@ -840,7 +854,7 @@ impl ModelProvider for MlxProvider {
                     &prompt,
                     &request,
                     true,
-                    self.cfg.airllm_safe_mode,
+                    self.airllm_safe_mode_enabled(),
                 );
                 let airllm = self
                     .run_command_capture(&self.cfg.airllm_python_command, &airllm_args)

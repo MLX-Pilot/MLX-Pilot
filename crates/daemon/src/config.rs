@@ -649,6 +649,11 @@ impl AppConfig {
 
         self.mlx_airllm_runner = resolve_mlx_airllm_runner(&self.mlx_airllm_runner);
         self.mlx_airllm_backend = normalize_mlx_airllm_backend(&self.mlx_airllm_backend);
+        if cfg!(target_os = "windows") {
+            // AIRLLM safe mode exists to mitigate MLX/Metal pressure on macOS.
+            // On Windows the AIRLLM path should keep its native behavior.
+            self.mlx_airllm_safe_mode = false;
+        }
 
         normalize_mlx_command(&mut self);
 
