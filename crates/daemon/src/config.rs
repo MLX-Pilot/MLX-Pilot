@@ -171,6 +171,8 @@ pub struct AppConfig {
     pub mlx_airllm_enabled: bool,
     #[serde(default = "default_mlx_airllm_threshold_percent")]
     pub mlx_airllm_threshold_percent: u8,
+    #[serde(default = "default_true")]
+    pub mlx_airllm_safe_mode: bool,
     #[serde(default = "default_mlx_airllm_python_command")]
     pub mlx_airllm_python_command: String,
     #[serde(default = "default_mlx_airllm_runner")]
@@ -229,6 +231,7 @@ impl Default for AppConfig {
             mlx_timeout: Duration::from_secs(900),
             mlx_airllm_enabled: true,
             mlx_airllm_threshold_percent: default_mlx_airllm_threshold_percent(),
+            mlx_airllm_safe_mode: true,
             mlx_airllm_python_command: default_mlx_airllm_python_command(),
             mlx_airllm_runner: default_mlx_airllm_runner(),
             mlx_airllm_backend: default_mlx_airllm_backend(),
@@ -369,6 +372,10 @@ impl AppConfig {
             if let Ok(parsed) = value.parse::<u8>() {
                 self.mlx_airllm_threshold_percent = parsed.clamp(1, 100);
             }
+        }
+
+        if let Ok(value) = env::var("APP_MLX_AIRLLM_SAFE_MODE") {
+            self.mlx_airllm_safe_mode = parse_bool(&value, self.mlx_airllm_safe_mode);
         }
 
         if let Ok(value) = env::var("APP_MLX_AIRLLM_PYTHON_COMMAND") {
