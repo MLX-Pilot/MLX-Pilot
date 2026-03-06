@@ -1001,12 +1001,14 @@ dependencies = [
  "serde",
  "serde_json",
  "shell-words",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "tower-http",
  "tracing",
  "tracing-subscriber",
  "urlencoding",
+ "uuid",
 ]
 
 [[package]]

@@ -1,8 +1,10 @@
 mod agent_api;
 mod catalog;
+mod channels;
 mod chat_stream;
 mod config;
 mod openclaw;
+mod plugins;
 mod secrets_vault;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -15,7 +17,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::extract::{Path as AxumPath, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
@@ -52,6 +54,13 @@ use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
 
+use crate::channels::{
+    ChannelAuthRequest, ChannelLogsQuery, ChannelProbeRequest, ChannelRemoveAccountRequest,
+    ChannelResolveRequest, ChannelService, ChannelUpsertAccountRequest, LegacyChannelRemoveRequest,
+    LegacyChannelUpsertRequest, MessageSendRequest,
+};
+use crate::plugins::{PluginManager, PluginToggleRequest};
+
 #[derive(Clone)]
 struct AppState {
     provider_mode: LocalProviderMode,
@@ -66,6 +75,8 @@ struct AppState {
     pub nanobot_runtime: Arc<Mutex<NanoBotRuntimeManager>>,
     pub session_store: Arc<mlx_agent_core::SessionStore>,
     pub agent_state: agent_api::AgentState,
+    pub plugin_manager: Arc<PluginManager>,
+    pub channel_service: Arc<ChannelService>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -115,6 +126,11 @@ enum AppError {
     Catalog(CatalogError),
     OpenClaw(OpenClawError),
     NotFound(String),
+    InvalidChannelRequest {
+        status: StatusCode,
+        message: String,
+        error_code: String,
+    },
 }
 
 impl From<ProviderError> for AppError {
@@ -137,77 +153,131 @@ impl From<OpenClawError> for AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, message) = match self {
+        let (status, message, error_code) = match self {
             AppError::Provider(error) => map_provider_error(error),
             AppError::Catalog(error) => map_catalog_error(error),
             AppError::OpenClaw(error) => map_openclaw_error(error),
-            AppError::NotFound(message) => (StatusCode::NOT_FOUND, message),
+            AppError::NotFound(message) => (StatusCode::NOT_FOUND, message, None),
+            AppError::InvalidChannelRequest {
+                status,
+                message,
+                error_code,
+            } => (status, message, Some(error_code)),
         };
 
-        (status, Json(ErrorBody { error: message })).into_response()
+        (
+            status,
+            Json(ErrorBody {
+                error: message,
+                error_code,
+                protocol_version: Some(channels::protocol::CHANNEL_PROTOCOL_VERSION.to_string()),
+            }),
+        )
+            .into_response()
     }
 }
 
-fn map_provider_error(error: ProviderError) -> (StatusCode, String) {
+fn map_provider_error(error: ProviderError) -> (StatusCode, String, Option<String>) {
     match error {
-        ProviderError::InvalidRequest { details } => (StatusCode::BAD_REQUEST, details),
+        ProviderError::InvalidRequest { details } => (StatusCode::BAD_REQUEST, details, None),
         ProviderError::ModelNotFound { model_id } => (
             StatusCode::NOT_FOUND,
             format!("model '{model_id}' not found"),
+            None,
         ),
         ProviderError::Timeout { seconds } => (
             StatusCode::GATEWAY_TIMEOUT,
             format!("provider timeout ({seconds}s)"),
+            None,
         ),
-        ProviderError::Unavailable { details } => (StatusCode::SERVICE_UNAVAILABLE, details),
+        ProviderError::Unavailable { details } => (StatusCode::SERVICE_UNAVAILABLE, details, None),
         ProviderError::CommandFailed { command, stderr } => (
             StatusCode::BAD_GATEWAY,
             format!("command failed: {command}; stderr: {stderr}"),
+            None,
         ),
         ProviderError::Io { context, source } => (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("{context}: {source}"),
+            None,
         ),
     }
 }
 
-fn map_catalog_error(error: CatalogError) -> (StatusCode, String) {
+fn map_catalog_error(error: CatalogError) -> (StatusCode, String, Option<String>) {
     match error {
-        CatalogError::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
-        CatalogError::NotFound(message) => (StatusCode::NOT_FOUND, message),
-        CatalogError::Network(message) => (StatusCode::BAD_GATEWAY, message),
-        CatalogError::Cancelled { details } => (StatusCode::CONFLICT, details),
+        CatalogError::BadRequest(message) => (StatusCode::BAD_REQUEST, message, None),
+        CatalogError::NotFound(message) => (StatusCode::NOT_FOUND, message, None),
+        CatalogError::Network(message) => (StatusCode::BAD_GATEWAY, message, None),
+        CatalogError::Cancelled { details } => (StatusCode::CONFLICT, details, None),
         CatalogError::Io { context, source } => (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("{context}: {source}"),
+            None,
         ),
-        CatalogError::Unavailable(message) => (StatusCode::SERVICE_UNAVAILABLE, message),
+        CatalogError::Unavailable(message) => (StatusCode::SERVICE_UNAVAILABLE, message, None),
     }
 }
 
-fn map_openclaw_error(error: OpenClawError) -> (StatusCode, String) {
+fn map_openclaw_error(error: OpenClawError) -> (StatusCode, String, Option<String>) {
     match error {
-        OpenClawError::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
+        OpenClawError::BadRequest(message) => (StatusCode::BAD_REQUEST, message, None),
         OpenClawError::Io { context, source } => (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("{context}: {source}"),
+            None,
         ),
         OpenClawError::CommandFailed { command, stderr } => (
             StatusCode::BAD_GATEWAY,
             format!("command failed: {command}; stderr: {stderr}"),
+            None,
         ),
-        OpenClawError::Parse { details } => (StatusCode::BAD_GATEWAY, details),
+        OpenClawError::Parse { details } => (StatusCode::BAD_GATEWAY, details, None),
         OpenClawError::Timeout { seconds } => (
             StatusCode::GATEWAY_TIMEOUT,
             format!("timeout ao consultar openclaw ({seconds}s)"),
+            None,
         ),
-        OpenClawError::Unavailable(message) => (StatusCode::SERVICE_UNAVAILABLE, message),
+        OpenClawError::Unavailable(message) => (StatusCode::SERVICE_UNAVAILABLE, message, None),
     }
 }
 
 #[derive(Serialize)]
 struct ErrorBody {
     error: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    protocol_version: Option<String>,
+}
+
+fn ensure_channel_protocol(headers: &HeaderMap) -> Result<(), AppError> {
+    channels::protocol::ensure_supported_request_version(headers).map_err(map_channel_service_error)
+}
+
+fn map_channel_service_error(error: String) -> AppError {
+    let (code, message) = if let Some((code, message)) = error.split_once(": ") {
+        (code.to_string(), message.to_string())
+    } else {
+        ("provider_error".to_string(), error)
+    };
+
+    let status = match code.as_str() {
+        "invalid_request" | "invalid_target" | "protocol_version_mismatch" => {
+            StatusCode::BAD_REQUEST
+        }
+        "auth_error" => StatusCode::UNAUTHORIZED,
+        "permission_error" => StatusCode::FORBIDDEN,
+        "rate_limited" => StatusCode::TOO_MANY_REQUESTS,
+        "network_error" => StatusCode::BAD_GATEWAY,
+        _ => StatusCode::BAD_GATEWAY,
+    };
+
+    AppError::InvalidChannelRequest {
+        status,
+        message,
+        error_code: code,
+    }
 }
 
 #[derive(Serialize)]
@@ -394,6 +464,8 @@ pub async fn run() -> anyhow::Result<()> {
             .await
             .expect("Failed to initialize session store"),
         ),
+        plugin_manager: Arc::new(PluginManager::new(AppConfig::get_settings_path())),
+        channel_service: Arc::new(ChannelService::new(AppConfig::get_settings_path())),
     };
 
     let app = Router::new()
@@ -460,6 +532,32 @@ pub async fn run() -> anyhow::Result<()> {
         .route("/agent/skills", get(agent_api::agent_list_skills))
         .route("/agent/skills/reload", post(agent_api::agent_reload_skills))
         .route("/agent/tools", get(agent_api::agent_list_tools))
+        .route("/agent/plugins", get(agent_plugins))
+        .route("/agent/plugins/enable", post(agent_enable_plugin))
+        .route("/agent/plugins/disable", post(agent_disable_plugin))
+        .route("/agent/channels/catalog", get(agent_channels_catalog))
+        .route("/agent/channels", get(agent_channels))
+        .route("/agent/channels/upsert", post(agent_channels_upsert))
+        .route("/agent/channels/remove", post(agent_channels_remove))
+        .route(
+            "/agent/channels/upsert-account",
+            post(agent_channels_upsert_account),
+        )
+        .route(
+            "/agent/channels/remove-account",
+            post(agent_channels_remove_account),
+        )
+        .route("/agent/channels/login", post(agent_channels_login))
+        .route("/agent/channels/logout", post(agent_channels_logout))
+        .route("/agent/channels/probe", post(agent_channels_probe))
+        .route("/agent/channels/resolve", post(agent_channels_resolve))
+        .route("/agent/channels/status", get(agent_channels_status))
+        .route(
+            "/agent/channels/capabilities",
+            get(agent_channels_capabilities),
+        )
+        .route("/agent/channels/logs", get(agent_channels_logs))
+        .route("/agent/message/send", post(agent_message_send))
         .route("/agent/audit", get(agent_api::agent_audit))
         .route("/agent/audit/export", get(agent_api::agent_audit_export))
         .route("/agent/audit/{id}", get(agent_api::agent_audit_get_id))
@@ -520,6 +618,228 @@ async fn list_models(
 ) -> Result<Json<Vec<ModelDescriptor>>, AppError> {
     let models = list_chat_models(&state).await?;
     Ok(Json(models))
+}
+
+async fn agent_plugins(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<plugins::PluginView>>, AppError> {
+    Ok(Json(state.plugin_manager.list_plugins().await))
+}
+
+async fn agent_enable_plugin(
+    State(state): State<AppState>,
+    Json(request): Json<PluginToggleRequest>,
+) -> Result<Json<plugins::PluginView>, AppError> {
+    state
+        .plugin_manager
+        .set_plugin_enabled(&request.plugin_id, true)
+        .await
+        .map(Json)
+        .map_err(AppError::NotFound)
+}
+
+async fn agent_disable_plugin(
+    State(state): State<AppState>,
+    Json(request): Json<PluginToggleRequest>,
+) -> Result<Json<plugins::PluginView>, AppError> {
+    state
+        .plugin_manager
+        .set_plugin_enabled(&request.plugin_id, false)
+        .await
+        .map(Json)
+        .map_err(AppError::NotFound)
+}
+
+async fn agent_channels_catalog(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<channels::ChannelView>>, AppError> {
+    ensure_channel_protocol(&headers)?;
+    state
+        .channel_service
+        .list_channels()
+        .await
+        .map(Json)
+        .map_err(map_channel_service_error)
+}
+
+async fn agent_channels(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<channels::ChannelView>>, AppError> {
+    ensure_channel_protocol(&headers)?;
+    state
+        .channel_service
+        .list_channels()
+        .await
+        .map(Json)
+        .map_err(map_channel_service_error)
+}
+
+async fn agent_channels_upsert(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(request): Json<LegacyChannelUpsertRequest>,
+) -> Result<Json<channels::ChannelView>, AppError> {
+    ensure_channel_protocol(&headers)?;
+    state
+        .channel_service
+        .legacy_upsert(request)
+        .await
+        .map(Json)
+        .map_err(map_channel_service_error)
+}
+
+async fn agent_channels_remove(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(request): Json<LegacyChannelRemoveRequest>,
+) -> Result<StatusCode, AppError> {
+    ensure_channel_protocol(&headers)?;
+    state
+        .channel_service
+        .legacy_remove(request)
+        .await
+        .map(|_| StatusCode::NO_CONTENT)
+        .map_err(map_channel_service_error)
+}
+
+async fn agent_channels_status(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<channels::ChannelView>>, AppError> {
+    ensure_channel_protocol(&headers)?;
+    state
+        .channel_service
+        .list_channels()
+        .await
+        .map(Json)
+        .map_err(map_channel_service_error)
+}
+
+async fn agent_channels_capabilities(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<channels::ChannelCapabilityView>>, AppError> {
+    ensure_channel_protocol(&headers)?;
+    state
+        .channel_service
+        .channel_capabilities()
+        .await
+        .map(Json)
+        .map_err(map_channel_service_error)
+}
+
+async fn agent_channels_upsert_account(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(request): Json<ChannelUpsertAccountRequest>,
+) -> Result<Json<channels::ChannelView>, AppError> {
+    ensure_channel_protocol(&headers)?;
+    state
+        .channel_service
+        .upsert_account(request)
+        .await
+        .map(Json)
+        .map_err(map_channel_service_error)
+}
+
+async fn agent_channels_remove_account(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(request): Json<ChannelRemoveAccountRequest>,
+) -> Result<StatusCode, AppError> {
+    ensure_channel_protocol(&headers)?;
+    state
+        .channel_service
+        .remove_account(request)
+        .await
+        .map(|_| StatusCode::NO_CONTENT)
+        .map_err(map_channel_service_error)
+}
+
+async fn agent_channels_login(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(request): Json<ChannelAuthRequest>,
+) -> Result<Json<channels::ChannelActionResponse>, AppError> {
+    ensure_channel_protocol(&headers)?;
+    state
+        .channel_service
+        .login(request)
+        .await
+        .map(Json)
+        .map_err(map_channel_service_error)
+}
+
+async fn agent_channels_logout(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(request): Json<ChannelAuthRequest>,
+) -> Result<Json<channels::ChannelActionResponse>, AppError> {
+    ensure_channel_protocol(&headers)?;
+    state
+        .channel_service
+        .logout(request)
+        .await
+        .map(Json)
+        .map_err(map_channel_service_error)
+}
+
+async fn agent_channels_probe(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(request): Json<ChannelProbeRequest>,
+) -> Result<Json<Vec<channels::ChannelActionResponse>>, AppError> {
+    ensure_channel_protocol(&headers)?;
+    state
+        .channel_service
+        .probe(request)
+        .await
+        .map(Json)
+        .map_err(map_channel_service_error)
+}
+
+async fn agent_channels_resolve(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(request): Json<ChannelResolveRequest>,
+) -> Result<Json<channels::ChannelResolveResponse>, AppError> {
+    ensure_channel_protocol(&headers)?;
+    state
+        .channel_service
+        .resolve(request)
+        .await
+        .map(Json)
+        .map_err(map_channel_service_error)
+}
+
+async fn agent_message_send(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(request): Json<MessageSendRequest>,
+) -> Result<Json<channels::MessageSendResponse>, AppError> {
+    ensure_channel_protocol(&headers)?;
+    state
+        .channel_service
+        .send_message(request)
+        .await
+        .map(Json)
+        .map_err(map_channel_service_error)
+}
+
+async fn agent_channels_logs(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Query(query): Query<ChannelLogsQuery>,
+) -> Result<Json<Vec<channels::ChannelAuditEntry>>, AppError> {
+    ensure_channel_protocol(&headers)?;
+    state
+        .channel_service
+        .logs(query)
+        .await
+        .map(Json)
+        .map_err(map_channel_service_error)
 }
 
 #[derive(Debug, Deserialize)]
