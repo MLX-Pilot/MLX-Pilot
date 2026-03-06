@@ -1,4 +1,5 @@
 import { ParticleSystem } from "./particles.js";
+import { createAgentChannelsController } from "./agent-channels.js";
 
 const STORAGE_DAEMON_URL = "mlxPilotDaemonUrl";
 const STORAGE_CHAT_THREADS = "mlxPilotChatThreadsV2";
@@ -188,6 +189,30 @@ const agentSkillsList = document.getElementById("agent-skills-list");
 const agentToolsList = document.getElementById("agent-tools-list");
 const agentEgressInput = document.getElementById("agent-egress-input");
 const agentSensitivePathsInput = document.getElementById("agent-sensitive-paths-input");
+const agentChannelsRefreshBtn = document.getElementById("agent-channels-refresh-btn");
+const agentChannelSelect = document.getElementById("agent-channel-select");
+const agentChannelAccountIdInput = document.getElementById("agent-channel-account-id");
+const agentChannelCredentialsInput = document.getElementById("agent-channel-credentials");
+const agentChannelMetadataInput = document.getElementById("agent-channel-metadata");
+const agentChannelRoutingDefaultsInput = document.getElementById("agent-channel-routing-defaults");
+const agentChannelEnabledToggle = document.getElementById("agent-channel-enabled");
+const agentChannelSetDefaultToggle = document.getElementById("agent-channel-set-default");
+const agentChannelSaveBtn = document.getElementById("agent-channel-save-btn");
+const agentChannelClearBtn = document.getElementById("agent-channel-clear-btn");
+const agentChannelFormFeedback = document.getElementById("agent-channel-form-feedback");
+const agentSendChannelSelect = document.getElementById("agent-send-channel");
+const agentSendAccountSelect = document.getElementById("agent-send-account");
+const agentSendTargetInput = document.getElementById("agent-send-target");
+const agentSendMessageInput = document.getElementById("agent-send-message");
+const agentSendTestBtn = document.getElementById("agent-send-test-btn");
+const agentProbeChannelBtn = document.getElementById("agent-probe-channel-btn");
+const agentResolveTargetBtn = document.getElementById("agent-resolve-target-btn");
+const agentChannelActionFeedback = document.getElementById("agent-channel-action-feedback");
+const agentChannelList = document.getElementById("agent-channel-list");
+const agentChannelLogsRefreshBtn = document.getElementById("agent-channel-logs-refresh-btn");
+const agentChannelLogsChannelSelect = document.getElementById("agent-channel-logs-channel");
+const agentChannelLogsAccountSelect = document.getElementById("agent-channel-logs-account");
+const agentChannelLogsList = document.getElementById("agent-channel-logs-list");
 const agentAuditList = document.getElementById("agent-audit-list");
 const agentChatStatus = document.getElementById("agent-chat-status");
 const agentChatLog = document.getElementById("agent-chat-log");
@@ -305,7 +330,7 @@ async function parseErrorDetail(response) {
   try {
     const body = await response.json();
     if (body?.error) {
-      detail = body.error;
+      detail = body.error_code ? `${body.error_code}: ${body.error}` : body.error;
     }
   } catch {
     // ignore parse errors
@@ -5955,6 +5980,46 @@ async function loadAgentTools() {
   renderAgentToggleList(agentToolsList, agentToolsCache, checked);
 }
 
+const agentChannelsController = createAgentChannelsController({
+  elements: {
+    agentChannelsRefreshBtn,
+    agentChannelSelect,
+    agentChannelAccountIdInput,
+    agentChannelCredentialsInput,
+    agentChannelMetadataInput,
+    agentChannelRoutingDefaultsInput,
+    agentChannelEnabledToggle,
+    agentChannelSetDefaultToggle,
+    agentChannelSaveBtn,
+    agentChannelClearBtn,
+    agentChannelFormFeedback,
+    agentSendChannelSelect,
+    agentSendAccountSelect,
+    agentSendTargetInput,
+    agentSendMessageInput,
+    agentSendTestBtn,
+    agentProbeChannelBtn,
+    agentResolveTargetBtn,
+    agentChannelActionFeedback,
+    agentChannelList,
+    agentChannelLogsRefreshBtn,
+    agentChannelLogsChannelSelect,
+    agentChannelLogsAccountSelect,
+    agentChannelLogsList,
+  },
+  fetchJson,
+  promptText: showTextPrompt,
+  confirmAction: showConfirmDialog,
+});
+
+async function loadAgentChannelLogs() {
+  await agentChannelsController.loadLogs();
+}
+
+async function loadAgentChannels() {
+  await agentChannelsController.loadChannels();
+}
+
 function enabledSetFromConfig(values) {
   return new Set(
     Array.isArray(values)
@@ -6217,6 +6282,7 @@ async function onAgentTabSelected() {
     await loadAgentConfig();
     await loadAgentSkills();
     await loadAgentTools();
+    await loadAgentChannels();
     await loadAgentAudit();
     await loadAgentSessions();
     syncAuditSessionFilterDropdown(); // ensure console gets the latest sessions list
@@ -6294,6 +6360,180 @@ async function sendAgentMessage() {
   } catch (error) {
     appendAgentMessage("assistant", `Erro: ${error.message}`);
     setAgentStatus("falha");
+  }
+}
+
+async function saveAgentChannelAccount() {
+  const channel = agentChannelSelect?.value;
+  const accountId = String(agentChannelAccountIdInput?.value || "").trim();
+  if (!channel || !accountId) {
+    throw new Error("Selecione um canal e informe o account_id.");
+  }
+
+  const payload = {
+    channel,
+    account_id: accountId,
+    enabled: Boolean(agentChannelEnabledToggle?.checked),
+    credentials: parseCredentialsInput(agentChannelCredentialsInput?.value),
+    metadata: parseOptionalJsonInput(agentChannelMetadataInput?.value, {}),
+    routing_defaults: parseOptionalJsonInput(agentChannelRoutingDefaultsInput?.value, {}),
+    set_as_default: Boolean(agentChannelSetDefaultToggle?.checked),
+    adapter_config: null,
+  };
+
+  await fetchJson("/agent/channels/upsert-account", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (agentChannelFormFeedback) {
+    agentChannelFormFeedback.textContent = `Conta ${channel}:${accountId} salva.`;
+  }
+  await loadAgentChannels();
+}
+
+async function executeChannelOperation(path, payload) {
+  const response = await fetchJson(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  await loadAgentChannels();
+  return response;
+}
+
+async function renameAgentChannelAccount(channelId, accountId) {
+  const channel = findChannelView(channelId);
+  const account = channel?.accounts?.find((entry) => entry.account_id === accountId);
+  if (!channel || !account) {
+    throw new Error("Conta nao encontrada.");
+  }
+  const nextAccountId = window.prompt("Novo account_id", accountId);
+  if (!nextAccountId || nextAccountId === accountId) {
+    return;
+  }
+
+  await executeChannelOperation("/agent/channels/upsert-account", {
+    channel: channelId,
+    account_id: nextAccountId,
+    enabled: account.enabled,
+    credentials_ref: account.credentials_ref || null,
+    metadata: account.metadata || {},
+    routing_defaults: account.routing_defaults || {},
+    set_as_default: account.is_default,
+    adapter_config: account.adapter_config || null,
+  });
+  await executeChannelOperation("/agent/channels/remove-account", {
+    channel: channelId,
+    account_id: accountId,
+  });
+}
+
+async function handleAgentChannelListAction(action, channelId, accountId) {
+  if (action === "edit") {
+    populateChannelForm(channelId, accountId);
+    return;
+  }
+  if (action === "login") {
+    const response = await executeChannelOperation("/agent/channels/login", {
+      channel: channelId,
+      account_id: accountId,
+    });
+    if (agentChannelActionFeedback) {
+      agentChannelActionFeedback.textContent = `${response.channel}:${response.account_id} • ${response.status}`;
+    }
+    return;
+  }
+  if (action === "logout") {
+    const response = await executeChannelOperation("/agent/channels/logout", {
+      channel: channelId,
+      account_id: accountId,
+    });
+    if (agentChannelActionFeedback) {
+      agentChannelActionFeedback.textContent = `${response.channel}:${response.account_id} • ${response.status}`;
+    }
+    return;
+  }
+  if (action === "default") {
+    const channel = findChannelView(channelId);
+    const account = channel?.accounts?.find((entry) => entry.account_id === accountId);
+    if (!account) {
+      throw new Error("Conta nao encontrada.");
+    }
+    await executeChannelOperation("/agent/channels/upsert-account", {
+      channel: channelId,
+      account_id: accountId,
+      enabled: account.enabled,
+      credentials_ref: account.credentials_ref || null,
+      metadata: account.metadata || {},
+      routing_defaults: account.routing_defaults || {},
+      set_as_default: true,
+      adapter_config: account.adapter_config || null,
+    });
+    return;
+  }
+  if (action === "rename") {
+    await renameAgentChannelAccount(channelId, accountId);
+    return;
+  }
+  if (action === "remove") {
+    if (!window.confirm(`Remover ${channelId}:${accountId}?`)) {
+      return;
+    }
+    await executeChannelOperation("/agent/channels/remove-account", {
+      channel: channelId,
+      account_id: accountId,
+    });
+  }
+}
+
+async function sendAgentChannelTestMessage() {
+  const channel = agentSendChannelSelect?.value;
+  const target = String(agentSendTargetInput?.value || "").trim();
+  const message = String(agentSendMessageInput?.value || "").trim();
+  if (!channel || !target || !message) {
+    throw new Error("Canal, target e mensagem sao obrigatorios.");
+  }
+  const payload = await executeChannelOperation("/agent/message/send", {
+    channel,
+    account_id: agentSendAccountSelect?.value || null,
+    target,
+    message,
+  });
+  if (agentChannelActionFeedback) {
+    agentChannelActionFeedback.textContent = `Mensagem enviada via ${payload.channel}:${payload.account_id} (${payload.message_id})`;
+  }
+}
+
+async function probeAgentChannel() {
+  const channel = agentSendChannelSelect?.value;
+  if (!channel) {
+    throw new Error("Selecione um canal.");
+  }
+  const payload = await executeChannelOperation("/agent/channels/probe", {
+    channel,
+    account_id: agentSendAccountSelect?.value || null,
+    all_accounts: !agentSendAccountSelect?.value,
+  });
+  const summaries = (Array.isArray(payload) ? payload : []).map((entry) => `${entry.account_id}:${entry.status}`);
+  if (agentChannelActionFeedback) {
+    agentChannelActionFeedback.textContent = summaries.join(" • ") || "Probe concluido.";
+  }
+}
+
+async function resolveAgentChannelTarget() {
+  const channel = agentSendChannelSelect?.value;
+  const target = String(agentSendTargetInput?.value || "").trim();
+  if (!channel || !target) {
+    throw new Error("Selecione canal e target.");
+  }
+  const payload = await executeChannelOperation("/agent/channels/resolve", {
+    channel,
+    account_id: agentSendAccountSelect?.value || null,
+    target,
+  });
+  if (agentChannelActionFeedback) {
+    agentChannelActionFeedback.textContent = `Target resolvido por ${payload.account_id}: ${payload.resolved_target}`;
   }
 }
 

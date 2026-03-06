@@ -483,6 +483,103 @@
           </article>
         </section>
 
+        <section class="agent-channels-panel glass" style="margin-top: 16px;">
+          <header class="panel-title-row" style="align-items: flex-start;">
+            <div>
+              <p class="chat-eyebrow">Canais Multi-conta</p>
+              <h3 style="margin: 4px 0 0;">Contas, login e envio operacional</h3>
+            </div>
+            <button id="agent-channels-refresh-btn" class="ghost-btn">Atualizar canais</button>
+          </header>
+
+          <div class="agent-channels-grid" style="display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 16px; margin-top: 16px;">
+            <article class="agent-card" style="margin: 0;">
+              <h4 style="margin-top: 0;">Adicionar / atualizar conta</h4>
+              <label class="field-group">
+                <span>Canal</span>
+                <select id="agent-channel-select" class="input"></select>
+              </label>
+              <label class="field-group">
+                <span>Account ID</span>
+                <input id="agent-channel-account-id" class="input" placeholder="work, personal, bot-a" />
+              </label>
+              <label class="field-group">
+                <span>Credencial (token ou JSON)</span>
+                <textarea id="agent-channel-credentials" class="input" rows="4" placeholder='{"token":"..."} ou xoxb-...'></textarea>
+              </label>
+              <label class="field-group">
+                <span>Metadata (JSON)</span>
+                <textarea id="agent-channel-metadata" class="input" rows="3" placeholder='{"workspace":"ops"}'></textarea>
+              </label>
+              <label class="field-group">
+                <span>Routing defaults (JSON)</span>
+                <textarea id="agent-channel-routing-defaults" class="input" rows="3" placeholder='{"target":"#alerts"}'></textarea>
+              </label>
+              <label class="agent-toggle-row">
+                <input id="agent-channel-enabled" type="checkbox" checked />
+                <span>Conta habilitada</span>
+              </label>
+              <label class="agent-toggle-row">
+                <input id="agent-channel-set-default" type="checkbox" />
+                <span>Marcar como default do canal</span>
+              </label>
+              <div style="display: flex; gap: 8px; margin-top: 12px;">
+                <button id="agent-channel-save-btn" class="primary-btn" type="button">Salvar conta</button>
+                <button id="agent-channel-clear-btn" class="ghost-btn" type="button">Limpar</button>
+              </div>
+              <p id="agent-channel-form-feedback" class="meta-note" style="margin-top: 12px;">-</p>
+            </article>
+
+            <article class="agent-card" style="margin: 0;">
+              <h4 style="margin-top: 0;">Operacao e contas ativas</h4>
+              <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px;">
+                <label class="field-group">
+                  <span>Canal</span>
+                  <select id="agent-send-channel" class="input"></select>
+                </label>
+                <label class="field-group">
+                  <span>Conta</span>
+                  <select id="agent-send-account" class="input">
+                    <option value="">Resolver automaticamente</option>
+                  </select>
+                </label>
+                <label class="field-group">
+                  <span>Target</span>
+                  <input id="agent-send-target" class="input" placeholder="@team ou #alerts" />
+                </label>
+                <label class="field-group">
+                  <span>Mensagem</span>
+                  <input id="agent-send-message" class="input" placeholder="Mensagem de teste" />
+                </label>
+              </div>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px;">
+                <button id="agent-send-test-btn" class="primary-btn" type="button">Enviar teste</button>
+                <button id="agent-probe-channel-btn" class="ghost-btn" type="button">Probe</button>
+                <button id="agent-resolve-target-btn" class="ghost-btn" type="button">Resolver alvo</button>
+              </div>
+              <p id="agent-channel-action-feedback" class="meta-note" style="margin-top: 12px;">-</p>
+
+              <div id="agent-channel-list" class="agent-channel-list" style="margin-top: 16px;"></div>
+            </article>
+          </div>
+
+          <article class="agent-card" style="margin-top: 16px;">
+            <div class="panel-title-row">
+              <h4 style="margin: 0;">Logs por canal/conta</h4>
+              <button id="agent-channel-logs-refresh-btn" class="ghost-btn" type="button">Atualizar logs</button>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px;">
+              <select id="agent-channel-logs-channel" class="input compact-input" style="max-width: 180px;">
+                <option value="">Todos canais</option>
+              </select>
+              <select id="agent-channel-logs-account" class="input compact-input" style="max-width: 180px;">
+                <option value="">Todas contas</option>
+              </select>
+            </div>
+            <ul id="agent-channel-logs-list" class="agent-audit-list" style="margin-top: 12px;"></ul>
+          </article>
+        </section>
+
         <section class="agent-console-panel glass" style="margin-top: 16px;">
           <header style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
             <div>
