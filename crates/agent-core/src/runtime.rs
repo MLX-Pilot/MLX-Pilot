@@ -4,7 +4,9 @@
 //! resolution by name, and helper functions.
 
 use mlx_agent_skills::{SkillLimits, SkillLoader, SkillPackage};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::SystemTime;
 use tracing::{debug, info};
 
 pub struct SkillRuntime {
@@ -103,6 +105,102 @@ impl SkillRuntime {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeHealth {
+    Unknown,
+    Idle,
+    Ready,
+    Degraded,
+    Error,
+    Disabled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeStatus {
+    pub id: String,
+    pub enabled: bool,
+    pub configured: bool,
+    pub loaded: bool,
+    pub health: RuntimeHealth,
+    #[serde(default)]
+    pub errors: Vec<String>,
+    #[serde(default)]
+    pub last_transition_epoch_ms: Option<u128>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RuntimeSlot {
+    loaded: bool,
+    errors: Vec<String>,
+    last_transition_epoch_ms: Option<u128>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct LazyRuntimeRegistry {
+    slots: HashMap<String, RuntimeSlot>,
+}
+
+impl LazyRuntimeRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn mark_loaded(&mut self, id: &str) {
+        let slot = self.slots.entry(id.to_ascii_lowercase()).or_default();
+        slot.loaded = true;
+        slot.errors.clear();
+        slot.last_transition_epoch_ms = Some(epoch_ms_now());
+    }
+
+    pub fn mark_unloaded(&mut self, id: &str) {
+        let slot = self.slots.entry(id.to_ascii_lowercase()).or_default();
+        slot.loaded = false;
+        slot.last_transition_epoch_ms = Some(epoch_ms_now());
+    }
+
+    pub fn mark_error(&mut self, id: &str, error: impl Into<String>) {
+        let slot = self.slots.entry(id.to_ascii_lowercase()).or_default();
+        slot.loaded = false;
+        slot.errors.push(error.into());
+        slot.last_transition_epoch_ms = Some(epoch_ms_now());
+    }
+
+    pub fn clear_errors(&mut self, id: &str) {
+        let slot = self.slots.entry(id.to_ascii_lowercase()).or_default();
+        slot.errors.clear();
+        slot.last_transition_epoch_ms = Some(epoch_ms_now());
+    }
+
+    pub fn snapshot(&self, id: &str, enabled: bool, configured: bool) -> RuntimeStatus {
+        let normalized = id.to_ascii_lowercase();
+        let slot = self.slots.get(&normalized);
+        let loaded = slot.map(|value| value.loaded).unwrap_or(false);
+        let errors = slot.map(|value| value.errors.clone()).unwrap_or_default();
+        let health = if !enabled {
+            RuntimeHealth::Disabled
+        } else if !errors.is_empty() {
+            RuntimeHealth::Error
+        } else if loaded {
+            RuntimeHealth::Ready
+        } else if configured {
+            RuntimeHealth::Idle
+        } else {
+            RuntimeHealth::Unknown
+        };
+
+        RuntimeStatus {
+            id: normalized,
+            enabled,
+            configured,
+            loaded,
+            health,
+            errors,
+            last_transition_epoch_ms: slot.and_then(|value| value.last_transition_epoch_ms),
+        }
+    }
+}
+
 fn extract_skill_summary_line(skill: &SkillPackage, max_chars: usize) -> String {
     let base = if !skill.description.trim().is_empty() {
         skill.description.trim()
@@ -143,4 +241,39 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
     let mut out = chars.into_iter().take(keep).collect::<String>();
     out.push_str("...");
     out
+}
+
+fn epoch_ms_now() -> u128 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|value| value.as_millis())
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lazy_runtime_registry_reports_idle_and_ready() {
+        let mut registry = LazyRuntimeRegistry::new();
+
+        let idle = registry.snapshot("telegram", true, true);
+        assert_eq!(idle.health, RuntimeHealth::Idle);
+        assert!(!idle.loaded);
+
+        registry.mark_loaded("telegram");
+        let ready = registry.snapshot("telegram", true, true);
+        assert_eq!(ready.health, RuntimeHealth::Ready);
+        assert!(ready.loaded);
+    }
+
+    #[test]
+    fn lazy_runtime_registry_reports_errors() {
+        let mut registry = LazyRuntimeRegistry::new();
+        registry.mark_error("memory", "missing local index");
+        let status = registry.snapshot("memory", true, true);
+        assert_eq!(status.health, RuntimeHealth::Error);
+        assert_eq!(status.errors, vec!["missing local index"]);
+    }
 }

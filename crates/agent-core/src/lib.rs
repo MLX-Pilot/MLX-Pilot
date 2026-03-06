@@ -26,5 +26,9 @@ pub use prompt_builder::{
     select_model_prompt_profile, ModelPromptProfile, ModelPromptProfileKind, PromptBuildInput,
     PromptBuildOutput, PromptBuilder, VerbosityLevel,
 };
-pub use registry::ToolRegistry;
+pub use registry::{
+    ChannelDescriptor, ChannelRegistry, HelpMetadata, PluginClass, PluginDescriptor,
+    PluginRegistry, ToolRegistry,
+};
+pub use runtime::{LazyRuntimeRegistry, RuntimeHealth, RuntimeStatus, SkillRuntime};
 pub use session::{SessionMessage, SessionStore};
