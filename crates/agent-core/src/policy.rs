@@ -1,6 +1,9 @@
 //! `PolicyEngine` — security policy enforcement for tool calls,
 //! skill loading, file access, and network requests.
 
+use crate::tool_catalog::{
+    catalog_entry, resolve_tool_access, ToolPolicyState, ToolRisk, ToolRuleTrace,
+};
 use mlx_agent_skills::{SkillPackage, TrustLevel};
 use mlx_agent_tools::ExecutionMode;
 use serde::Deserialize;
@@ -18,6 +21,14 @@ pub enum PolicyDecision {
     Deny { reason: String },
     /// The action requires user approval before proceeding.
     Ask { prompt: String, approval_id: String },
+}
+
+#[derive(Debug, Clone)]
+pub struct PolicyToolInspection {
+    pub decision: PolicyDecision,
+    pub final_rule: String,
+    pub trace: Vec<ToolRuleTrace>,
+    pub risk: Option<ToolRisk>,
 }
 
 /// Configuration for the policy engine.
@@ -53,6 +64,12 @@ pub struct PolicyConfig {
     pub skill_sha256_pins: BTreeMap<String, String>,
     #[serde(default)]
     pub known_skill_hashes: BTreeMap<String, String>,
+    #[serde(default)]
+    pub tool_policy: ToolPolicyState,
+    #[serde(default = "default_agent_id")]
+    pub agent_id: String,
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 impl Default for PolicyConfig {
@@ -79,6 +96,9 @@ impl Default for PolicyConfig {
             require_capabilities: false,
             skill_sha256_pins: BTreeMap::new(),
             known_skill_hashes: BTreeMap::new(),
+            tool_policy: ToolPolicyState::default(),
+            agent_id: default_agent_id(),
+            session_id: None,
         }
     }
 }
@@ -94,6 +114,21 @@ pub trait PolicyEngine: Send + Sync {
         skill: Option<&SkillPackage>,
         mode: ExecutionMode,
     ) -> PolicyDecision;
+
+    async fn inspect_tool_call(
+        &self,
+        tool_name: &str,
+        params: &serde_json::Value,
+        skill: Option<&SkillPackage>,
+        mode: ExecutionMode,
+    ) -> PolicyToolInspection {
+        PolicyToolInspection {
+            decision: self.check_tool_call(tool_name, params, skill, mode).await,
+            final_rule: "policy:unexplained".to_string(),
+            trace: Vec::new(),
+            risk: None,
+        }
+    }
 
     /// Check if a skill can be loaded (trust, requirements, capabilities).
     async fn check_skill_load(&self, skill: &SkillPackage) -> PolicyDecision;
@@ -125,89 +160,181 @@ impl PolicyEngine for DefaultPolicyEngine {
         skill: Option<&SkillPackage>,
         mode: ExecutionMode,
     ) -> PolicyDecision {
+        self.inspect_tool_call(tool_name, params, skill, mode)
+            .await
+            .decision
+    }
+
+    async fn inspect_tool_call(
+        &self,
+        tool_name: &str,
+        params: &serde_json::Value,
+        skill: Option<&SkillPackage>,
+        mode: ExecutionMode,
+    ) -> PolicyToolInspection {
+        let catalog = catalog_entry(tool_name);
+        let resolved = resolve_tool_access(
+            tool_name,
+            &self.config.tool_policy,
+            &self.config.agent_id,
+            self.config.session_id.as_deref(),
+            catalog.as_ref(),
+        );
+        let mut trace = resolved.trace.clone();
+
+        if !resolved.implemented {
+            return deny_inspection(
+                format!("Tool '{tool_name}' is not implemented"),
+                resolved.final_rule,
+                trace,
+                Some(resolved.risk),
+            );
+        }
+
+        if !resolved.allowed {
+            return deny_inspection(
+                format!(
+                    "Tool '{tool_name}' is blocked by effective policy ({})",
+                    resolved.final_rule
+                ),
+                resolved.final_rule,
+                trace,
+                Some(resolved.risk),
+            );
+        }
+
         if mode == ExecutionMode::Locked {
-            return PolicyDecision::Deny {
-                reason: "Execution mode is Locked".into(),
-            };
+            trace.push(policy_trace("execution_mode", "deny", "locked"));
+            return deny_inspection(
+                "Execution mode is Locked".into(),
+                "execution_mode:locked".into(),
+                trace,
+                Some(resolved.risk),
+            );
         }
 
         if mode == ExecutionMode::ReadOnly && is_mutating_tool(tool_name) {
-            return PolicyDecision::Deny {
-                reason: format!("Tool '{tool_name}' is blocked in read-only mode"),
-            };
+            trace.push(policy_trace("execution_mode", "deny", "read_only"));
+            return deny_inspection(
+                format!("Tool '{tool_name}' is blocked in read-only mode"),
+                "execution_mode:read_only".into(),
+                trace,
+                Some(resolved.risk),
+            );
         }
 
         if self.config.airgapped_mode && is_network_tool(tool_name) {
-            return PolicyDecision::Deny {
-                reason: "airgapped mode blocks all network tools".to_string(),
-            };
+            trace.push(policy_trace("network", "deny", "airgapped_mode"));
+            return deny_inspection(
+                "airgapped mode blocks all network tools".to_string(),
+                "network:airgapped_mode".to_string(),
+                trace,
+                Some(resolved.risk),
+            );
         }
 
         if !self.config.tool_allowlist.is_empty()
             && !matches_glob_any(&self.config.tool_allowlist, tool_name)
         {
-            return PolicyDecision::Deny {
-                reason: format!("Tool '{tool_name}' is not allowed by tool_allowlist"),
-            };
+            trace.push(policy_trace("legacy_global", "deny", "tool_allowlist"));
+            return deny_inspection(
+                format!("Tool '{tool_name}' is not allowed by tool_allowlist"),
+                "legacy_global:tool_allowlist".to_string(),
+                trace,
+                Some(resolved.risk),
+            );
         }
 
         if matches_glob_any(&self.config.tool_denylist, tool_name) {
-            return PolicyDecision::Deny {
-                reason: format!("Tool '{tool_name}' is denied by tool_denylist"),
-            };
+            trace.push(policy_trace("legacy_global", "deny", "tool_denylist"));
+            return deny_inspection(
+                format!("Tool '{tool_name}' is denied by tool_denylist"),
+                "legacy_global:tool_denylist".to_string(),
+                trace,
+                Some(resolved.risk),
+            );
         }
 
         if let Some(sk) = skill {
             let caps = &sk.capabilities;
 
             if tool_name == "exec" && !caps.allows_exec() {
-                return PolicyDecision::Deny {
-                    reason: format!("Skill '{}' does not allow 'exec'", sk.name),
-                };
+                trace.push(policy_trace("skill_capability", "deny", "exec"));
+                return deny_inspection(
+                    format!("Skill '{}' does not allow 'exec'", sk.name),
+                    format!("skill:{}:exec", sk.name),
+                    trace,
+                    Some(resolved.risk),
+                );
             }
 
             if is_fs_read_tool(tool_name) && !caps.allows_fs_read() {
-                return PolicyDecision::Deny {
-                    reason: format!("Skill '{}' does not allow 'fs_read'", sk.name),
-                };
+                trace.push(policy_trace("skill_capability", "deny", "fs_read"));
+                return deny_inspection(
+                    format!("Skill '{}' does not allow 'fs_read'", sk.name),
+                    format!("skill:{}:fs_read", sk.name),
+                    trace,
+                    Some(resolved.risk),
+                );
             }
 
             if is_fs_write_tool(tool_name) && !caps.allows_fs_write() {
-                return PolicyDecision::Deny {
-                    reason: format!("Skill '{}' does not allow 'fs_write'", sk.name),
-                };
+                trace.push(policy_trace("skill_capability", "deny", "fs_write"));
+                return deny_inspection(
+                    format!("Skill '{}' does not allow 'fs_write'", sk.name),
+                    format!("skill:{}:fs_write", sk.name),
+                    trace,
+                    Some(resolved.risk),
+                );
             }
 
             if is_network_tool(tool_name) && !caps.allows_network() {
-                return PolicyDecision::Deny {
-                    reason: format!("Skill '{}' does not allow 'network'", sk.name),
-                };
+                trace.push(policy_trace("skill_capability", "deny", "network"));
+                return deny_inspection(
+                    format!("Skill '{}' does not allow 'network'", sk.name),
+                    format!("skill:{}:network", sk.name),
+                    trace,
+                    Some(resolved.risk),
+                );
             }
 
             if contains_secret_like_params(params) && !caps.allows_secrets_access() {
-                return PolicyDecision::Deny {
-                    reason: format!("Skill '{}' does not allow 'secrets_access'", sk.name),
-                };
+                trace.push(policy_trace("skill_capability", "deny", "secrets_access"));
+                return deny_inspection(
+                    format!("Skill '{}' does not allow 'secrets_access'", sk.name),
+                    format!("skill:{}:secrets_access", sk.name),
+                    trace,
+                    Some(resolved.risk),
+                );
             }
         } else if self.config.require_capabilities && requires_capability(tool_name, params) {
-            return PolicyDecision::Ask {
-                prompt: format!(
-                    "Tool '{}' requires explicit skill capabilities, but no active skill is bound",
-                    tool_name
-                ),
-                approval_id: uuid::Uuid::new_v4().to_string(),
+            trace.push(policy_trace("capability", "ask", "missing_active_skill"));
+            return PolicyToolInspection {
+                decision: PolicyDecision::Ask {
+                    prompt: format!(
+                        "Tool '{}' requires explicit skill capabilities, but no active skill is bound",
+                        tool_name
+                    ),
+                    approval_id: uuid::Uuid::new_v4().to_string(),
+                },
+                final_rule: "capability:missing_active_skill".to_string(),
+                trace,
+                risk: Some(resolved.risk),
             };
         }
 
-        // Catch-all: ask for approval for unsafe command execution.
         if tool_name == "exec" {
             let cmd = params.get("command").and_then(|v| v.as_str()).unwrap_or("");
 
             for deny in &self.config.exec_deny_patterns {
                 if glob_match::glob_match(deny, cmd) || cmd.contains(deny) {
-                    return PolicyDecision::Deny {
-                        reason: format!("Command matches deny pattern: {}", deny),
-                    };
+                    trace.push(policy_trace("exec_pattern", "deny", deny));
+                    return deny_inspection(
+                        format!("Command matches deny pattern: {}", deny),
+                        format!("exec_pattern:{deny}"),
+                        trace,
+                        Some(resolved.risk),
+                    );
                 }
             }
 
@@ -218,25 +345,35 @@ impl PolicyEngine for DefaultPolicyEngine {
                 .any(|bin| cmd == bin || cmd.starts_with(&format!("{} ", bin)));
 
             if !is_safe {
-                return PolicyDecision::Ask {
-                    prompt: format!(
-                        "The agent wants to run a potentially unsafe command: `{}`",
-                        cmd
-                    ),
-                    approval_id: uuid::Uuid::new_v4().to_string(),
+                trace.push(policy_trace("exec_risk", "ask", "unsafe_command"));
+                return PolicyToolInspection {
+                    decision: PolicyDecision::Ask {
+                        prompt: format!(
+                            "The agent wants to run a potentially unsafe command: `{}`",
+                            cmd
+                        ),
+                        approval_id: uuid::Uuid::new_v4().to_string(),
+                    },
+                    final_rule: "exec_risk:unsafe_command".to_string(),
+                    trace,
+                    risk: Some(resolved.risk),
                 };
             }
         }
 
-        // File tools: deny sensitive paths before execution.
         if let Some(path_str) = params.get("path").and_then(|v| v.as_str()) {
             let decision = self.check_file_access(Path::new(path_str), is_write_tool(tool_name));
-            if !matches!(decision, PolicyDecision::Allow) {
-                return decision;
+            if let PolicyDecision::Deny { reason } = decision {
+                trace.push(policy_trace("file_access", "deny", "path_policy"));
+                return deny_inspection(
+                    reason,
+                    "file_access:path_policy".to_string(),
+                    trace,
+                    Some(resolved.risk),
+                );
             }
         }
 
-        // Network tools: enforce airgap/IP blocking/allowlist.
         if is_network_tool(tool_name)
             && params
                 .get("url")
@@ -252,13 +389,28 @@ impl PolicyEngine for DefaultPolicyEngine {
                 .get("method")
                 .and_then(|v| v.as_str())
                 .unwrap_or("GET");
-            let decision = self.check_network(url, method);
-            if !matches!(decision, PolicyDecision::Allow) {
-                return decision;
+            if let PolicyDecision::Deny { reason } = self.check_network(url, method) {
+                trace.push(policy_trace("network", "deny", "egress_policy"));
+                return deny_inspection(
+                    reason,
+                    "network:egress_policy".to_string(),
+                    trace,
+                    Some(resolved.risk),
+                );
             }
         }
 
-        PolicyDecision::Allow
+        trace.push(policy_trace(
+            "effective_policy",
+            "allow",
+            &resolved.final_rule,
+        ));
+        PolicyToolInspection {
+            decision: PolicyDecision::Allow,
+            final_rule: resolved.final_rule,
+            trace,
+            risk: Some(resolved.risk),
+        }
     }
 
     async fn check_skill_load(&self, skill: &SkillPackage) -> PolicyDecision {
@@ -416,15 +568,18 @@ fn matches_glob_any(patterns: &[String], value: &str) -> bool {
 }
 
 fn is_mutating_tool(tool_name: &str) -> bool {
-    matches!(tool_name, "write_file" | "edit_file" | "exec")
+    matches!(
+        tool_name,
+        "write_file" | "edit_file" | "exec" | "message" | "sessions_spawn" | "sessions_send"
+    )
 }
 
 fn is_write_tool(tool_name: &str) -> bool {
-    matches!(tool_name, "write_file" | "edit_file")
+    matches!(tool_name, "write_file" | "edit_file" | "sessions_send")
 }
 
 fn is_fs_read_tool(tool_name: &str) -> bool {
-    matches!(tool_name, "read_file" | "list_dir")
+    matches!(tool_name, "read_file" | "list_dir" | "sessions_history")
 }
 
 fn is_fs_write_tool(tool_name: &str) -> bool {
@@ -432,7 +587,7 @@ fn is_fs_write_tool(tool_name: &str) -> bool {
 }
 
 fn is_network_tool(tool_name: &str) -> bool {
-    matches!(tool_name, "web_fetch" | "web_search")
+    matches!(tool_name, "web_fetch" | "web_search" | "message")
 }
 
 fn requires_capability(tool_name: &str, params: &serde_json::Value) -> bool {
@@ -560,6 +715,33 @@ fn normalize_lexical(path: &Path) -> PathBuf {
         }
     }
     out
+}
+
+fn deny_inspection(
+    reason: String,
+    final_rule: String,
+    trace: Vec<ToolRuleTrace>,
+    risk: Option<ToolRisk>,
+) -> PolicyToolInspection {
+    PolicyToolInspection {
+        decision: PolicyDecision::Deny { reason },
+        final_rule,
+        trace,
+        risk,
+    }
+}
+
+fn policy_trace(scope: &str, action: &str, rule: &str) -> ToolRuleTrace {
+    ToolRuleTrace {
+        scope: scope.to_string(),
+        action: action.to_string(),
+        rule: rule.to_string(),
+        matched: true,
+    }
+}
+
+fn default_agent_id() -> String {
+    "default".to_string()
 }
 
 #[cfg(test)]
