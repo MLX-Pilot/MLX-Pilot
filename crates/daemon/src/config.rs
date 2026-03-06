@@ -77,6 +77,29 @@ impl Default for AgentSecurityConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSkillOverride {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    #[serde(default)]
+    pub env_refs: BTreeMap<String, String>,
+    #[serde(default)]
+    pub config: BTreeMap<String, String>,
+}
+
+impl Default for AgentSkillOverride {
+    fn default() -> Self {
+        Self {
+            enabled: None,
+            env: BTreeMap::new(),
+            env_refs: BTreeMap::new(),
+            config: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentUiConfig {
     #[serde(default = "default_agent_provider")]
     pub provider: String,
@@ -116,6 +139,10 @@ pub struct AgentUiConfig {
     pub enable_tool_call_fallback: bool,
     #[serde(default)]
     pub enabled_skills: Vec<String>,
+    #[serde(default = "default_agent_node_manager")]
+    pub node_package_manager: String,
+    #[serde(default)]
+    pub skill_overrides: BTreeMap<String, AgentSkillOverride>,
     #[serde(default)]
     pub enabled_tools: Vec<String>,
     #[serde(default)]
@@ -146,6 +173,8 @@ impl Default for AgentUiConfig {
             aggressive_tool_filtering: true,
             enable_tool_call_fallback: true,
             enabled_skills: Vec::new(),
+            node_package_manager: default_agent_node_manager(),
+            skill_overrides: BTreeMap::new(),
             enabled_tools: vec![
                 "read_file".to_string(),
                 "write_file".to_string(),
@@ -1252,4 +1281,8 @@ fn default_agent_execution_mode() -> String {
 
 fn default_agent_approval_mode() -> String {
     "ask".to_string()
+}
+
+fn default_agent_node_manager() -> String {
+    "npm".to_string()
 }
