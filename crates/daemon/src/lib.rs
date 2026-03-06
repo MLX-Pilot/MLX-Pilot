@@ -1,4 +1,5 @@
 mod agent_api;
+mod agent_runtime_tools;
 mod catalog;
 mod channels;
 mod chat_stream;
@@ -453,6 +454,13 @@ pub async fn run() -> anyhow::Result<()> {
             audit: Arc::new(mlx_agent_core::AuditLog::new(
                 std::env::temp_dir().join("mlx-pilot-audit"),
             )),
+            memory: Arc::new(mlx_agent_core::MemoryStore::new(
+                AppConfig::get_settings_path()
+                    .parent()
+                    .unwrap_or(std::path::Path::new("."))
+                    .join("memory"),
+            )),
+            budget_tracker: Arc::new(tokio::sync::RwLock::new(BTreeMap::new())),
         },
         session_store: Arc::new(
             mlx_agent_core::SessionStore::new(
@@ -546,6 +554,16 @@ pub async fn run() -> anyhow::Result<()> {
         )
         .route("/agent/skills/reload", post(agent_api::agent_reload_skills))
         .route("/agent/tools", get(agent_api::agent_list_tools))
+        .route("/agent/tools/catalog", get(agent_api::agent_tools_catalog))
+        .route(
+            "/agent/tools/effective-policy",
+            get(agent_api::agent_tools_effective_policy),
+        )
+        .route("/agent/tools/profile", post(agent_api::agent_tools_profile))
+        .route(
+            "/agent/tools/allow-deny",
+            post(agent_api::agent_tools_allow_deny),
+        )
         .route("/agent/plugins", get(agent_plugins))
         .route("/agent/plugins/enable", post(agent_enable_plugin))
         .route("/agent/plugins/disable", post(agent_disable_plugin))
@@ -577,6 +595,10 @@ pub async fn run() -> anyhow::Result<()> {
         .route("/agent/audit/{id}", get(agent_api::agent_audit_get_id))
         .route("/agent/approve", post(agent_api::agent_approve))
         .route("/agent/stream", post(agent_api::agent_stream))
+        .route(
+            "/agent/context/budget",
+            get(agent_api::agent_context_budget),
+        )
         .route(
             "/agent/sessions",
             get(agent_api::agent_list_sessions).post(agent_api::agent_create_session),

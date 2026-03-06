@@ -118,6 +118,8 @@ pub struct AgentRunResponse {
     pub completion_tokens: usize,
     pub total_tokens: usize,
     pub latency_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_budget: Option<mlx_agent_core::ContextBudgetTelemetry>,
 }
 
 /// Error response from agent endpoints.
@@ -311,6 +313,40 @@ pub struct AgentToolInfo {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct ToolPolicyQuery {
+    #[serde(default)]
+    pub agent_id: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AgentToolProfileRequest {
+    pub profile: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AgentToolAllowDenyRequest {
+    pub scope: String,
+    #[serde(default)]
+    pub agent_id: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub allow: Vec<String>,
+    #[serde(default)]
+    pub deny: Vec<String>,
+    #[serde(default)]
+    pub replace: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ContextBudgetQuery {
+    #[serde(default)]
+    pub session_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct AuditQuery {
     #[serde(default)]
     pub limit: Option<usize>,
@@ -335,6 +371,9 @@ pub struct AgentState {
     pub approval: Arc<DefaultApprovalService>,
     pub event_bus: Arc<EventBus>,
     pub audit: Arc<AuditLog>,
+    pub memory: Arc<mlx_agent_core::MemoryStore>,
+    pub budget_tracker:
+        Arc<tokio::sync::RwLock<BTreeMap<String, mlx_agent_core::ContextBudgetTelemetry>>>,
 }
 
 const AGENT_API_KEY_SECRET_REF: &str = "vault://agent.api_key";
@@ -342,6 +381,7 @@ const AGENT_API_KEY_SECRET_KEY: &str = "agent.api_key";
 const SKILL_INTEGRITY_STATE_FILE: &str = "agent_skill_integrity_state.json";
 const INSTALL_COMMAND_TIMEOUT_SECS_DEFAULT: u64 = 180;
 const INSTALL_DOWNLOAD_TIMEOUT_SECS_DEFAULT: u64 = 60;
+const DEFAULT_AGENT_ID: &str = "default";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct SkillIntegrityState {
@@ -383,10 +423,158 @@ fn merged_value(primary: Option<String>, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.to_string())
 }
 
-fn merged_vec(primary: Option<Vec<String>>, fallback: &[String]) -> Vec<String> {
-    primary
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| fallback.to_vec())
+fn normalize_scope_key(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+fn parse_tool_profile(value: Option<&str>) -> mlx_agent_core::ToolProfileName {
+    value
+        .unwrap_or("coding")
+        .parse::<mlx_agent_core::ToolProfileName>()
+        .unwrap_or_default()
+}
+
+fn to_rule_set(
+    override_cfg: &crate::config::AgentToolScopeOverride,
+) -> mlx_agent_core::ToolRuleSet {
+    mlx_agent_core::ToolRuleSet {
+        allow: override_cfg.allow.clone(),
+        deny: override_cfg.deny.clone(),
+    }
+}
+
+fn build_tool_policy_state(
+    agent_cfg: &super::config::AgentUiConfig,
+    session_id: Option<&str>,
+    request_enabled_tools: Option<&[String]>,
+) -> mlx_agent_core::ToolPolicyState {
+    let mut agents = agent_cfg
+        .tool_policy
+        .agent_overrides
+        .iter()
+        .map(|(key, value)| (normalize_scope_key(key), to_rule_set(value)))
+        .collect::<BTreeMap<_, _>>();
+
+    if agents.is_empty() && !agent_cfg.enabled_tools.is_empty() {
+        agents.insert(
+            DEFAULT_AGENT_ID.to_string(),
+            mlx_agent_core::ToolRuleSet {
+                allow: agent_cfg.enabled_tools.clone(),
+                deny: Vec::new(),
+            },
+        );
+    }
+
+    let mut sessions = agent_cfg
+        .tool_policy
+        .session_overrides
+        .iter()
+        .map(|(key, value)| (normalize_scope_key(key), to_rule_set(value)))
+        .collect::<BTreeMap<_, _>>();
+
+    if let Some(enabled_tools) = request_enabled_tools.filter(|value| !value.is_empty()) {
+        if let Some(session) = session_id.map(normalize_scope_key) {
+            sessions.insert(
+                session,
+                mlx_agent_core::ToolRuleSet {
+                    allow: enabled_tools.to_vec(),
+                    deny: Vec::new(),
+                },
+            );
+        }
+    }
+
+    mlx_agent_core::ToolPolicyState {
+        profile: parse_tool_profile(Some(agent_cfg.tool_policy.profile.as_str())),
+        global: mlx_agent_core::ToolRuleSet {
+            allow: agent_cfg.security.tool_allowlist.clone(),
+            deny: agent_cfg.security.tool_denylist.clone(),
+        },
+        agents,
+        sessions,
+    }
+}
+
+fn sync_legacy_enabled_tools(agent_cfg: &mut super::config::AgentUiConfig) {
+    let effective = mlx_agent_core::resolve_effective_tool_policy(
+        &build_tool_policy_state(agent_cfg, None, None),
+        DEFAULT_AGENT_ID,
+        None,
+    );
+    agent_cfg.enabled_tools = effective
+        .entries
+        .into_iter()
+        .filter(|entry| entry.allowed && entry.implemented)
+        .map(|entry| entry.name)
+        .collect();
+}
+
+fn session_messages_to_chat_history(
+    messages: &[mlx_agent_core::SessionMessage],
+) -> Vec<mlx_ollama_core::ChatMessage> {
+    messages
+        .iter()
+        .map(|message| {
+            let role = match message.role.trim().to_ascii_lowercase().as_str() {
+                "system" => mlx_ollama_core::MessageRole::System,
+                "assistant" => mlx_ollama_core::MessageRole::Assistant,
+                "tool" => mlx_ollama_core::MessageRole::Tool,
+                _ => mlx_ollama_core::MessageRole::User,
+            };
+            if matches!(role, mlx_ollama_core::MessageRole::Tool) {
+                if let Some(tool_call_id) = message.tool_call_id.as_deref() {
+                    return mlx_ollama_core::ChatMessage::tool_result(
+                        tool_call_id,
+                        message.content.clone(),
+                    );
+                }
+            }
+            mlx_ollama_core::ChatMessage::text(role, message.content.clone())
+        })
+        .collect()
+}
+
+fn summary_artifact_to_memory_record(
+    artifact: &mlx_agent_core::ContextSummaryArtifact,
+) -> mlx_agent_core::MemoryRecord {
+    mlx_agent_core::MemoryRecord {
+        id: artifact.id.clone(),
+        session_id: artifact.session_id.clone(),
+        kind: artifact
+            .metadata
+            .get("kind")
+            .cloned()
+            .unwrap_or_else(|| "history_summary".to_string()),
+        title: artifact.title.clone(),
+        content: artifact.content.clone(),
+        created_at: artifact.created_at,
+        metadata: artifact.metadata.clone(),
+    }
+}
+
+fn merge_rules(
+    allow_target: &mut Vec<String>,
+    deny_target: &mut Vec<String>,
+    allow: &[String],
+    deny: &[String],
+) {
+    allow_target.extend(
+        allow
+            .iter()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string),
+    );
+    deny_target.extend(
+        deny.iter()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string),
+    );
+    allow_target.sort();
+    allow_target.dedup();
+    deny_target.sort();
+    deny_target.dedup();
 }
 
 fn build_policy_config(
@@ -394,6 +582,8 @@ fn build_policy_config(
     mode: ExecutionMode,
     workspace_root: &Path,
     known_skill_hashes: BTreeMap<String, String>,
+    tool_policy: mlx_agent_core::ToolPolicyState,
+    session_id: Option<&str>,
 ) -> PolicyConfig {
     let security_mode = cfg.security.security_mode.trim().to_ascii_lowercase();
     let paranoid_mode = security_mode == "paranoid";
@@ -401,8 +591,8 @@ fn build_policy_config(
 
     PolicyConfig {
         default_mode: mode,
-        tool_allowlist: cfg.security.tool_allowlist.clone(),
-        tool_denylist: cfg.security.tool_denylist.clone(),
+        tool_allowlist: Vec::new(),
+        tool_denylist: Vec::new(),
         exec_safe_bins: cfg.security.exec_safe_bins.clone(),
         exec_deny_patterns: cfg.security.exec_deny_patterns.clone(),
         file_deny_paths: cfg.security.sensitive_paths.clone(),
@@ -421,6 +611,9 @@ fn build_policy_config(
         require_capabilities: enterprise_mode || cfg.security.require_capabilities,
         skill_sha256_pins: cfg.security.skill_sha256_pins.clone(),
         known_skill_hashes,
+        tool_policy,
+        agent_id: DEFAULT_AGENT_ID.to_string(),
+        session_id: session_id.map(normalize_scope_key),
     }
 }
 
@@ -821,7 +1014,15 @@ async fn load_skill_catalog(
 
     let known_skill_hashes = load_skill_integrity_state();
     let mode = parse_execution_mode(Some(cfg.agent.execution_mode.as_str()));
-    let policy_cfg = build_policy_config(&cfg.agent, mode, &workspace, known_skill_hashes);
+    let tool_policy = build_tool_policy_state(&cfg.agent, None, None);
+    let policy_cfg = build_policy_config(
+        &cfg.agent,
+        mode,
+        &workspace,
+        known_skill_hashes,
+        tool_policy,
+        None,
+    );
     let policy = DefaultPolicyEngine::new(policy_cfg);
     let packages = discovered
         .iter()
@@ -1603,27 +1804,25 @@ fn resolve_provider(
     }
 }
 
-fn build_tool_registry(enabled_tools: &[String]) -> ToolRegistry {
+fn build_tool_registry(state: &super::AppState) -> ToolRegistry {
     use mlx_agent_tools::{EditFileTool, ExecTool, ListDirTool, ReadFileTool, WriteFileTool};
 
-    let enabled = enabled_set(enabled_tools);
     let mut registry = ToolRegistry::new();
+    registry.register(Arc::new(ReadFileTool::new()));
+    registry.register(Arc::new(WriteFileTool::new()));
+    registry.register(Arc::new(EditFileTool::new()));
+    registry.register(Arc::new(ListDirTool::new()));
+    registry.register(Arc::new(ExecTool::new()));
 
-    if enabled.is_empty() || enabled.contains("read_file") {
-        registry.register(Arc::new(ReadFileTool::new()));
-    }
-    if enabled.is_empty() || enabled.contains("write_file") {
-        registry.register(Arc::new(WriteFileTool::new()));
-    }
-    if enabled.is_empty() || enabled.contains("edit_file") {
-        registry.register(Arc::new(EditFileTool::new()));
-    }
-    if enabled.is_empty() || enabled.contains("list_dir") {
-        registry.register(Arc::new(ListDirTool::new()));
-    }
-    if enabled.is_empty() || enabled.contains("exec") {
-        registry.register(Arc::new(ExecTool::new()));
-    }
+    crate::agent_runtime_tools::register_runtime_tools(
+        &mut registry,
+        &crate::agent_runtime_tools::RuntimeToolServices {
+            sessions: state.session_store.clone(),
+            channels: state.channel_service.clone(),
+            memory: state.agent_state.memory.clone(),
+            budget_tracker: state.agent_state.budget_tracker.clone(),
+        },
+    );
 
     registry
 }
@@ -1713,6 +1912,11 @@ async fn run_agent_once(
     resolved: ResolvedProvider,
     workspace: PathBuf,
 ) -> Result<AgentRunResponse, AgentApiError> {
+    let session_id = request
+        .session_id
+        .clone()
+        .unwrap_or_else(mlx_agent_core::SessionStore::new_session_id);
+
     let mode = parse_execution_mode(
         request
             .execution_mode
@@ -1729,15 +1933,22 @@ async fn run_agent_once(
     state.agent_state.approval.set_mode(approval_mode);
 
     let known_skill_hashes = load_skill_integrity_state();
-    let policy_config = build_policy_config(agent_cfg, mode, &workspace, known_skill_hashes);
+    let tool_policy = build_tool_policy_state(
+        agent_cfg,
+        Some(&session_id),
+        request.enabled_tools.as_deref(),
+    );
+    let policy_config = build_policy_config(
+        agent_cfg,
+        mode,
+        &workspace,
+        known_skill_hashes,
+        tool_policy,
+        Some(&session_id),
+    );
     let policy: Arc<dyn PolicyEngine> = Arc::new(DefaultPolicyEngine::new(policy_config));
 
-    let enabled_tools = merged_vec(request.enabled_tools.clone(), &agent_cfg.enabled_tools);
-    let tool_registry = build_tool_registry(&enabled_tools);
-
-    if tool_registry.is_empty() {
-        return Err(AgentApiError::bad_request("no tools enabled for agent run"));
-    }
+    let tool_registry = build_tool_registry(state);
 
     let mut skill_runtime = mlx_agent_core::runtime::SkillRuntime::new();
     let skill_context = build_skill_requirement_context(agent_cfg)?;
@@ -1763,8 +1974,16 @@ async fn run_agent_once(
     };
 
     let config = AgentLoopConfig {
+        session_id: session_id.clone(),
         model_id: resolved.model_id.clone(),
         workspace_root: workspace.clone(),
+        initial_history: session_messages_to_chat_history(
+            &state
+                .session_store
+                .load(&session_id)
+                .await
+                .unwrap_or_default(),
+        ),
         system_prompt: request.system_prompt.clone(),
         max_iterations: request.max_iterations.unwrap_or(25),
         max_prompt_tokens: request.max_prompt_tokens.or(agent_cfg.max_prompt_tokens),
@@ -1784,6 +2003,7 @@ async fn run_agent_once(
             .enable_tool_call_fallback
             .unwrap_or(agent_cfg.enable_tool_call_fallback),
         mode,
+        tool_profile: parse_tool_profile(Some(agent_cfg.tool_policy.profile.as_str())),
         skill_filter: Some(enabled_skills),
     };
 
@@ -1796,31 +2016,7 @@ async fn run_agent_once(
         "starting agent run"
     );
 
-    let session_id = request
-        .session_id
-        .clone()
-        .unwrap_or_else(mlx_agent_core::SessionStore::new_session_id);
-
-    // Persist session + user message
     let _ = state.session_store.ensure_session(&session_id, None).await;
-    let _ = state
-        .session_store
-        .append(
-            &session_id,
-            &mlx_agent_core::session::SessionMessage {
-                role: "user".to_string(),
-                content: request.message.clone(),
-                tool_call_id: None,
-                tool_name: None,
-                timestamp: chrono::Utc::now(),
-            },
-        )
-        .await;
-
-    // TODO: if we want to seamlessly pass previous session messages to AgentLoop,
-    // we should load them and prepend to a `history` field in the AgentRunRequest/AgentLoopConfig.
-    // However, for v0.1.1, the prompt builder might build fresh. We'll leave history injection
-    // out of AgentLoop for a future phase or inject them if AgentLoopConfig adds support.
 
     let mut agent = AgentLoop::new(
         config,
@@ -1838,7 +2034,20 @@ async fn run_agent_once(
         .await
         .map_err(AgentApiError::from_agent_error)?;
 
-    // Persist final assistant message
+    let _ = state
+        .session_store
+        .append(
+            &session_id,
+            &mlx_agent_core::session::SessionMessage {
+                role: "user".to_string(),
+                content: request.message.clone(),
+                tool_call_id: None,
+                tool_name: None,
+                timestamp: chrono::Utc::now(),
+            },
+        )
+        .await;
+
     let _ = state
         .session_store
         .append(
@@ -1853,6 +2062,18 @@ async fn run_agent_once(
         )
         .await;
 
+    {
+        let mut budget = state.agent_state.budget_tracker.write().await;
+        budget.insert(session_id.clone(), response.budget.clone());
+    }
+
+    let records = response
+        .summary_artifacts
+        .iter()
+        .map(summary_artifact_to_memory_record)
+        .collect::<Vec<_>>();
+    let _ = state.agent_state.memory.upsert(&records).await;
+
     Ok(AgentRunResponse {
         provider: resolved.provider_name,
         model_id: resolved.model_id,
@@ -1865,6 +2086,7 @@ async fn run_agent_once(
         completion_tokens: response.usage.completion_tokens,
         total_tokens: response.usage.total_tokens,
         latency_ms: response.latency_ms,
+        context_budget: Some(response.budget),
     })
 }
 
@@ -2156,6 +2378,7 @@ pub async fn agent_providers(
 /// GET /agent/config
 pub async fn agent_get_config() -> Result<Json<super::config::AgentUiConfig>, AgentApiError> {
     let mut cfg = super::config::AppConfig::load_settings().apply_env();
+    sync_legacy_enabled_tools(&mut cfg.agent);
     if cfg.agent.security.use_secrets_vault
         && cfg.agent.api_key.trim().is_empty()
         && cfg
@@ -2193,10 +2416,30 @@ pub async fn agent_update_config(
     if merged.skill_overrides.is_empty() {
         merged.skill_overrides = cfg.agent.skill_overrides.clone();
     }
+    if merged.tool_policy.agent_overrides.is_empty() {
+        merged.tool_policy.agent_overrides = cfg.agent.tool_policy.agent_overrides.clone();
+    }
+    if merged.tool_policy.session_overrides.is_empty() {
+        merged.tool_policy.session_overrides = cfg.agent.tool_policy.session_overrides.clone();
+    }
+    if merged.tool_policy.profile.trim().is_empty() {
+        merged.tool_policy.profile = cfg.agent.tool_policy.profile.clone();
+    }
     merged.node_package_manager = normalize_node_manager(
         Some(merged.node_package_manager.as_str()),
         &cfg.agent.node_package_manager,
     );
+
+    if merged.tool_policy.agent_overrides.is_empty() && !merged.enabled_tools.is_empty() {
+        merged.tool_policy.agent_overrides.insert(
+            DEFAULT_AGENT_ID.to_string(),
+            crate::config::AgentToolScopeOverride {
+                allow: merged.enabled_tools.clone(),
+                deny: Vec::new(),
+            },
+        );
+    }
+    sync_legacy_enabled_tools(&mut merged);
 
     if merged.security.use_secrets_vault {
         let vault = open_secrets_vault()?;
@@ -2423,44 +2666,234 @@ pub async fn agent_configure_skill(
 /// GET /agent/tools
 pub async fn agent_list_tools() -> Result<Json<Vec<AgentToolInfo>>, AgentApiError> {
     let cfg = super::config::AppConfig::load_settings().apply_env();
-    let mode = parse_execution_mode(Some(cfg.agent.execution_mode.as_str()));
-    let workspace = cfg
-        .agent
-        .workspace_root
+    let effective = mlx_agent_core::resolve_effective_tool_policy(
+        &build_tool_policy_state(&cfg.agent, None, None),
+        DEFAULT_AGENT_ID,
+        None,
+    );
+
+    Ok(Json(
+        effective
+            .entries
+            .into_iter()
+            .map(|entry| AgentToolInfo {
+                name: entry.name,
+                description: entry.description,
+                enabled: entry.allowed,
+                policy: if entry.allowed { "allow" } else { "deny" }.to_string(),
+            })
+            .collect(),
+    ))
+}
+
+/// GET /agent/tools/catalog
+pub async fn agent_tools_catalog() -> Result<Json<serde_json::Value>, AgentApiError> {
+    let profiles = [
+        mlx_agent_core::ToolProfileName::Minimal,
+        mlx_agent_core::ToolProfileName::Coding,
+        mlx_agent_core::ToolProfileName::Messaging,
+        mlx_agent_core::ToolProfileName::Full,
+    ]
+    .into_iter()
+    .map(|profile| {
+        serde_json::json!({
+            "id": profile.as_str(),
+            "tools": mlx_agent_core::profile_tool_names(profile).into_iter().collect::<Vec<_>>(),
+        })
+    })
+    .collect::<Vec<_>>();
+
+    Ok(Json(serde_json::json!({
+        "profiles": profiles,
+        "entries": mlx_agent_core::tool_catalog(),
+    })))
+}
+
+/// GET /agent/tools/effective-policy
+pub async fn agent_tools_effective_policy(
+    Query(query): Query<ToolPolicyQuery>,
+) -> Result<Json<mlx_agent_core::EffectiveToolPolicy>, AgentApiError> {
+    let cfg = super::config::AppConfig::load_settings().apply_env();
+    let agent_id = query
+        .agent_id
         .as_deref()
-        .filter(|v| !v.trim().is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-    let known_hashes = load_skill_integrity_state();
-    let policy_cfg = build_policy_config(&cfg.agent, mode, &workspace, known_hashes);
-    let policy = DefaultPolicyEngine::new(policy_cfg);
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(DEFAULT_AGENT_ID);
+    Ok(Json(mlx_agent_core::resolve_effective_tool_policy(
+        &build_tool_policy_state(&cfg.agent, query.session_id.as_deref(), None),
+        agent_id,
+        query.session_id.as_deref(),
+    )))
+}
 
-    let enabled = enabled_set(&cfg.agent.enabled_tools);
+/// POST /agent/tools/profile
+pub async fn agent_tools_profile(
+    Json(request): Json<AgentToolProfileRequest>,
+) -> Result<Json<mlx_agent_core::EffectiveToolPolicy>, AgentApiError> {
+    let mut cfg = super::config::AppConfig::load_settings().apply_env();
+    let profile = parse_tool_profile(Some(request.profile.as_str()));
+    cfg.agent.tool_policy.profile = profile.as_str().to_string();
 
-    let mut tools = Vec::new();
-    for t in ToolRegistry::with_builtins().definitions() {
-        let name = t.name.clone();
-        let active = enabled.is_empty() || enabled.contains(&name.to_ascii_lowercase());
-        let decision = policy
-            .check_tool_call(&name, &serde_json::json!({}), None, mode)
-            .await;
-        let policy_status = match decision {
-            mlx_agent_core::policy::PolicyDecision::Allow => "allow",
-            mlx_agent_core::policy::PolicyDecision::Ask { .. } => "ask",
-            mlx_agent_core::policy::PolicyDecision::Deny { .. } => "deny",
+    let agent_rules = cfg
+        .agent
+        .tool_policy
+        .agent_overrides
+        .entry(DEFAULT_AGENT_ID.to_string())
+        .or_default();
+    agent_rules.allow = mlx_agent_core::profile_tool_names(profile)
+        .into_iter()
+        .collect();
+    agent_rules.deny.clear();
+    sync_legacy_enabled_tools(&mut cfg.agent);
+
+    cfg.save_settings().map_err(|error| {
+        AgentApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "save_failed",
+            Some(error.to_string()),
+        )
+    })?;
+
+    Ok(Json(mlx_agent_core::resolve_effective_tool_policy(
+        &build_tool_policy_state(&cfg.agent, None, None),
+        DEFAULT_AGENT_ID,
+        None,
+    )))
+}
+
+/// POST /agent/tools/allow-deny
+pub async fn agent_tools_allow_deny(
+    Json(request): Json<AgentToolAllowDenyRequest>,
+) -> Result<Json<mlx_agent_core::EffectiveToolPolicy>, AgentApiError> {
+    let mut cfg = super::config::AppConfig::load_settings().apply_env();
+    let scope = request.scope.trim().to_ascii_lowercase();
+
+    match scope.as_str() {
+        "global" => {
+            if request.replace {
+                cfg.agent.security.tool_allowlist = request.allow.clone();
+                cfg.agent.security.tool_denylist = request.deny.clone();
+            } else {
+                merge_rules(
+                    &mut cfg.agent.security.tool_allowlist,
+                    &mut cfg.agent.security.tool_denylist,
+                    &request.allow,
+                    &request.deny,
+                );
+            }
         }
-        .to_string();
-
-        tools.push(AgentToolInfo {
-            name,
-            description: t.description,
-            enabled: active,
-            policy: policy_status,
-        });
+        "agent" => {
+            let agent_id = request
+                .agent_id
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or(DEFAULT_AGENT_ID);
+            let entry = cfg
+                .agent
+                .tool_policy
+                .agent_overrides
+                .entry(normalize_scope_key(agent_id))
+                .or_default();
+            if request.replace {
+                entry.allow = request.allow.clone();
+                entry.deny = request.deny.clone();
+            } else {
+                merge_rules(
+                    &mut entry.allow,
+                    &mut entry.deny,
+                    &request.allow,
+                    &request.deny,
+                );
+            }
+        }
+        "session" => {
+            let session_id = request
+                .session_id
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| {
+                    AgentApiError::bad_request("session_id is required for session scope")
+                })?;
+            let entry = cfg
+                .agent
+                .tool_policy
+                .session_overrides
+                .entry(normalize_scope_key(session_id))
+                .or_default();
+            if request.replace {
+                entry.allow = request.allow.clone();
+                entry.deny = request.deny.clone();
+            } else {
+                merge_rules(
+                    &mut entry.allow,
+                    &mut entry.deny,
+                    &request.allow,
+                    &request.deny,
+                );
+            }
+        }
+        _ => {
+            return Err(AgentApiError::bad_request(
+                "scope must be global, agent, or session",
+            ))
+        }
     }
 
-    tools.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(Json(tools))
+    sync_legacy_enabled_tools(&mut cfg.agent);
+    cfg.save_settings().map_err(|error| {
+        AgentApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "save_failed",
+            Some(error.to_string()),
+        )
+    })?;
+
+    let effective = mlx_agent_core::resolve_effective_tool_policy(
+        &build_tool_policy_state(&cfg.agent, request.session_id.as_deref(), None),
+        request.agent_id.as_deref().unwrap_or(DEFAULT_AGENT_ID),
+        request.session_id.as_deref(),
+    );
+    Ok(Json(effective))
+}
+
+/// GET /agent/context/budget
+pub async fn agent_context_budget(
+    State(state): State<super::AppState>,
+    Query(query): Query<ContextBudgetQuery>,
+) -> Result<Json<mlx_agent_core::ContextBudgetTelemetry>, AgentApiError> {
+    let tracker = state.agent_state.budget_tracker.read().await;
+
+    if let Some(session_id) = query
+        .session_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        let key = normalize_scope_key(session_id);
+        if let Some(entry) = tracker
+            .get(&key)
+            .cloned()
+            .or_else(|| tracker.get(session_id).cloned())
+        {
+            return Ok(Json(entry));
+        }
+        return Err(AgentApiError::new(
+            StatusCode::NOT_FOUND,
+            "budget_not_found",
+            Some(format!("no budget telemetry for session '{}'", session_id)),
+        ));
+    }
+
+    let latest = tracker
+        .values()
+        .cloned()
+        .max_by(|left, right| left.last_updated.cmp(&right.last_updated));
+    latest.map(Json).ok_or_else(|| {
+        AgentApiError::new(
+            StatusCode::NOT_FOUND,
+            "budget_not_found",
+            Some("no budget telemetry available".to_string()),
+        )
+    })
 }
 
 /// GET /agent/audit
@@ -2923,6 +3356,56 @@ mod tests {
         assert_eq!(response.summary.missing_configuration, 1);
         assert!(response.summary.configure_now);
         assert_eq!(response.summary.installable, 1);
+    }
+
+    #[test]
+    fn build_tool_policy_state_applies_session_override_last() {
+        let mut cfg = crate::config::AgentUiConfig::default();
+        cfg.tool_policy.profile = "minimal".to_string();
+        cfg.security.tool_allowlist = vec!["exec".to_string()];
+        cfg.tool_policy.session_overrides.insert(
+            "session-a".to_string(),
+            crate::config::AgentToolScopeOverride {
+                allow: Vec::new(),
+                deny: vec!["exec".to_string()],
+            },
+        );
+
+        let effective = mlx_agent_core::resolve_effective_tool_policy(
+            &build_tool_policy_state(&cfg, Some("session-a"), None),
+            DEFAULT_AGENT_ID,
+            Some("session-a"),
+        );
+        let exec = effective
+            .entries
+            .into_iter()
+            .find(|entry| entry.name == "exec")
+            .unwrap();
+
+        assert!(!exec.allowed);
+        assert_eq!(exec.final_rule, "session:session-a:deny:exec");
+    }
+
+    #[test]
+    fn sync_legacy_enabled_tools_matches_effective_policy() {
+        let mut cfg = crate::config::AgentUiConfig::default();
+        cfg.tool_policy.profile = "messaging".to_string();
+        cfg.tool_policy.agent_overrides.insert(
+            DEFAULT_AGENT_ID.to_string(),
+            crate::config::AgentToolScopeOverride {
+                allow: mlx_agent_core::profile_tool_names(
+                    mlx_agent_core::ToolProfileName::Messaging,
+                )
+                .into_iter()
+                .collect(),
+                deny: Vec::new(),
+            },
+        );
+
+        sync_legacy_enabled_tools(&mut cfg);
+
+        assert!(cfg.enabled_tools.iter().any(|tool| tool == "message"));
+        assert!(!cfg.enabled_tools.iter().any(|tool| tool == "exec"));
     }
 
     #[test]
