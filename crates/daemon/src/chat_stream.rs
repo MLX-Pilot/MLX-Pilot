@@ -649,7 +649,7 @@ fn should_try_airllm(
 }
 
 fn should_force_airllm_safe_cpu(cfg: &ChatRuntimeConfig, profile: Option<MemoryProfile>) -> bool {
-    if !cfg.airllm_safe_mode {
+    if !airllm_safe_mode_enabled(cfg) {
         return false;
     }
     let Some(profile) = profile else { return false };
@@ -703,7 +703,7 @@ fn bridge_device_hint(backend: &str) -> &'static str {
 }
 
 fn recommended_airllm_max_kv_size(cfg: &ChatRuntimeConfig, device_hint: &str) -> u32 {
-    if !cfg.airllm_safe_mode {
+    if !airllm_safe_mode_enabled(cfg) {
         return 1024;
     }
     if device_hint == "cpu" {
@@ -711,6 +711,14 @@ fn recommended_airllm_max_kv_size(cfg: &ChatRuntimeConfig, device_hint: &str) ->
     } else {
         512
     }
+}
+
+fn airllm_safe_mode_enabled(cfg: &ChatRuntimeConfig) -> bool {
+    cfg.airllm_safe_mode && !cfg!(target_os = "windows")
+}
+
+fn should_force_legacy_retry() -> bool {
+    !cfg!(target_os = "windows")
 }
 
 async fn run_airllm_bridge(
@@ -737,7 +745,15 @@ async fn run_airllm_bridge(
     let fallback_timeout = cfg.timeout.min(Duration::from_secs(300));
     let backend = normalize_airllm_backend(&cfg.airllm_backend);
     let (first_backend, first_device) = if safe_cpu_preferred {
-        let safe_backend = if backend == "auto" { "legacy" } else { backend };
+        let safe_backend = if backend == "auto" {
+            if should_force_legacy_retry() {
+                "legacy"
+            } else {
+                "original"
+            }
+        } else {
+            backend
+        };
         let _ = send_event(
             tx,
             ChatStreamEvent::airllm_log(
@@ -776,6 +792,11 @@ async fn run_airllm_bridge(
                 ),
             )
             .await;
+            let retry_backend = if should_force_legacy_retry() {
+                "legacy"
+            } else {
+                "original"
+            };
             run_airllm_bridge_once(
                 cfg,
                 model_path,
@@ -783,7 +804,7 @@ async fn run_airllm_bridge(
                 prompt,
                 tx,
                 fallback_timeout,
-                "legacy",
+                retry_backend,
                 "cpu",
                 recommended_airllm_max_kv_size(cfg, "cpu"),
             )

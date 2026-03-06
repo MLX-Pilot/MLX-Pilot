@@ -224,6 +224,11 @@ def run_backend(args: argparse.Namespace) -> str:
         except Exception as exc:
             if backend == "original":
                 raise
+            if platform.system().lower() == "windows":
+                log(
+                    f"original backend failed on windows ({type(exc).__name__}: {exc}); not falling back to legacy"
+                )
+                raise
             log(f"original backend failed ({type(exc).__name__}: {exc}); falling back to legacy")
 
     legacy_args = argparse.Namespace(**vars(args))
