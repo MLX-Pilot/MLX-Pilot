@@ -3,12 +3,14 @@
 
 use crate::approval::ApprovalService;
 use crate::audit::AuditLog;
+use crate::context_budget::{
+    ContextBudgetInput, ContextBudgetManager, ContextBudgetTelemetry, ContextSummaryArtifact,
+};
 use crate::events::EventBus;
 use crate::policy::PolicyEngine;
-use crate::prompt_builder::{
-    select_model_prompt_profile, ModelPromptProfile, PromptBuildInput, PromptBuilder,
-};
+use crate::prompt_builder::{select_model_prompt_profile, ModelPromptProfile, PromptBuilder};
 use crate::registry::ToolRegistry;
+use crate::tool_catalog::ToolProfileName;
 use mlx_agent_tools::ExecutionMode;
 use mlx_ollama_core::{
     ChatMessage, ChatToolsRequest, FunctionDef, GenerationOptions, MessageRole, ModelProvider,
@@ -23,8 +25,10 @@ use tracing::{debug, info, warn};
 /// Configuration for an `AgentLoop` instance.
 #[derive(Debug, Clone)]
 pub struct AgentLoopConfig {
+    pub session_id: String,
     pub model_id: String,
     pub workspace_root: std::path::PathBuf,
+    pub initial_history: Vec<ChatMessage>,
     pub system_prompt: Option<String>,
     pub max_iterations: usize,
     pub max_prompt_tokens: Option<usize>,
@@ -36,14 +40,17 @@ pub struct AgentLoopConfig {
     pub aggressive_tool_filtering: bool,
     pub enable_tool_call_fallback: bool,
     pub mode: ExecutionMode,
+    pub tool_profile: ToolProfileName,
     pub skill_filter: Option<Vec<String>>,
 }
 
 impl Default for AgentLoopConfig {
     fn default() -> Self {
         Self {
+            session_id: String::new(),
             model_id: String::new(),
             workspace_root: std::path::PathBuf::new(),
+            initial_history: Vec::new(),
             system_prompt: None,
             max_iterations: 25,
             max_prompt_tokens: None,
@@ -55,6 +62,7 @@ impl Default for AgentLoopConfig {
             aggressive_tool_filtering: false,
             enable_tool_call_fallback: true,
             mode: ExecutionMode::Full,
+            tool_profile: ToolProfileName::default(),
             skill_filter: None,
         }
     }
@@ -69,6 +77,8 @@ pub struct AgentResponse {
     pub tool_calls_made: usize,
     pub usage: TokenUsage,
     pub latency_ms: u64,
+    pub budget: ContextBudgetTelemetry,
+    pub summary_artifacts: Vec<ContextSummaryArtifact>,
 }
 
 /// Errors during agent execution.
@@ -115,7 +125,7 @@ pub struct AgentLoop {
     #[allow(dead_code)]
     audit: Arc<AuditLog>,
     skill_runtime: crate::runtime::SkillRuntime,
-    prompt_builder: PromptBuilder,
+    context_budget: ContextBudgetManager,
     /// In-memory conversation history for the current run.
     history: Vec<ChatMessage>,
 }
@@ -133,6 +143,7 @@ impl AgentLoop {
         event_bus: Arc<EventBus>,
         audit: Arc<AuditLog>,
     ) -> Self {
+        let history = config.initial_history.clone();
         Self {
             config,
             provider,
@@ -142,8 +153,8 @@ impl AgentLoop {
             approval,
             event_bus,
             audit,
-            history: Vec::new(),
-            prompt_builder: PromptBuilder,
+            history,
+            context_budget: ContextBudgetManager,
         }
     }
 
@@ -157,7 +168,11 @@ impl AgentLoop {
     /// 5. Guard: stop after `max_iterations`
     pub async fn run(&mut self, user_message: &str) -> Result<AgentResponse, AgentError> {
         let started = Instant::now();
-        let session_id = uuid::Uuid::new_v4().to_string();
+        let session_id = if self.config.session_id.trim().is_empty() {
+            uuid::Uuid::new_v4().to_string()
+        } else {
+            self.config.session_id.clone()
+        };
 
         use crate::audit::{AuditEventType, AuditLogEntry};
         self.log_audit(AuditLogEntry {
@@ -175,6 +190,9 @@ impl AgentLoop {
             duration_ms: None,
             decision: None,
             reason: None,
+            policy_rule: None,
+            policy_trace: Vec::new(),
+            tool_risk: None,
             error: None,
             error_summary: None,
         })
@@ -207,6 +225,8 @@ impl AgentLoop {
             completion_tokens: 0,
             total_tokens: 0,
         };
+        let mut last_budget: ContextBudgetTelemetry;
+        let mut last_summary_artifacts: Vec<ContextSummaryArtifact>;
 
         loop {
             iterations += 1;
@@ -223,11 +243,15 @@ impl AgentLoop {
             }
 
             let prompt = self.build_prompt_context(
+                &session_id,
+                provider_id,
                 &profile,
                 &conversation,
                 &all_tool_defs,
                 &skill_summaries,
             );
+            last_budget = prompt.telemetry.clone();
+            last_summary_artifacts = prompt.summary_artifacts.clone();
 
             debug!(
                 session = %session_id,
@@ -323,6 +347,9 @@ impl AgentLoop {
                     duration_ms: Some(elapsed_ms_u64(started)),
                     decision: None,
                     reason: None,
+                    policy_rule: None,
+                    policy_trace: Vec::new(),
+                    tool_risk: None,
                     error: None,
                     error_summary: None,
                 })
@@ -335,6 +362,8 @@ impl AgentLoop {
                     tool_calls_made: total_tool_calls,
                     usage: total_usage,
                     latency_ms: elapsed_ms_u64(started),
+                    budget: last_budget,
+                    summary_artifacts: last_summary_artifacts,
                 });
             }
 
@@ -366,20 +395,195 @@ impl AgentLoop {
 
     fn build_prompt_context(
         &self,
+        session_id: &str,
+        provider_id: &str,
         profile: &ModelPromptProfile,
         conversation: &[ChatMessage],
         all_tool_defs: &[FunctionDef],
         skill_summaries: &[String],
-    ) -> crate::prompt_builder::PromptBuildOutput {
-        self.prompt_builder.build(PromptBuildInput {
-            system_prompt_override: self.config.system_prompt.as_deref(),
+    ) -> crate::context_budget::ContextBudgetOutput {
+        self.context_budget.build(ContextBudgetInput {
+            session_id,
+            provider_id,
+            model_id: &self.config.model_id,
+            tool_profile: self.config.tool_profile,
             execution_mode: self.config.mode,
             profile,
+            system_prompt_override: self.config.system_prompt.as_deref(),
             conversation,
             skill_summaries,
             tools: all_tool_defs,
             aggressive_tool_filtering: self.config.aggressive_tool_filtering,
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn request_tool_approval(
+        &self,
+        session_id: &str,
+        tool_name: &str,
+        skill_name: Option<String>,
+        params_hash: String,
+        params_summary: String,
+        tool_started: Instant,
+        prompt: String,
+        approval_id: String,
+        policy_rule: String,
+        policy_trace: Vec<crate::tool_catalog::ToolRuleTrace>,
+        tool_risk: Option<String>,
+    ) -> Result<(), AgentError> {
+        use crate::approval::{ApprovalDecision, ApprovalRequest};
+        use crate::audit::{AuditEventType, AuditLogEntry};
+
+        let req = ApprovalRequest {
+            id: approval_id,
+            skill_name: skill_name.clone(),
+            tool_name: tool_name.to_string(),
+            description: prompt,
+            params_summary: params_summary.clone(),
+            created_at: chrono::Utc::now(),
+            expires_at: chrono::Utc::now() + std::time::Duration::from_secs(300),
+        };
+
+        self.event_bus
+            .emit(crate::events::AgentEvent::ApprovalRequired {
+                request: req.clone(),
+            });
+
+        self.log_audit(AuditLogEntry {
+            id: uuid::Uuid::new_v4().to_string(),
+            timestamp: chrono::Utc::now(),
+            session_id: session_id.into(),
+            event_type: AuditEventType::ApprovalPending,
+            provider: None,
+            model: None,
+            tool_name: Some(tool_name.to_string()),
+            skill_name: skill_name.clone(),
+            params_hash: Some(params_hash.clone()),
+            params_summary: Some(params_summary),
+            result_summary: None,
+            duration_ms: Some(tool_started.elapsed().as_millis() as u64),
+            decision: None,
+            reason: None,
+            policy_rule: Some(policy_rule.clone()),
+            policy_trace: policy_trace.clone(),
+            tool_risk: tool_risk.clone(),
+            error: None,
+            error_summary: None,
+        })
+        .await;
+
+        match self
+            .approval
+            .request_approval(req, std::time::Duration::from_secs(300))
+            .await
+        {
+            Ok(ApprovalDecision::AllowOnce) | Ok(ApprovalDecision::AllowSession) => {
+                self.log_audit(AuditLogEntry {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    timestamp: chrono::Utc::now(),
+                    session_id: session_id.into(),
+                    event_type: AuditEventType::ApprovalDecision,
+                    provider: None,
+                    model: None,
+                    tool_name: Some(tool_name.to_string()),
+                    skill_name,
+                    params_hash: Some(params_hash),
+                    params_summary: None,
+                    result_summary: None,
+                    duration_ms: Some(tool_started.elapsed().as_millis() as u64),
+                    decision: Some("allow".into()),
+                    reason: None,
+                    policy_rule: Some(policy_rule),
+                    policy_trace,
+                    tool_risk,
+                    error: None,
+                    error_summary: None,
+                })
+                .await;
+                Ok(())
+            }
+            Ok(ApprovalDecision::AllowAlways { pattern }) => {
+                self.approval.add_allowlist_entry(tool_name, pattern);
+                self.log_audit(AuditLogEntry {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    timestamp: chrono::Utc::now(),
+                    session_id: session_id.into(),
+                    event_type: AuditEventType::ApprovalDecision,
+                    provider: None,
+                    model: None,
+                    tool_name: Some(tool_name.to_string()),
+                    skill_name,
+                    params_hash: Some(params_hash),
+                    params_summary: None,
+                    result_summary: None,
+                    duration_ms: Some(tool_started.elapsed().as_millis() as u64),
+                    decision: Some("allow_always".into()),
+                    reason: None,
+                    policy_rule: Some(policy_rule),
+                    policy_trace,
+                    tool_risk,
+                    error: None,
+                    error_summary: None,
+                })
+                .await;
+                Ok(())
+            }
+            Ok(ApprovalDecision::Deny) => {
+                self.log_audit(AuditLogEntry {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    timestamp: chrono::Utc::now(),
+                    session_id: session_id.into(),
+                    event_type: AuditEventType::ApprovalDecision,
+                    provider: None,
+                    model: None,
+                    tool_name: Some(tool_name.to_string()),
+                    skill_name,
+                    params_hash: Some(params_hash),
+                    params_summary: None,
+                    result_summary: None,
+                    duration_ms: Some(tool_started.elapsed().as_millis() as u64),
+                    decision: Some("deny".into()),
+                    reason: Some("User denied execution".into()),
+                    policy_rule: Some(policy_rule),
+                    policy_trace,
+                    tool_risk,
+                    error: None,
+                    error_summary: None,
+                })
+                .await;
+                Err(AgentError::PolicyDenied {
+                    reason: "User denied execution".into(),
+                })
+            }
+            Err(error) => {
+                self.log_audit(AuditLogEntry {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    timestamp: chrono::Utc::now(),
+                    session_id: session_id.into(),
+                    event_type: AuditEventType::ApprovalDecision,
+                    provider: None,
+                    model: None,
+                    tool_name: Some(tool_name.to_string()),
+                    skill_name,
+                    params_hash: Some(params_hash),
+                    params_summary: None,
+                    result_summary: None,
+                    duration_ms: Some(tool_started.elapsed().as_millis() as u64),
+                    decision: Some("error".into()),
+                    reason: None,
+                    policy_rule: Some(policy_rule),
+                    policy_trace,
+                    tool_risk,
+                    error: Some(error.to_string()),
+                    error_summary: None,
+                })
+                .await;
+                Err(AgentError::PolicyDenied {
+                    reason: format!("Approval failed: {}", error),
+                })
+            }
+        }
     }
 
     /// Execute a single tool call through the registry.
@@ -419,11 +623,13 @@ impl AgentLoop {
             .active_skill
             .as_deref()
             .and_then(|name| self.skill_runtime.get(name));
-        match self
+        let inspection = self
             .policy
-            .check_tool_call(&tool_call.name, &params, active_skill_pkg, self.config.mode)
-            .await
-        {
+            .inspect_tool_call(&tool_call.name, &params, active_skill_pkg, self.config.mode)
+            .await;
+        let tool_risk = inspection.risk.map(format_tool_risk);
+
+        match inspection.decision {
             PolicyDecision::Deny { reason } => {
                 self.event_bus
                     .emit(crate::events::AgentEvent::ToolCallDenied {
@@ -447,6 +653,9 @@ impl AgentLoop {
                     duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                     decision: Some("deny".into()),
                     reason: Some(reason.clone()),
+                    policy_rule: Some(inspection.final_rule.clone()),
+                    policy_trace: inspection.trace.clone(),
+                    tool_risk: tool_risk.clone(),
                     error: Some(reason.clone()),
                     error_summary: None,
                 })
@@ -458,142 +667,50 @@ impl AgentLoop {
                 prompt,
                 approval_id,
             } => {
-                use crate::approval::{ApprovalDecision, ApprovalRequest};
-                let req = ApprovalRequest {
-                    id: approval_id,
-                    skill_name: ctx.active_skill.clone(),
-                    tool_name: tool_call.name.clone(),
-                    description: prompt,
-                    params_summary: params_summary.clone(),
-                    created_at: chrono::Utc::now(),
-                    // 5 minutes expiry
-                    expires_at: chrono::Utc::now() + std::time::Duration::from_secs(300),
-                };
+                self.request_tool_approval(
+                    session_id,
+                    &tool_call.name,
+                    ctx.active_skill.clone(),
+                    params_hash.clone(),
+                    params_summary.clone(),
+                    tool_started,
+                    prompt,
+                    approval_id,
+                    inspection.final_rule.clone(),
+                    inspection.trace.clone(),
+                    tool_risk.clone(),
+                )
+                .await?;
+            }
+            PolicyDecision::Allow => {
+                let approval_pattern = params_hash.clone();
+                let risk_requires_approval = inspection
+                    .risk
+                    .map(|risk| risk.requires_approval())
+                    .unwrap_or(false)
+                    && !self.approval.is_allowed(&tool_call.name, &approval_pattern);
 
-                self.event_bus
-                    .emit(crate::events::AgentEvent::ApprovalRequired {
-                        request: req.clone(),
-                    });
-
-                self.log_audit(AuditLogEntry {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    timestamp: chrono::Utc::now(),
-                    session_id: session_id.into(),
-                    event_type: AuditEventType::ApprovalPending,
-                    provider: None,
-                    model: None,
-                    tool_name: Some(tool_call.name.clone()),
-                    skill_name: ctx.active_skill.clone(),
-                    params_hash: Some(params_hash.clone()),
-                    params_summary: Some(params_summary.clone()),
-                    result_summary: None,
-                    duration_ms: Some(tool_started.elapsed().as_millis() as u64),
-                    decision: None,
-                    reason: None,
-                    error: None,
-                    error_summary: None,
-                })
-                .await;
-
-                match self
-                    .approval
-                    .request_approval(req, std::time::Duration::from_secs(300))
-                    .await
-                {
-                    Ok(ApprovalDecision::AllowOnce) | Ok(ApprovalDecision::AllowSession) => {
-                        self.log_audit(AuditLogEntry {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            timestamp: chrono::Utc::now(),
-                            session_id: session_id.into(),
-                            event_type: AuditEventType::ApprovalDecision,
-                            provider: None,
-                            model: None,
-                            tool_name: Some(tool_call.name.clone()),
-                            skill_name: ctx.active_skill.clone(),
-                            params_hash: Some(params_hash.clone()),
-                            params_summary: None,
-                            result_summary: None,
-                            duration_ms: Some(tool_started.elapsed().as_millis() as u64),
-                            decision: Some("allow".into()),
-                            reason: None,
-                            error: None,
-                            error_summary: None,
-                        })
-                        .await;
-                    }
-                    Ok(ApprovalDecision::AllowAlways { pattern }) => {
-                        self.approval.add_allowlist_entry(&tool_call.name, pattern);
-                        self.log_audit(AuditLogEntry {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            timestamp: chrono::Utc::now(),
-                            session_id: session_id.into(),
-                            event_type: AuditEventType::ApprovalDecision,
-                            provider: None,
-                            model: None,
-                            tool_name: Some(tool_call.name.clone()),
-                            skill_name: ctx.active_skill.clone(),
-                            params_hash: Some(params_hash.clone()),
-                            params_summary: None,
-                            result_summary: None,
-                            duration_ms: Some(tool_started.elapsed().as_millis() as u64),
-                            decision: Some("allow_always".into()),
-                            reason: None,
-                            error: None,
-                            error_summary: None,
-                        })
-                        .await;
-                    }
-                    Ok(ApprovalDecision::Deny) => {
-                        self.log_audit(AuditLogEntry {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            timestamp: chrono::Utc::now(),
-                            session_id: session_id.into(),
-                            event_type: AuditEventType::ApprovalDecision,
-                            provider: None,
-                            model: None,
-                            tool_name: Some(tool_call.name.clone()),
-                            skill_name: ctx.active_skill.clone(),
-                            params_hash: Some(params_hash.clone()),
-                            params_summary: None,
-                            result_summary: None,
-                            duration_ms: Some(tool_started.elapsed().as_millis() as u64),
-                            decision: Some("deny".into()),
-                            reason: Some("User denied execution".into()),
-                            error: None,
-                            error_summary: None,
-                        })
-                        .await;
-                        return Err(AgentError::PolicyDenied {
-                            reason: "User denied execution".into(),
-                        });
-                    }
-                    Err(e) => {
-                        self.log_audit(AuditLogEntry {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            timestamp: chrono::Utc::now(),
-                            session_id: session_id.into(),
-                            event_type: AuditEventType::ApprovalDecision,
-                            provider: None,
-                            model: None,
-                            tool_name: Some(tool_call.name.clone()),
-                            skill_name: ctx.active_skill.clone(),
-                            params_hash: Some(params_hash.clone()),
-                            params_summary: None,
-                            result_summary: None,
-                            duration_ms: Some(tool_started.elapsed().as_millis() as u64),
-                            decision: Some("error".into()),
-                            reason: None,
-                            error: Some(e.to_string()),
-                            error_summary: None,
-                        })
-                        .await;
-                        return Err(AgentError::PolicyDenied {
-                            reason: format!("Approval failed: {}", e),
-                        });
-                    }
+                if risk_requires_approval {
+                    let risk_label = tool_risk.clone().unwrap_or_else(|| "high".to_string());
+                    self.request_tool_approval(
+                        session_id,
+                        &tool_call.name,
+                        ctx.active_skill.clone(),
+                        params_hash.clone(),
+                        params_summary.clone(),
+                        tool_started,
+                        format!(
+                            "Tool '{}' has risk '{}'; approve execution?",
+                            tool_call.name, risk_label
+                        ),
+                        uuid::Uuid::new_v4().to_string(),
+                        inspection.final_rule.clone(),
+                        inspection.trace.clone(),
+                        tool_risk.clone(),
+                    )
+                    .await?;
                 }
             }
-            PolicyDecision::Allow => {}
         }
 
         let result = match self
@@ -617,6 +734,9 @@ impl AgentLoop {
                     duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                     decision: None,
                     reason: None,
+                    policy_rule: Some(inspection.final_rule.clone()),
+                    policy_trace: inspection.trace.clone(),
+                    tool_risk: tool_risk.clone(),
                     error: None,
                     error_summary: None,
                 })
@@ -639,6 +759,9 @@ impl AgentLoop {
                     duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                     decision: None,
                     reason: None,
+                    policy_rule: Some(inspection.final_rule),
+                    policy_trace: inspection.trace,
+                    tool_risk,
                     error: Some(e.to_string()),
                     error_summary: None,
                 })
@@ -771,6 +894,16 @@ fn compact_whitespace_preview(input: &str, max_chars: usize) -> Cow<'_, str> {
         preview.push_str("...");
     }
     Cow::Owned(preview)
+}
+
+fn format_tool_risk(risk: crate::tool_catalog::ToolRisk) -> String {
+    match risk {
+        crate::tool_catalog::ToolRisk::Low => "low",
+        crate::tool_catalog::ToolRisk::Medium => "medium",
+        crate::tool_catalog::ToolRisk::High => "high",
+        crate::tool_catalog::ToolRisk::Critical => "critical",
+    }
+    .to_string()
 }
 
 #[cfg(test)]
@@ -943,8 +1076,10 @@ mod tests {
 
         AgentLoop::new(
             AgentLoopConfig {
+                session_id: "test-session".into(),
                 model_id: "mock-model".into(),
                 workspace_root: tmp,
+                initial_history: Vec::new(),
                 system_prompt: Some("You are a helpful assistant.".into()),
                 max_iterations: 10,
                 max_prompt_tokens: None,
@@ -956,6 +1091,7 @@ mod tests {
                 aggressive_tool_filtering: false,
                 enable_tool_call_fallback: true,
                 mode: ExecutionMode::Full,
+                tool_profile: ToolProfileName::Coding,
                 skill_filter: None,
             },
             provider,
