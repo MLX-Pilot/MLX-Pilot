@@ -530,6 +530,20 @@ pub async fn run() -> anyhow::Result<()> {
             get(agent_api::agent_get_config).post(agent_api::agent_update_config),
         )
         .route("/agent/skills", get(agent_api::agent_list_skills))
+        .route("/agent/skills/check", get(agent_api::agent_check_skills))
+        .route(
+            "/agent/skills/install",
+            post(agent_api::agent_install_skills),
+        )
+        .route("/agent/skills/enable", post(agent_api::agent_enable_skills))
+        .route(
+            "/agent/skills/disable",
+            post(agent_api::agent_disable_skills),
+        )
+        .route(
+            "/agent/skills/config",
+            post(agent_api::agent_configure_skill),
+        )
         .route("/agent/skills/reload", post(agent_api::agent_reload_skills))
         .route("/agent/tools", get(agent_api::agent_list_tools))
         .route("/agent/plugins", get(agent_plugins))
