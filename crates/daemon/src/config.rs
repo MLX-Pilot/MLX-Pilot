@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentSecurityConfig {
@@ -159,6 +160,192 @@ impl Default for AgentUiConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginPersistedState {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_config_object")]
+    pub config: Value,
+}
+
+impl PluginPersistedState {
+    pub fn is_configured(&self) -> bool {
+        json_value_is_configured(&self.config)
+    }
+}
+
+impl Default for PluginPersistedState {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            config: default_config_object(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelPersistedState {
+    #[serde(default)]
+    pub default_account_id: Option<String>,
+    #[serde(default)]
+    pub accounts: BTreeMap<String, ChannelAccountPersistedState>,
+    #[serde(default)]
+    pub alias: Option<String>,
+    #[serde(default = "default_config_object")]
+    pub config: Value,
+    #[serde(default)]
+    pub metadata: BTreeMap<String, String>,
+}
+
+impl ChannelPersistedState {
+    #[allow(dead_code)]
+    pub fn is_configured(&self) -> bool {
+        !self.accounts.is_empty()
+            || self
+                .default_account_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .is_some()
+            || self
+                .accounts
+                .values()
+                .any(ChannelAccountPersistedState::is_configured)
+            || self.accounts.values().any(|account| account.enabled)
+            || json_value_is_configured(&self.config)
+            || self.metadata.values().any(|value| !value.trim().is_empty())
+            || self
+                .alias
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .is_some()
+    }
+}
+
+impl Default for ChannelPersistedState {
+    fn default() -> Self {
+        Self {
+            default_account_id: None,
+            accounts: BTreeMap::new(),
+            alias: None,
+            config: default_config_object(),
+            metadata: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelAccountPersistedState {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub credentials_ref: Option<String>,
+    #[serde(default)]
+    pub metadata: BTreeMap<String, String>,
+    #[serde(default)]
+    pub routing_defaults: BTreeMap<String, String>,
+    #[serde(default)]
+    pub health_state: ChannelAccountHealthState,
+    #[serde(default)]
+    pub limits: ChannelAccountPolicy,
+    #[serde(default = "default_config_object")]
+    pub adapter_config: Value,
+}
+
+impl ChannelAccountPersistedState {
+    pub fn is_configured(&self) -> bool {
+        self.credentials_ref
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_some()
+            || !self.metadata.is_empty()
+            || !self.routing_defaults.is_empty()
+            || json_value_is_configured(&self.adapter_config)
+    }
+}
+
+impl Default for ChannelAccountPersistedState {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            credentials_ref: None,
+            metadata: BTreeMap::new(),
+            routing_defaults: BTreeMap::new(),
+            health_state: ChannelAccountHealthState::default(),
+            limits: ChannelAccountPolicy::default(),
+            adapter_config: default_config_object(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelAccountHealthState {
+    #[serde(default = "default_channel_health_status")]
+    pub status: String,
+    #[serde(default)]
+    pub last_error: Option<String>,
+    #[serde(default)]
+    pub failure_count: u32,
+    #[serde(default)]
+    pub circuit_open_until_epoch_ms: Option<u128>,
+    #[serde(default)]
+    pub last_checked_epoch_ms: Option<u128>,
+    #[serde(default)]
+    pub last_connected_epoch_ms: Option<u128>,
+}
+
+impl Default for ChannelAccountHealthState {
+    fn default() -> Self {
+        Self {
+            status: default_channel_health_status(),
+            last_error: None,
+            failure_count: 0,
+            circuit_open_until_epoch_ms: None,
+            last_checked_epoch_ms: None,
+            last_connected_epoch_ms: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelAccountPolicy {
+    #[serde(default = "default_rate_limit_per_minute")]
+    pub rate_limit_per_minute: u32,
+    #[serde(default = "default_operation_timeout_ms")]
+    pub timeout_ms: u64,
+    #[serde(default = "default_retry_count")]
+    pub max_retries: u32,
+    #[serde(default = "default_backoff_base_ms")]
+    pub backoff_base_ms: u64,
+    #[serde(default = "default_circuit_breaker_threshold")]
+    pub circuit_breaker_threshold: u32,
+    #[serde(default = "default_circuit_breaker_open_ms")]
+    pub circuit_breaker_open_ms: u64,
+}
+
+impl Default for ChannelAccountPolicy {
+    fn default() -> Self {
+        Self {
+            rate_limit_per_minute: default_rate_limit_per_minute(),
+            timeout_ms: default_operation_timeout_ms(),
+            max_retries: default_retry_count(),
+            backoff_base_ms: default_backoff_base_ms(),
+            circuit_breaker_threshold: default_circuit_breaker_threshold(),
+            circuit_breaker_open_ms: default_circuit_breaker_open_ms(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CompatibilityConfig {
+    #[serde(default)]
+    pub plugins: BTreeMap<String, PluginPersistedState>,
+    #[serde(default)]
+    pub channels: BTreeMap<String, ChannelPersistedState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub bind_addr: SocketAddr,
     pub local_provider: String,
@@ -212,6 +399,8 @@ pub struct AppConfig {
     pub active_agent_framework: String,
     #[serde(default)]
     pub agent: AgentUiConfig,
+    #[serde(default)]
+    pub compatibility: CompatibilityConfig,
 }
 
 impl Default for AppConfig {
@@ -267,12 +456,23 @@ impl Default for AppConfig {
             nanobot_cli_path: app_data_dir.join("nanobot"),
             active_agent_framework: "openclaw".to_string(),
             agent: AgentUiConfig::default(),
+            compatibility: CompatibilityConfig::default(),
         }
     }
 }
 
 impl AppConfig {
     pub fn get_settings_path() -> PathBuf {
+        if let Ok(path) = env::var("APP_SETTINGS_PATH") {
+            let trimmed = path.trim();
+            if !trimmed.is_empty() {
+                let path = PathBuf::from(trimmed);
+                if let Some(parent) = path.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                return path;
+            }
+        }
         let base = if let Some(home) = home_dir() {
             home.join(".config")
         } else if let Ok(app_data) = std::env::var("APPDATA") {
@@ -288,9 +488,16 @@ impl AppConfig {
     }
 
     pub fn load_settings() -> Self {
-        let path = Self::get_settings_path();
+        Self::load_settings_from(&Self::get_settings_path())
+    }
+
+    pub fn save_settings(&self) -> Result<(), std::io::Error> {
+        self.save_settings_to(&Self::get_settings_path())
+    }
+
+    pub fn load_settings_from(path: &std::path::Path) -> Self {
         if path.exists() {
-            if let Ok(content) = fs::read_to_string(&path) {
+            if let Ok(content) = fs::read_to_string(path) {
                 if let Ok(config) = serde_json::from_str::<AppConfig>(&content) {
                     return config;
                 }
@@ -299,8 +506,10 @@ impl AppConfig {
         Self::default()
     }
 
-    pub fn save_settings(&self) -> Result<(), std::io::Error> {
-        let path = Self::get_settings_path();
+    pub fn save_settings_to(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
         let content = serde_json::to_string_pretty(self)?;
         fs::write(path, content)?;
         Ok(())
@@ -661,6 +870,21 @@ impl AppConfig {
     }
 }
 
+fn default_config_object() -> Value {
+    Value::Object(Map::new())
+}
+
+fn json_value_is_configured(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Object(map) => !map.is_empty(),
+        Value::Array(items) => !items.is_empty(),
+        Value::String(text) => !text.trim().is_empty(),
+        Value::Bool(flag) => *flag,
+        Value::Number(_) => true,
+    }
+}
+
 fn parse_shell_args(value: &str) -> Option<Vec<String>> {
     shell_words::split(value).ok()
 }
@@ -819,6 +1043,62 @@ fn normalize_mlx_command(cfg: &mut AppConfig) {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compatibility_state_roundtrips_via_custom_settings_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("settings.json");
+        let mut cfg = AppConfig::default();
+        cfg.compatibility.plugins.insert(
+            "memory".to_string(),
+            PluginPersistedState {
+                enabled: true,
+                config: serde_json::json!({"backend": "local"}),
+            },
+        );
+        cfg.compatibility.channels.insert(
+            "telegram".to_string(),
+            ChannelPersistedState {
+                default_account_id: Some("tg".to_string()),
+                accounts: BTreeMap::from([(
+                    "tg".to_string(),
+                    ChannelAccountPersistedState {
+                        enabled: true,
+                        credentials_ref: Some("channels.telegram.tg.credentials".to_string()),
+                        metadata: BTreeMap::from([("owner".to_string(), "local".to_string())]),
+                        routing_defaults: BTreeMap::new(),
+                        health_state: ChannelAccountHealthState::default(),
+                        limits: ChannelAccountPolicy::default(),
+                        adapter_config: serde_json::json!({"token": "secret"}),
+                    },
+                )]),
+                alias: Some("tg".to_string()),
+                config: serde_json::json!({"token": "secret"}),
+                metadata: BTreeMap::new(),
+            },
+        );
+
+        cfg.save_settings_to(&path).expect("save settings");
+        let loaded = AppConfig::load_settings_from(&path);
+
+        assert!(loaded
+            .compatibility
+            .plugins
+            .get("memory")
+            .expect("plugin state")
+            .is_configured());
+        assert!(loaded
+            .compatibility
+            .channels
+            .get("telegram")
+            .expect("channel state")
+            .is_configured());
+    }
+}
+
 fn starts_with_legacy_module(values: &[String], expected: &[&str]) -> bool {
     if values.len() < expected.len() {
         return false;
@@ -920,6 +1200,34 @@ fn parse_bool(value: &str, fallback: bool) -> bool {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_channel_health_status() -> String {
+    "not_configured".to_string()
+}
+
+fn default_rate_limit_per_minute() -> u32 {
+    60
+}
+
+fn default_operation_timeout_ms() -> u64 {
+    5_000
+}
+
+fn default_retry_count() -> u32 {
+    2
+}
+
+fn default_backoff_base_ms() -> u64 {
+    250
+}
+
+fn default_circuit_breaker_threshold() -> u32 {
+    3
+}
+
+fn default_circuit_breaker_open_ms() -> u64 {
+    30_000
 }
 
 fn default_security_mode() -> String {
