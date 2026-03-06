@@ -575,6 +575,7 @@ mod tests {
             emoji: None,
             always: false,
             os: Vec::new(),
+            primary_env: None,
             source: SkillSource::Workspace,
             file_path: PathBuf::from(format!("skills/{name}/SKILL.md")),
             base_dir: PathBuf::from(format!("skills/{name}")),
