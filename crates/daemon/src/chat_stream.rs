@@ -697,8 +697,57 @@ async fn run_airllm_bridge(
 
     let fallback_timeout = cfg.timeout.min(Duration::from_secs(300));
     let backend = normalize_airllm_backend(&cfg.airllm_backend);
-    let device_hint = bridge_device_hint(backend);
+    let first_device = bridge_device_hint(backend);
+    match run_airllm_bridge_once(
+        cfg,
+        model_path,
+        request,
+        prompt,
+        tx,
+        fallback_timeout,
+        backend,
+        first_device,
+    )
+    .await
+    {
+        Ok(output) => Ok(output),
+        Err(ChatStreamError::CommandFailed(message))
+            if first_device != "cpu" && is_memory_pressure_error(&message) =>
+        {
+            let _ = send_event(
+                tx,
+                ChatStreamEvent::airllm_log(
+                    "Fallback AIRLLM encontrou erro de memoria; repetindo com device=cpu."
+                        .to_string(),
+                ),
+            )
+            .await;
+            run_airllm_bridge_once(
+                cfg,
+                model_path,
+                request,
+                prompt,
+                tx,
+                fallback_timeout,
+                "legacy",
+                "cpu",
+            )
+            .await
+        }
+        Err(error) => Err(error),
+    }
+}
 
+async fn run_airllm_bridge_once(
+    cfg: &ChatRuntimeConfig,
+    model_path: &Path,
+    request: &ChatRequest,
+    prompt: &str,
+    tx: &mpsc::Sender<ChatStreamEvent>,
+    fallback_timeout: Duration,
+    backend: &str,
+    device_hint: &str,
+) -> Result<String, ChatStreamError> {
     send_event(
         tx,
         ChatStreamEvent::airllm_log(format!(

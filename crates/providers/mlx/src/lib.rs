@@ -327,9 +327,14 @@ impl MlxProvider {
         model_path: &Path,
         prompt: &str,
         request: &ChatRequest,
+        force_cpu: bool,
     ) -> Vec<String> {
         let backend = self.normalized_airllm_backend();
-        let device_hint = Self::bridge_device_hint(backend);
+        let device_hint = if force_cpu {
+            "cpu"
+        } else {
+            Self::bridge_device_hint(backend)
+        };
         let mut args = vec![
             self.cfg.airllm_runner.clone(),
             "--model".to_string(),
@@ -736,10 +741,18 @@ impl ModelProvider for MlxProvider {
                 });
             }
 
-            let airllm_args = self.build_airllm_args(&model_path, &prompt, &request);
-            let airllm = self
+            let airllm_args = self.build_airllm_args(&model_path, &prompt, &request, false);
+            let mut airllm = self
                 .run_command_capture(&self.cfg.airllm_python_command, &airllm_args)
                 .await?;
+            if !airllm.status.success()
+                && Self::is_memory_pressure_error(&airllm.stdout, &airllm.stderr)
+            {
+                let retry_args = self.build_airllm_args(&model_path, &prompt, &request, true);
+                airllm = self
+                    .run_command_capture(&self.cfg.airllm_python_command, &retry_args)
+                    .await?;
+            }
 
             if airllm.status.success() {
                 airllm_used = true;
@@ -775,7 +788,7 @@ impl ModelProvider for MlxProvider {
                     });
                 }
 
-                let airllm_args = self.build_airllm_args(&model_path, &prompt, &request);
+                let airllm_args = self.build_airllm_args(&model_path, &prompt, &request, true);
                 let airllm = self
                     .run_command_capture(&self.cfg.airllm_python_command, &airllm_args)
                     .await?;
