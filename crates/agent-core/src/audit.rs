@@ -1,5 +1,6 @@
 //! `AuditLog` — structured JSONL audit logging.
 
+use crate::tool_catalog::ToolRuleTrace;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -22,6 +23,12 @@ pub struct AuditLogEntry {
     pub duration_ms: Option<u64>,
     pub decision: Option<String>,
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_rule: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub policy_trace: Vec<ToolRuleTrace>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_risk: Option<String>,
     pub error: Option<String>,
     pub error_summary: Option<String>,
 }
@@ -110,6 +117,9 @@ mod tests {
             duration_ms: Some(12),
             decision: None,
             reason: None,
+            policy_rule: None,
+            policy_trace: Vec::new(),
+            tool_risk: None,
             error: None,
             error_summary: None,
         };
@@ -135,6 +145,9 @@ mod tests {
             duration_ms: None,
             decision: None,
             reason: None,
+            policy_rule: None,
+            policy_trace: Vec::new(),
+            tool_risk: None,
             error: None,
             error_summary: None,
         };

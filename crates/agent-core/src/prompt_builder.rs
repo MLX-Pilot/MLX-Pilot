@@ -238,7 +238,7 @@ impl PromptBuilder {
     }
 }
 
-fn latest_user_text(conversation: &[ChatMessage]) -> &str {
+pub(crate) fn latest_user_text(conversation: &[ChatMessage]) -> &str {
     conversation
         .iter()
         .rev()
@@ -305,7 +305,7 @@ fn estimate_json_tokens(v: &Value) -> usize {
     }
 }
 
-fn build_system_prompt(
+pub(crate) fn build_system_prompt(
     mode: ExecutionMode,
     verbosity: VerbosityLevel,
     system_override: Option<&str>,
@@ -467,7 +467,7 @@ fn truncate_messages_in_place(
     }
 }
 
-fn filter_tools(
+pub(crate) fn filter_tools(
     tools: &[FunctionDef],
     mode: ExecutionMode,
     user_text: &str,
