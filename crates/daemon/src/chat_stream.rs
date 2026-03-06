@@ -20,10 +20,13 @@ pub struct ChatRuntimeConfig {
     pub timeout: Duration,
     pub airllm_enabled: bool,
     pub airllm_threshold_percent: u8,
+    pub airllm_safe_mode: bool,
     pub airllm_python_command: String,
     pub airllm_runner: String,
     pub airllm_backend: String,
 }
+
+const AIRLLM_SAFE_CPU_RATIO: f64 = 1.0;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ChatStreamEvent {
@@ -289,6 +292,7 @@ async fn run_chat_stream(
 
     let memory_profile = memory_profile(model_scan.safetensors_bytes);
     let should_try_airllm = should_try_airllm(&cfg, memory_profile, request.options.airllm_enabled);
+    let safe_cpu_preferred = should_force_airllm_safe_cpu(&cfg, memory_profile);
     let force_airllm = request.options.airllm_enabled == Some(true);
 
     let prompt = build_prompt(&request.messages);
@@ -331,7 +335,15 @@ async fn run_chat_stream(
         send_event(&tx, ChatStreamEvent::status("fallback_airllm")).await?;
         announce_airllm_start(&cfg, &tx).await?;
         let started_fallback = Instant::now();
-        let fallback_output = run_airllm_bridge(&cfg, &model_path, &request, &prompt, &tx).await?;
+        let fallback_output = run_airllm_bridge(
+            &cfg,
+            &model_path,
+            &request,
+            &prompt,
+            &tx,
+            safe_cpu_preferred,
+        )
+        .await?;
         (
             fallback_output,
             prompt.clone(),
@@ -486,8 +498,15 @@ async fn run_chat_stream(
                 send_event(&tx, ChatStreamEvent::status("fallback_airllm")).await?;
                 announce_airllm_start(&cfg, &tx).await?;
                 let started_fallback = Instant::now();
-                let fallback_output =
-                    run_airllm_bridge(&cfg, &model_path, &request, &prompt, &tx).await?;
+                let fallback_output = run_airllm_bridge(
+                    &cfg,
+                    &model_path,
+                    &request,
+                    &prompt,
+                    &tx,
+                    safe_cpu_preferred,
+                )
+                .await?;
                 (
                     fallback_output,
                     prompt.clone(),
@@ -629,6 +648,14 @@ fn should_try_airllm(
     profile.usage_ratio >= threshold
 }
 
+fn should_force_airllm_safe_cpu(cfg: &ChatRuntimeConfig, profile: Option<MemoryProfile>) -> bool {
+    if !cfg.airllm_safe_mode {
+        return false;
+    }
+    let Some(profile) = profile else { return false };
+    profile.usage_ratio >= AIRLLM_SAFE_CPU_RATIO
+}
+
 fn is_memory_pressure_error(text: &str) -> bool {
     let normalized = text.to_ascii_lowercase();
     // Explicit memory pressure keywords
@@ -675,12 +702,24 @@ fn bridge_device_hint(backend: &str) -> &'static str {
     }
 }
 
+fn recommended_airllm_max_kv_size(cfg: &ChatRuntimeConfig, device_hint: &str) -> u32 {
+    if !cfg.airllm_safe_mode {
+        return 1024;
+    }
+    if device_hint == "cpu" {
+        256
+    } else {
+        512
+    }
+}
+
 async fn run_airllm_bridge(
     cfg: &ChatRuntimeConfig,
     model_path: &Path,
     request: &ChatRequest,
     prompt: &str,
     tx: &mpsc::Sender<ChatStreamEvent>,
+    safe_cpu_preferred: bool,
 ) -> Result<String, ChatStreamError> {
     let runner_path = PathBuf::from(&cfg.airllm_runner);
     if !runner_path.exists() {
@@ -697,7 +736,21 @@ async fn run_airllm_bridge(
 
     let fallback_timeout = cfg.timeout.min(Duration::from_secs(300));
     let backend = normalize_airllm_backend(&cfg.airllm_backend);
-    let first_device = bridge_device_hint(backend);
+    let (first_backend, first_device) = if safe_cpu_preferred {
+        let safe_backend = if backend == "auto" { "legacy" } else { backend };
+        let _ = send_event(
+            tx,
+            ChatStreamEvent::airllm_log(
+                "AIRLLM safe mode: modelo muito grande para GPU local, iniciando em cpu."
+                    .to_string(),
+            ),
+        )
+        .await;
+        (safe_backend, "cpu")
+    } else {
+        (backend, bridge_device_hint(backend))
+    };
+    let first_max_kv_size = recommended_airllm_max_kv_size(cfg, first_device);
     match run_airllm_bridge_once(
         cfg,
         model_path,
@@ -705,8 +758,9 @@ async fn run_airllm_bridge(
         prompt,
         tx,
         fallback_timeout,
-        backend,
+        first_backend,
         first_device,
+        first_max_kv_size,
     )
     .await
     {
@@ -731,6 +785,7 @@ async fn run_airllm_bridge(
                 fallback_timeout,
                 "legacy",
                 "cpu",
+                recommended_airllm_max_kv_size(cfg, "cpu"),
             )
             .await
         }
@@ -747,12 +802,13 @@ async fn run_airllm_bridge_once(
     fallback_timeout: Duration,
     backend: &str,
     device_hint: &str,
+    max_kv_size: u32,
 ) -> Result<String, ChatStreamError> {
     send_event(
         tx,
         ChatStreamEvent::airllm_log(format!(
-            "Bridge AIRLLM backend='{}' device='{}'",
-            backend, device_hint
+            "Bridge AIRLLM backend='{}' device='{}' max_kv_size={}",
+            backend, device_hint, max_kv_size
         )),
     )
     .await?;
@@ -767,6 +823,8 @@ async fn run_airllm_bridge_once(
         backend.to_string(),
         "--device".to_string(),
         device_hint.to_string(),
+        "--max-kv-size".to_string(),
+        max_kv_size.to_string(),
     ];
 
     if let Some(temp) = request.options.temperature {
@@ -832,8 +890,12 @@ async fn run_airllm_bridge_once(
                 break;
             }
             collected.push_str(&line);
-            let trimmed = line.trim();
-            if !trimmed.is_empty() {
+            let normalized = line.replace('\r', "\n");
+            for segment in normalized.lines() {
+                let trimmed = segment.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
                 let _ = tx_for_stderr
                     .send(ChatStreamEvent::airllm_log(trimmed.to_string()))
                     .await;

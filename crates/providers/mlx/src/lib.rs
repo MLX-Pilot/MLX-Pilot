@@ -21,6 +21,7 @@ pub struct MlxProviderConfig {
     pub timeout: Duration,
     pub airllm_enabled: bool,
     pub airllm_threshold_percent: u8,
+    pub airllm_safe_mode: bool,
     pub airllm_python_command: String,
     pub airllm_runner: String,
     pub airllm_backend: String,
@@ -36,6 +37,7 @@ impl Default for MlxProviderConfig {
             timeout: Duration::from_secs(900),
             airllm_enabled: true,
             airllm_threshold_percent: 70,
+            airllm_safe_mode: true,
             airllm_python_command: default_airllm_python_command(),
             airllm_runner: default_airllm_runner(),
             airllm_backend: "auto".to_string(),
@@ -49,6 +51,7 @@ pub struct MlxProvider {
 }
 
 const RUNTIME_META_PREFIX: &str = "[[MLX-PILOT-META";
+const AIRLLM_SAFE_CPU_RATIO: f64 = 1.0;
 
 impl MlxProvider {
     pub fn new(cfg: MlxProviderConfig) -> Self {
@@ -280,6 +283,14 @@ impl MlxProvider {
         profile.usage_ratio >= threshold
     }
 
+    fn should_force_airllm_safe_cpu(&self, profile: Option<MemoryProfile>) -> bool {
+        if !self.cfg.airllm_safe_mode {
+            return false;
+        }
+        let Some(profile) = profile else { return false };
+        profile.usage_ratio >= AIRLLM_SAFE_CPU_RATIO
+    }
+
     fn is_memory_pressure_error(stdout: &str, stderr: &str) -> bool {
         let text = format!("{stdout}\n{stderr}").to_ascii_lowercase();
         // Explicit memory pressure keywords
@@ -328,13 +339,20 @@ impl MlxProvider {
         prompt: &str,
         request: &ChatRequest,
         force_cpu: bool,
+        force_legacy: bool,
     ) -> Vec<String> {
-        let backend = self.normalized_airllm_backend();
+        let configured_backend = self.normalized_airllm_backend();
+        let backend = if force_legacy {
+            "legacy"
+        } else {
+            configured_backend
+        };
         let device_hint = if force_cpu {
             "cpu"
         } else {
             Self::bridge_device_hint(backend)
         };
+        let max_kv_size = self.recommended_airllm_max_kv_size(force_cpu);
         let mut args = vec![
             self.cfg.airllm_runner.clone(),
             "--model".to_string(),
@@ -345,6 +363,8 @@ impl MlxProvider {
             backend.to_string(),
             "--device".to_string(),
             device_hint.to_string(),
+            "--max-kv-size".to_string(),
+            max_kv_size.to_string(),
         ];
 
         if let Some(temp) = request.options.temperature {
@@ -381,6 +401,17 @@ impl MlxProvider {
         } else {
             // Original AirLLM backend should pick the best available accelerator.
             "auto"
+        }
+    }
+
+    fn recommended_airllm_max_kv_size(&self, force_cpu: bool) -> usize {
+        if !self.cfg.airllm_safe_mode {
+            return 1024;
+        }
+        if force_cpu {
+            256
+        } else {
+            512
         }
     }
 
@@ -688,6 +719,7 @@ impl ModelProvider for MlxProvider {
         let memory_profile = Self::memory_profile(model_scan.safetensors_bytes);
         let should_try_airllm =
             self.should_try_airllm(memory_profile, request.options.airllm_enabled);
+        let safe_cpu_preferred = self.should_force_airllm_safe_cpu(memory_profile);
         let force_airllm = request.options.airllm_enabled == Some(true);
         if let Some(profile) = memory_profile {
             debug!(
@@ -695,6 +727,12 @@ impl ModelProvider for MlxProvider {
                 Self::format_size(profile.model_bytes),
                 Self::format_size(profile.system_memory_bytes),
                 profile.usage_ratio * 100.0
+            );
+        }
+        if safe_cpu_preferred {
+            debug!(
+                "airllm safe mode: forcing cpu-first for model {}",
+                model_path.display()
             );
         }
 
@@ -741,14 +779,23 @@ impl ModelProvider for MlxProvider {
                 });
             }
 
-            let airllm_args = self.build_airllm_args(&model_path, &prompt, &request, false);
+            let prefer_legacy_safe =
+                safe_cpu_preferred && self.normalized_airllm_backend() == "auto";
+            let airllm_args = self.build_airllm_args(
+                &model_path,
+                &prompt,
+                &request,
+                safe_cpu_preferred,
+                prefer_legacy_safe,
+            );
             let mut airllm = self
                 .run_command_capture(&self.cfg.airllm_python_command, &airllm_args)
                 .await?;
             if !airllm.status.success()
                 && Self::is_memory_pressure_error(&airllm.stdout, &airllm.stderr)
+                && !safe_cpu_preferred
             {
-                let retry_args = self.build_airllm_args(&model_path, &prompt, &request, true);
+                let retry_args = self.build_airllm_args(&model_path, &prompt, &request, true, true);
                 airllm = self
                     .run_command_capture(&self.cfg.airllm_python_command, &retry_args)
                     .await?;
@@ -788,7 +835,13 @@ impl ModelProvider for MlxProvider {
                     });
                 }
 
-                let airllm_args = self.build_airllm_args(&model_path, &prompt, &request, true);
+                let airllm_args = self.build_airllm_args(
+                    &model_path,
+                    &prompt,
+                    &request,
+                    true,
+                    self.cfg.airllm_safe_mode,
+                );
                 let airllm = self
                     .run_command_capture(&self.cfg.airllm_python_command, &airllm_args)
                     .await?;
