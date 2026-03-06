@@ -3,6 +3,7 @@
 
 use serde::Deserializer;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 // ── Capabilities ───────────────────────────────────────────────────
@@ -164,6 +165,7 @@ pub enum InstallKind {
     Go,
     Uv,
     Download,
+    Manual,
 }
 
 // ── Skill package ──────────────────────────────────────────────────
@@ -181,6 +183,8 @@ pub struct SkillPackage {
     pub always: bool,
     #[serde(default)]
     pub os: Vec<String>,
+    #[serde(default)]
+    pub primary_env: Option<String>,
     pub source: SkillSource,
     pub file_path: PathBuf,
     pub base_dir: PathBuf,
@@ -215,6 +219,67 @@ pub enum TrustLevel {
     Local,
     #[default]
     Unknown,
+}
+
+/// Ambient data used to evaluate skill requirements without mutating process state.
+#[derive(Debug, Clone, Default)]
+pub struct RequirementContext {
+    pub env_keys: BTreeSet<String>,
+    pub config_keys: BTreeSet<String>,
+}
+
+impl RequirementContext {
+    pub fn from_current_env() -> Self {
+        let env_keys = std::env::vars()
+            .map(|(key, _)| normalize_env_key(&key))
+            .collect();
+        Self {
+            env_keys,
+            config_keys: BTreeSet::new(),
+        }
+    }
+
+    pub fn with_config_keys<I, S>(mut self, keys: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.config_keys.extend(
+            keys.into_iter()
+                .map(|key| normalize_config_key(key.as_ref()))
+                .filter(|key| !key.is_empty()),
+        );
+        self
+    }
+
+    pub fn with_env_keys<I, S>(mut self, keys: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.env_keys.extend(
+            keys.into_iter()
+                .map(|key| normalize_env_key(key.as_ref()))
+                .filter(|key| !key.is_empty()),
+        );
+        self
+    }
+
+    pub fn has_env(&self, key: &str) -> bool {
+        self.env_keys.contains(&normalize_env_key(key))
+    }
+
+    pub fn has_config(&self, key: &str) -> bool {
+        self.config_keys.contains(&normalize_config_key(key))
+    }
+}
+
+pub fn normalize_env_key(key: &str) -> String {
+    key.trim().to_ascii_uppercase()
+}
+
+pub fn normalize_config_key(key: &str) -> String {
+    key.trim().to_ascii_lowercase()
 }
 
 // ── Tests ──────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@
 //! Maintains the loaded skills in memory and provides compact summaries,
 //! resolution by name, and helper functions.
 
-use mlx_agent_skills::{SkillLimits, SkillLoader, SkillPackage};
+use mlx_agent_skills::{RequirementContext, SkillLimits, SkillLoader, SkillPackage};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -28,8 +28,20 @@ impl SkillRuntime {
 
     /// Load all skills from the workspace root.
     pub async fn load_from_workspace(&mut self, workspace_root: &std::path::Path) {
+        self.load_from_workspace_with_context(
+            workspace_root,
+            &RequirementContext::from_current_env(),
+        )
+        .await;
+    }
+
+    pub async fn load_from_workspace_with_context(
+        &mut self,
+        workspace_root: &std::path::Path,
+        context: &RequirementContext,
+    ) {
         let loader = SkillLoader::from_workspace(workspace_root, SkillLimits::default());
-        match loader.load_all().await {
+        match loader.load_all_with_context(context).await {
             Ok(packages) => {
                 info!(count = packages.len(), "Loaded skills from workspace");
 
