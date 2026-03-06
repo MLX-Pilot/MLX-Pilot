@@ -8,6 +8,34 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AgentToolScopeOverride {
+    #[serde(default)]
+    pub allow: Vec<String>,
+    #[serde(default)]
+    pub deny: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentToolPolicyConfig {
+    #[serde(default = "default_tool_profile")]
+    pub profile: String,
+    #[serde(default)]
+    pub agent_overrides: BTreeMap<String, AgentToolScopeOverride>,
+    #[serde(default)]
+    pub session_overrides: BTreeMap<String, AgentToolScopeOverride>,
+}
+
+impl Default for AgentToolPolicyConfig {
+    fn default() -> Self {
+        Self {
+            profile: default_tool_profile(),
+            agent_overrides: BTreeMap::new(),
+            session_overrides: BTreeMap::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentSecurityConfig {
     #[serde(default = "default_security_mode")]
@@ -146,6 +174,8 @@ pub struct AgentUiConfig {
     #[serde(default)]
     pub enabled_tools: Vec<String>,
     #[serde(default)]
+    pub tool_policy: AgentToolPolicyConfig,
+    #[serde(default)]
     pub workspace_root: Option<String>,
     #[serde(default)]
     pub security: AgentSecurityConfig,
@@ -153,6 +183,29 @@ pub struct AgentUiConfig {
 
 impl Default for AgentUiConfig {
     fn default() -> Self {
+        let default_tools = vec![
+            "read_file".to_string(),
+            "write_file".to_string(),
+            "edit_file".to_string(),
+            "list_dir".to_string(),
+            "exec".to_string(),
+            "sessions_list".to_string(),
+            "sessions_history".to_string(),
+            "sessions_spawn".to_string(),
+            "sessions_send".to_string(),
+            "sessions_status".to_string(),
+            "memory_search".to_string(),
+            "memory_get".to_string(),
+        ];
+        let mut tool_policy = AgentToolPolicyConfig::default();
+        tool_policy.agent_overrides.insert(
+            "default".to_string(),
+            AgentToolScopeOverride {
+                allow: default_tools.clone(),
+                deny: Vec::new(),
+            },
+        );
+
         Self {
             provider: default_agent_provider(),
             model_id: default_agent_model(),
@@ -175,13 +228,8 @@ impl Default for AgentUiConfig {
             enabled_skills: Vec::new(),
             node_package_manager: default_agent_node_manager(),
             skill_overrides: BTreeMap::new(),
-            enabled_tools: vec![
-                "read_file".to_string(),
-                "write_file".to_string(),
-                "edit_file".to_string(),
-                "list_dir".to_string(),
-                "exec".to_string(),
-            ],
+            enabled_tools: default_tools,
+            tool_policy,
             workspace_root: None,
             security: AgentSecurityConfig::default(),
         }
@@ -1285,4 +1333,8 @@ fn default_agent_approval_mode() -> String {
 
 fn default_agent_node_manager() -> String {
     "npm".to_string()
+}
+
+fn default_tool_profile() -> String {
+    "coding".to_string()
 }
