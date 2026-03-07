@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "test:e2e:channels-smoke": "node --test e2e/channels-smoke.test.js",
-    "test:e2e:skills-smoke": "node --test e2e/skills-smoke.test.js"
+    "test:e2e:skills-smoke": "node --test e2e/skills-smoke.test.js",
+    "test:e2e:agent-control-plane": "node --test e2e/agent-control-plane.test.js"
   },
   "devDependencies": {
     "jsdom": "^26.1.0"
