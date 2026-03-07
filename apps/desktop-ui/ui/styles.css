@@ -395,6 +395,35 @@ img {
   gap: 10px;
 }
 
+.agent-grid-wide {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.agent-section-stack {
+  display: grid;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.agent-control-section {
+  border-radius: var(--radius-xl);
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.agent-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.agent-section-head h3 {
+  margin: 4px 0 0;
+  font-size: 1rem;
+}
+
 .agent-card {
   border-radius: var(--radius-lg);
   padding: 14px;
@@ -406,6 +435,24 @@ img {
 .agent-card h3 {
   margin: 0;
   font-size: 0.95rem;
+}
+
+.agent-card-title {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.agent-inline-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.agent-quad-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .agent-toggle-row {
@@ -491,6 +538,64 @@ img {
   min-width: 86px;
 }
 
+.agent-plugin-list {
+  display: grid;
+  gap: 10px;
+  max-height: 520px;
+  overflow: auto;
+}
+
+.agent-plugin-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  display: grid;
+  gap: 8px;
+}
+
+.agent-plugin-card.active {
+  border-color: rgba(86, 162, 255, 0.58);
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.24);
+  background: rgba(29, 56, 94, 0.24);
+}
+
+.agent-plugin-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.agent-plugin-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.agent-plugin-config-form {
+  display: grid;
+  gap: 10px;
+}
+
+.agent-policy-item {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  display: grid;
+  gap: 8px;
+}
+
+.agent-policy-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.agent-effective-policy-list {
+  max-height: 420px;
+}
+
 .agent-audit-list {
   list-style: none;
   margin: 0;
@@ -548,8 +653,35 @@ img {
   background: rgba(31, 38, 51, 0.45);
 }
 
+.agent-runtime-pre {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(6, 10, 18, 0.54);
+  padding: 10px;
+  min-height: 160px;
+  white-space: pre-wrap;
+  overflow: auto;
+  color: #d7e4f4;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.76rem;
+}
+
 @media (max-width: 1200px) {
   .agent-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-grid-wide {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-section-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .agent-quad-grid {
     grid-template-columns: 1fr;
   }
 }
