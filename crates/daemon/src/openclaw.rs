@@ -131,11 +131,9 @@ impl OpenClawRuntime {
     }
 
     pub async fn install(&self) -> Result<String, OpenClawError> {
-        let parent_dir = self
-            .cfg
-            .cli_path
-            .parent()
-            .ok_or_else(|| OpenClawError::BadRequest("caminho openclaw_cli_path invalido".to_string()))?;
+        let parent_dir = self.cfg.cli_path.parent().ok_or_else(|| {
+            OpenClawError::BadRequest("caminho openclaw_cli_path invalido".to_string())
+        })?;
 
         if !parent_dir.exists() {
             tokio::fs::create_dir_all(parent_dir)
@@ -858,13 +856,13 @@ impl OpenClawRuntime {
         Ok(aliases)
     }
 
-fn npm_command_name() -> &'static str {
-    if cfg!(windows) {
-        "npm.cmd"
-    } else {
-        "npm"
+    fn npm_command_name() -> &'static str {
+        if cfg!(windows) {
+            "npm.cmd"
+        } else {
+            "npm"
+        }
     }
-}
     async fn list_configured_cloud_models(
         &self,
         alias_map: &BTreeMap<String, String>,
@@ -1143,11 +1141,15 @@ fn npm_command_name() -> &'static str {
             .unwrap_or(self.cfg.timeout.as_millis() as u64)
             .clamp(1000, 900000);
         let timeout_limit = Duration::from_millis(timeout_ms + 2000);
+        let timeout_secs = timeout_ms / 1000;
+        let agent_timeout_secs = timeout_secs.saturating_sub(5).max(1);
 
         let params = json!({
             "message": message,
             "idempotencyKey": idempotency_key,
             "sessionKey": session_key,
+            "channel": "webchat",
+            "timeout": agent_timeout_secs,
         });
         let params_json = serde_json::to_string(&params).map_err(|error| OpenClawError::Parse {
             details: format!("falha serializando params: {error}"),

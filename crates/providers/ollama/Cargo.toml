@@ -11,3 +11,4 @@ serde_json.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio.workspace = true
 mlx-ollama-core = { path = "../../core" }
+uuid = { version = "1", features = ["v4"] }

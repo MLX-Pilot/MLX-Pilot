@@ -57,6 +57,76 @@ O repositorio e um workspace Rust com multiplas crates (core, providers e daemon
 
 ---
 
+## Agent
+
+### Recursos
+
+- Agent loop completo em Rust com iteracao multi-turn e tool-calling.
+- Loader de skills compativel com `SKILL.md` (sem injetar corpo integral no prompt).
+- Prompt engineering adaptativo para modelos locais/remotos.
+- Compatibility Matrix automatizada para modo `OpenClaw-compatible`.
+- API dedicada do agente:
+- `POST /agent/run`
+- `POST /agent/stream` (stub para streaming de eventos)
+- `GET /agent/providers`
+- `GET/POST /agent/config`
+- `GET /agent/skills`
+- `POST /agent/skills/reload`
+- `GET /agent/tools`
+- `GET /agent/compat/report`
+- `GET /agent/audit`
+- `POST /agent/approve`
+
+### Multi-provider
+
+- Providers locais: `mlx`, `llamacpp`, `ollama`.
+- Providers remotos: `openai`, `anthropic`, `groq`, `openrouter`, `deepseek`.
+- Endpoint customizavel (`custom`) com `base_url` e headers.
+- Fallback opcional entre provider primario e secundario por configuracao.
+
+### Seguranca
+
+- `PolicyEngine` com allow/deny por glob, bloqueio de paths sensiveis e controle de egress.
+- `ApprovalService` com modos `auto`, `ask` e `deny`.
+- `AuditLog` estruturado em JSONL para trilha de execucao.
+- Modo enterprise/paranoid com:
+- capabilities declarativas por skill (`fs_read`, `fs_write`, `network`, `exec`, `secrets_access`)
+- integridade de skill (SHA256 + pin opcional)
+- cofre local criptografado para API keys
+- airgapped mode e owner-only mode
+
+### UI
+
+- Aba **Agent** no desktop com configuracao de provider, modelo, execucao e seguranca.
+- Controle de skills/tools ativos direto na UI.
+- Control Plane completo para channels, plugins, skills, tools/policies, context/memory e runtime/health.
+- Chat do agente integrado ao fluxo principal do MLX-Pilot.
+
+### OpenClaw-Compatible Mode
+
+- Estado atual validado por `GET /agent/compat/report`.
+- Relatorios gerados automaticamente em:
+- `docs/openclaw-compat-report.json`
+- `docs/openclaw-compat-report.md`
+- Guia operacional: `docs/openclaw-compatible-mode.md`
+- Smoke validation local:
+
+```bash
+node scripts/openclaw-compat-smoke.mjs
+```
+
+- UI smoke validations:
+
+```bash
+cd apps/desktop-ui
+npm run test:e2e:channels-smoke
+npm run test:e2e:skills-smoke
+npm run test:e2e:agent-control-plane
+npm run test:e2e:openclaw-compat
+```
+
+---
+
 ## Estrutura do repositorio
 
 ```text
@@ -64,10 +134,15 @@ mlx-ollama-pilot/
 |-- Cargo.toml
 |-- crates/
 |   |-- core/
+|   |-- agent-core/
+|   |-- agent-tools/
+|   |-- agent-skills/
 |   |-- providers/
 |   |   |-- mlx/
 |   |   |-- llamacpp/
-|   |   '-- ollama/
+|   |   |-- ollama/
+|   |   '-- http_llm_provider/
+|   |-- bench_agent/
 |   '-- daemon/
 |-- apps/
 |   '-- desktop-ui/
@@ -79,9 +154,14 @@ mlx-ollama-pilot/
 | Pasta | Papel |
 |---|---|
 | `crates/core` | Contratos de dominio (tipos, erros, trait `ModelProvider`). |
+| `crates/agent-core` | Agent loop, prompt builder, policy/approval/audit e runtime de skills. |
+| `crates/agent-tools` | Ferramentas (read/write/edit/list/exec) e sandbox de IO. |
+| `crates/agent-skills` | Parser/loader de skills e metadados de compatibilidade. |
 | `crates/providers/mlx` | Provider MLX. |
 | `crates/providers/llamacpp` | Provider llama.cpp embutido. |
 | `crates/providers/ollama` | Provider Ollama. |
+| `crates/providers/http_llm_provider` | Provider HTTP generico (OpenAI-compatible/Anthropic). |
+| `crates/bench_agent` | Benchmark comparativo automatizado entre OpenClaw/NanoBot/Rust Agent. |
 | `crates/daemon` | Servidor HTTP principal. |
 | `apps/desktop-ui` | App desktop Tauri e frontend. |
 | `scripts` | Scripts de conveniencia (`run-desktop.sh`, `stop-daemon.sh`) para macOS/Linux. |
@@ -241,6 +321,11 @@ Fluxo de produto recomendado:
 | `APP_MLX_PREFIX_ARGS` | `-m mlx_lm.generate` | Args antes do modelo/prompt |
 | `APP_MLX_SUFFIX_ARGS` | vazio | Args apos o prompt |
 | `APP_MLX_TIMEOUT_SECS` | `900` | Timeout da inferencia |
+| `APP_MLX_AIRLLM_ENABLED` | `true` | Ativa fallback de memoria para modelos grandes (orquestrado no Rust) |
+| `APP_MLX_AIRLLM_THRESHOLD_PERCENT` | `70` | Percentual RAM fisica para ativar o fallback |
+| `APP_MLX_AIRLLM_PYTHON_COMMAND` | `~/mlx-env/bin/python` (`python` no Windows) | Python usado pelo bridge do fallback |
+| `APP_MLX_AIRLLM_RUNNER` | `scripts/mlx_airllm_bridge.py` | Script bridge executado no fallback |
+| `APP_MLX_AIRLLM_BACKEND` | `auto` | Backend do bridge: `auto`, `original` (AirLLM) ou `legacy` (mlx_lm) |
 | `APP_LLAMACPP_SERVER_BINARY` | `llama-server` | Binario do llama.cpp |
 | `APP_LLAMACPP_BASE_URL` | `http://127.0.0.1:11439` | URL do servidor llama.cpp |
 | `APP_LLAMACPP_AUTO_START` | `true` | Sobe `llama-server` automaticamente |

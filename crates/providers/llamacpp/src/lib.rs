@@ -33,7 +33,7 @@ pub struct LlamaCppProviderConfig {
 impl Default for LlamaCppProviderConfig {
     fn default() -> Self {
         Self {
-            models_dir: PathBuf::from("/Users/kaike/models"),
+            models_dir: default_models_dir(),
             server_binary: default_llama_server_binary(),
             base_url: "http://127.0.0.1:11439".to_string(),
             timeout: Duration::from_secs(900),
@@ -47,21 +47,11 @@ impl Default for LlamaCppProviderConfig {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct ServerState {
     child: Option<Child>,
     model_path: Option<PathBuf>,
     model_name: Option<String>,
-}
-
-impl Default for ServerState {
-    fn default() -> Self {
-        Self {
-            child: None,
-            model_path: None,
-            model_name: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -153,30 +143,26 @@ impl LlamaCppProvider {
     }
 
     async fn install_llamacpp(&self) -> Result<(), ProviderError> {
-        if cfg!(target_os = "macos") {
-            if command_available("brew").await {
-                run_command("brew", &["install", "llama.cpp"], Duration::from_secs(1800)).await?;
-                return Ok(());
-            }
+        if cfg!(target_os = "macos") && command_available("brew").await {
+            run_command("brew", &["install", "llama.cpp"], Duration::from_secs(1800)).await?;
+            return Ok(());
         }
 
-        if cfg!(target_os = "windows") {
-            if command_available("winget").await {
-                let _ = run_command(
-                    "winget",
-                    &[
-                        "install",
-                        "--id",
-                        "ggml.llama.cpp",
-                        "-e",
-                        "--accept-package-agreements",
-                        "--accept-source-agreements",
-                        "--silent",
-                    ],
-                    Duration::from_secs(1800),
-                )
-                .await;
-            }
+        if cfg!(target_os = "windows") && command_available("winget").await {
+            let _ = run_command(
+                "winget",
+                &[
+                    "install",
+                    "--id",
+                    "ggml.llama.cpp",
+                    "-e",
+                    "--accept-package-agreements",
+                    "--accept-source-agreements",
+                    "--silent",
+                ],
+                Duration::from_secs(1800),
+            )
+            .await;
         }
 
         Err(ProviderError::Unavailable {
@@ -394,6 +380,17 @@ impl ModelProvider for LlamaCppProvider {
     }
 
     async fn list_models(&self) -> Result<Vec<ModelDescriptor>, ProviderError> {
+        if !self.cfg.models_dir.exists() {
+            std::fs::create_dir_all(&self.cfg.models_dir).map_err(|source| ProviderError::Io {
+                context: format!(
+                    "creating models directory {}",
+                    self.cfg.models_dir.display()
+                ),
+                source,
+            })?;
+            return Ok(Vec::new());
+        }
+
         let files =
             discover_gguf_models(&self.cfg.models_dir).map_err(|source| ProviderError::Io {
                 context: format!("reading models directory {}", self.cfg.models_dir.display()),
@@ -451,6 +448,7 @@ impl ModelProvider for LlamaCppProvider {
                     MessageRole::System => "system",
                     MessageRole::User => "user",
                     MessageRole::Assistant => "assistant",
+                    MessageRole::Tool => "tool",
                 },
                 "content": entry.content,
             })).collect::<Vec<_>>(),
@@ -505,10 +503,7 @@ impl ModelProvider for LlamaCppProvider {
         Ok(ChatResponse {
             model_id: model_path.display().to_string(),
             provider: self.provider_id().to_string(),
-            message: ChatMessage {
-                role: MessageRole::Assistant,
-                content: answer,
-            },
+            message: ChatMessage::text(MessageRole::Assistant, answer),
             usage: TokenUsage {
                 prompt_tokens,
                 completion_tokens,
@@ -604,12 +599,38 @@ fn extract_host_port(base_url: &str) -> Result<(String, u16), ProviderError> {
 }
 
 fn default_llama_server_binary() -> String {
-    let bundled = PathBuf::from("/Users/kaike/mlx-ollama-pilot/bin/llama-server");
-    if bundled.exists() {
-        bundled.display().to_string()
-    } else {
-        "llama-server".to_string()
+    let mut candidates = Vec::new();
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join("llama-server"));
+            candidates.push(exe_dir.join("llama-server.exe"));
+            candidates.push(exe_dir.join("bin").join("llama-server"));
+            candidates.push(exe_dir.join("bin").join("llama-server.exe"));
+            candidates.push(exe_dir.join("../Resources").join("llama-server"));
+            candidates.push(exe_dir.join("../Resources").join("llama-server.exe"));
+        }
     }
+
+    candidates.push(PathBuf::from("bin").join("llama-server"));
+    candidates.push(PathBuf::from("bin").join("llama-server.exe"));
+
+    for candidate in candidates {
+        if candidate.exists() {
+            return candidate.display().to_string();
+        }
+    }
+
+    "llama-server".to_string()
+}
+
+fn default_models_dir() -> PathBuf {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()
+        .map(PathBuf::from)
+        .map(|home| home.join("mlx-pilot-models"))
+        .unwrap_or_else(|| PathBuf::from(".").join("models"))
 }
 
 async fn command_available(command: &str) -> bool {
