@@ -1,0 +1,4270 @@
+{
+  "generated_at": "2026-03-07T01:29:23.366Z",
+  "repo": "/Users/kaike/mlx-ollama-pilot",
+  "decision": {
+    "status": "GO",
+    "criteria": {
+      "no_release_blocking_security_findings": true,
+      "no_state_loss_in_migration_or_restart": true,
+      "no_crash_under_short_load": true,
+      "pending_channels_tested_with_explicit_result": true,
+      "dry_run_completed_or_checklist_validated": true
+    },
+    "blockers": []
+  },
+  "blocks": [
+    {
+      "id": "channels_real_validation",
+      "title": "Bloco 1 - Canais bridge/webhook",
+      "status": "pass",
+      "blockers": []
+    },
+    {
+      "id": "load_smoke",
+      "title": "Bloco 2 - Carga curta e concorrencia",
+      "status": "pass",
+      "blockers": []
+    },
+    {
+      "id": "migration_upgrade_rollback",
+      "title": "Bloco 3 - Upgrade e rollback de migracao",
+      "status": "pass",
+      "blockers": []
+    },
+    {
+      "id": "security_audit_smoke",
+      "title": "Bloco 4 - Auditoria pratica de seguranca",
+      "status": "pass",
+      "blockers": []
+    },
+    {
+      "id": "crash_recovery_smoke",
+      "title": "Bloco 5 - Recuperacao de falha",
+      "status": "pass",
+      "blockers": []
+    },
+    {
+      "id": "release_dry_run",
+      "title": "Bloco 6 - Release dry-run",
+      "status": "pass",
+      "blockers": []
+    }
+  ],
+  "results": {
+    "channels_real_validation": {
+      "block": "channels_real_validation",
+      "title": "Bloco 1 - Canais bridge/webhook",
+      "status": "pass",
+      "summary": {
+        "pending_channels_detected": 14,
+        "tested_channels": 14,
+        "passed": 14,
+        "failed": 0
+      },
+      "blockers": [],
+      "commands": [
+        "node scripts/release-gate/channels-real-validation.mjs"
+      ],
+      "results": [
+        {
+          "channel": "bluebubbles",
+          "family": "bridge_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "bluebubbles",
+            "protocol_family": "bridge_http_v1",
+            "activation_mode": "local_bridge_mock",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "id": "bluebubbles",
+                  "name": "BlueBubbles",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "protocol_schema": {
+                    "error_codes": [
+                      "invalid_request",
+                      "auth_error",
+                      "permission_error",
+                      "rate_limited",
+                      "network_error",
+                      "invalid_target",
+                      "provider_error",
+                      "protocol_version_mismatch"
+                    ],
+                    "family": "bridge_http_v1",
+                    "operations": {
+                      "login": {
+                        "request": {
+                          "properties": {
+                            "account_id": {
+                              "type": "string"
+                            },
+                            "channel": {
+                              "type": "string"
+                            },
+                            "metadata": {
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "channel",
+                            "account_id"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "message": {
+                              "type": "string"
+                            },
+                            "protocol_version": {
+                              "const": "v1"
+                            },
+                            "status": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "status",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "logout": {
+                        "response_ref": "login.response"
+                      },
+                      "probe": {
+                        "response_ref": "login.response"
+                      },
+                      "resolve": {
+                        "request": {
+                          "required": [
+                            "channel",
+                            "account_id",
+                            "target"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "protocol_version": {
+                              "const": "v1"
+                            },
+                            "resolved_target": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "resolved_target"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "send": {
+                        "request": {
+                          "required": [
+                            "channel",
+                            "account_id",
+                            "target",
+                            "message"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "message_id": {
+                              "type": "string"
+                            },
+                            "protocol_version": {
+                              "const": "v1"
+                            }
+                          },
+                          "required": [
+                            "message_id"
+                          ],
+                          "type": "object"
+                        }
+                      }
+                    },
+                    "protocol_version": "v1",
+                    "request_headers": {
+                      "x-channel-protocol-version": "v1"
+                    }
+                  },
+                  "aliases": [
+                    "blue-bubbles"
+                  ],
+                  "capabilities": [
+                    "send-messages",
+                    "receive-messages",
+                    "health",
+                    "docs"
+                  ],
+                  "supports_lazy_load": true,
+                  "docs": {
+                    "summary": "BlueBubbles compatibility channel for OpenClaw-style routing.",
+                    "help": "Registers BlueBubbles with alias resolution, local-first config, and lazy runtime activation.",
+                    "docs_url": null,
+                    "aliases": []
+                  },
+                  "config_schema": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "endpoint": {
+                        "type": "string"
+                      },
+                      "room": {
+                        "type": "string"
+                      },
+                      "token": {
+                        "type": "string"
+                      }
+                    },
+                    "title": "BlueBubbles Config",
+                    "type": "object"
+                  },
+                  "default_account_id": "release-gate",
+                  "ambiguity_warning": null,
+                  "accounts": [
+                    {
+                      "account_id": "release-gate",
+                      "enabled": true,
+                      "configured": true,
+                      "is_default": true,
+                      "credentials_ref": "channels.bluebubbles.release-gate.credentials",
+                      "metadata": {
+                        "owner": "release-gate"
+                      },
+                      "routing_defaults": {
+                        "target": "target-bluebubbles"
+                      },
+                      "health_state": {
+                        "status": "not_configured",
+                        "last_error": null,
+                        "failure_count": 0,
+                        "circuit_open_until_epoch_ms": null,
+                        "last_checked_epoch_ms": null,
+                        "last_connected_epoch_ms": null
+                      },
+                      "limits": {
+                        "rate_limit_per_minute": 60,
+                        "timeout_ms": 5000,
+                        "max_retries": 2,
+                        "backoff_base_ms": 250,
+                        "circuit_breaker_threshold": 3,
+                        "circuit_breaker_open_ms": 30000
+                      },
+                      "adapter_config": {},
+                      "session": {
+                        "status": "not_logged_in",
+                        "session_dir": null,
+                        "qr_code": null,
+                        "connected_at_epoch_ms": null,
+                        "disconnected_at_epoch_ms": null
+                      },
+                      "capabilities": [
+                        "resolve",
+                        "send",
+                        "probe",
+                        "media"
+                      ]
+                    }
+                  ]
+                },
+                "canonical_error": null
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "bluebubbles",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "status": "connected",
+                  "message": "bridge login ok",
+                  "details": {
+                    "message": "bridge login ok",
+                    "protocol_version": "v1",
+                    "status": "connected"
+                  }
+                },
+                "canonical_error": null
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "payload": [
+                  {
+                    "channel": "bluebubbles",
+                    "account_id": "release-gate",
+                    "protocol_family": "bridge_http_v1",
+                    "protocol_version": "v1",
+                    "status": "healthy",
+                    "message": "bridge probe ok",
+                    "details": null
+                  }
+                ],
+                "canonical_error": null
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "bluebubbles",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "requested_target": "target-bluebubbles",
+                  "resolved_target": "canonical:target-bluebubbles",
+                  "status": "resolved"
+                },
+                "canonical_error": null
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "bluebubbles",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "target": "target-bluebubbles",
+                  "message_id": "bridge-2079370285",
+                  "status": "sent"
+                },
+                "canonical_error": null
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "bluebubbles",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "status": "logged_out",
+                  "message": "bridge logout ok",
+                  "details": {
+                    "message": "bridge logout ok",
+                    "protocol_version": "v1",
+                    "status": "logged_out"
+                  }
+                },
+                "canonical_error": null
+              }
+            },
+            "recommendation": "Provisionar bridge/webhook do provedor alvo e repetir o script com endpoints reais no ambiente final."
+          }
+        },
+        {
+          "channel": "feishu",
+          "family": "webhook_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "feishu",
+            "protocol_family": "webhook_http_v1",
+            "activation_mode": "local_webhook_mock",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "id": "feishu",
+                  "name": "Feishu",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "protocol_schema": {
+                    "credentials": {
+                      "required": [
+                        "webhook_url"
+                      ],
+                      "type": "object"
+                    },
+                    "error_codes": [
+                      "invalid_request",
+                      "auth_error",
+                      "permission_error",
+                      "rate_limited",
+                      "network_error",
+                      "invalid_target",
+                      "provider_error",
+                      "protocol_version_mismatch"
+                    ],
+                    "family": "webhook_http_v1",
+                    "operations": [
+                      "login",
+                      "logout",
+                      "probe",
+                      "resolve",
+                      "send",
+                      "status"
+                    ],
+                    "protocol_version": "v1"
+                  },
+                  "aliases": [
+                    "lark"
+                  ],
+                  "capabilities": [
+                    "send-messages",
+                    "receive-messages",
+                    "health",
+                    "docs"
+                  ],
+                  "supports_lazy_load": true,
+                  "docs": {
+                    "summary": "Feishu compatibility channel for OpenClaw-style routing.",
+                    "help": "Registers Feishu with alias resolution, local-first config, and lazy runtime activation.",
+                    "docs_url": null,
+                    "aliases": []
+                  },
+                  "config_schema": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "endpoint": {
+                        "type": "string"
+                      },
+                      "room": {
+                        "type": "string"
+                      },
+                      "token": {
+                        "type": "string"
+                      }
+                    },
+                    "title": "Feishu Config",
+                    "type": "object"
+                  },
+                  "default_account_id": "release-gate",
+                  "ambiguity_warning": null,
+                  "accounts": [
+                    {
+                      "account_id": "release-gate",
+                      "enabled": true,
+                      "configured": true,
+                      "is_default": true,
+                      "credentials_ref": "channels.feishu.release-gate.credentials",
+                      "metadata": {
+                        "owner": "release-gate"
+                      },
+                      "routing_defaults": {
+                        "target": "room-feishu"
+                      },
+                      "health_state": {
+                        "status": "not_configured",
+                        "last_error": null,
+                        "failure_count": 0,
+                        "circuit_open_until_epoch_ms": null,
+                        "last_checked_epoch_ms": null,
+                        "last_connected_epoch_ms": null
+                      },
+                      "limits": {
+                        "rate_limit_per_minute": 60,
+                        "timeout_ms": 5000,
+                        "max_retries": 2,
+                        "backoff_base_ms": 250,
+                        "circuit_breaker_threshold": 3,
+                        "circuit_breaker_open_ms": 30000
+                      },
+                      "adapter_config": {},
+                      "session": {
+                        "status": "not_logged_in",
+                        "session_dir": null,
+                        "qr_code": null,
+                        "connected_at_epoch_ms": null,
+                        "disconnected_at_epoch_ms": null
+                      },
+                      "capabilities": [
+                        "send-messages",
+                        "webhook",
+                        "probe"
+                      ]
+                    }
+                  ]
+                },
+                "canonical_error": null
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "feishu",
+                  "account_id": "release-gate",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "status": "connected",
+                  "message": "feishu webhook registered for account.",
+                  "details": {
+                    "webhook_url": "http://127.0.0.1:56369/webhook"
+                  }
+                },
+                "canonical_error": null
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "payload": [
+                  {
+                    "channel": "feishu",
+                    "account_id": "release-gate",
+                    "protocol_family": "webhook_http_v1",
+                    "protocol_version": "v1",
+                    "status": "healthy",
+                    "message": "feishu webhook accepted the probe request.",
+                    "details": null
+                  }
+                ],
+                "canonical_error": null
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "feishu",
+                  "account_id": "release-gate",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "requested_target": "room-feishu",
+                  "resolved_target": "room-feishu",
+                  "status": "resolved"
+                },
+                "canonical_error": null
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "feishu",
+                  "account_id": "release-gate",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "target": "room-feishu",
+                  "message_id": "feishu-fdde99d04ebf1ee4",
+                  "status": "sent"
+                },
+                "canonical_error": null
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "feishu",
+                  "account_id": "release-gate",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "status": "logged_out",
+                  "message": "feishu webhook account disconnected.",
+                  "details": null
+                },
+                "canonical_error": null
+              }
+            },
+            "recommendation": "Provisionar bridge/webhook do provedor alvo e repetir o script com endpoints reais no ambiente final."
+          }
+        },
+        {
+          "channel": "googlechat",
+          "family": "webhook_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "googlechat",
+            "protocol_family": "webhook_http_v1",
+            "activation_mode": "local_webhook_mock",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "id": "googlechat",
+                  "name": "Google Chat",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "protocol_schema": {
+                    "credentials": {
+                      "required": [
+                        "webhook_url"
+                      ],
+                      "type": "object"
+                    },
+                    "error_codes": [
+                      "invalid_request",
+                      "auth_error",
+                      "permission_error",
+                      "rate_limited",
+                      "network_error",
+                      "invalid_target",
+                      "provider_error",
+                      "protocol_version_mismatch"
+                    ],
+                    "family": "webhook_http_v1",
+                    "operations": [
+                      "login",
+                      "logout",
+                      "probe",
+                      "resolve",
+                      "send",
+                      "status"
+                    ],
+                    "protocol_version": "v1"
+                  },
+                  "aliases": [
+                    "google-chat",
+                    "gchat"
+                  ],
+                  "capabilities": [
+                    "send-messages",
+                    "receive-messages",
+                    "health",
+                    "docs"
+                  ],
+                  "supports_lazy_load": true,
+                  "docs": {
+                    "summary": "Google Chat compatibility channel for OpenClaw-style routing.",
+                    "help": "Registers Google Chat with alias resolution, local-first config, and lazy runtime activation.",
+                    "docs_url": null,
+                    "aliases": []
+                  },
+                  "config_schema": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "endpoint": {
+                        "type": "string"
+                      },
+                      "room": {
+                        "type": "string"
+                      },
+                      "token": {
+                        "type": "string"
+                      }
+                    },
+                    "title": "Google Chat Config",
+                    "type": "object"
+                  },
+                  "default_account_id": "release-gate",
+                  "ambiguity_warning": null,
+                  "accounts": [
+                    {
+                      "account_id": "release-gate",
+                      "enabled": true,
+                      "configured": true,
+                      "is_default": true,
+                      "credentials_ref": "channels.googlechat.release-gate.credentials",
+                      "metadata": {
+                        "owner": "release-gate"
+                      },
+                      "routing_defaults": {
+                        "target": "room-googlechat"
+                      },
+                      "health_state": {
+                        "status": "not_configured",
+                        "last_error": null,
+                        "failure_count": 0,
+                        "circuit_open_until_epoch_ms": null,
+                        "last_checked_epoch_ms": null,
+                        "last_connected_epoch_ms": null
+                      },
+                      "limits": {
+                        "rate_limit_per_minute": 60,
+                        "timeout_ms": 5000,
+                        "max_retries": 2,
+                        "backoff_base_ms": 250,
+                        "circuit_breaker_threshold": 3,
+                        "circuit_breaker_open_ms": 30000
+                      },
+                      "adapter_config": {},
+                      "session": {
+                        "status": "not_logged_in",
+                        "session_dir": null,
+                        "qr_code": null,
+                        "connected_at_epoch_ms": null,
+                        "disconnected_at_epoch_ms": null
+                      },
+                      "capabilities": [
+                        "send-messages",
+                        "webhook",
+                        "probe"
+                      ]
+                    }
+                  ]
+                },
+                "canonical_error": null
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "googlechat",
+                  "account_id": "release-gate",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "status": "connected",
+                  "message": "googlechat webhook registered for account.",
+                  "details": {
+                    "webhook_url": "http://127.0.0.1:56369/webhook"
+                  }
+                },
+                "canonical_error": null
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "payload": [
+                  {
+                    "channel": "googlechat",
+                    "account_id": "release-gate",
+                    "protocol_family": "webhook_http_v1",
+                    "protocol_version": "v1",
+                    "status": "healthy",
+                    "message": "googlechat webhook accepted the probe request.",
+                    "details": null
+                  }
+                ],
+                "canonical_error": null
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "googlechat",
+                  "account_id": "release-gate",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "requested_target": "room-googlechat",
+                  "resolved_target": "room-googlechat",
+                  "status": "resolved"
+                },
+                "canonical_error": null
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "googlechat",
+                  "account_id": "release-gate",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "target": "room-googlechat",
+                  "message_id": "googlechat-cb82b62df71ea353",
+                  "status": "sent"
+                },
+                "canonical_error": null
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "googlechat",
+                  "account_id": "release-gate",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "status": "logged_out",
+                  "message": "googlechat webhook account disconnected.",
+                  "details": null
+                },
+                "canonical_error": null
+              }
+            },
+            "recommendation": "Provisionar bridge/webhook do provedor alvo e repetir o script com endpoints reais no ambiente final."
+          }
+        },
+        {
+          "channel": "imessage",
+          "family": "bridge_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "imessage",
+            "protocol_family": "bridge_http_v1",
+            "activation_mode": "local_bridge_mock",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "id": "imessage",
+                  "name": "iMessage",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "protocol_schema": {
+                    "error_codes": [
+                      "invalid_request",
+                      "auth_error",
+                      "permission_error",
+                      "rate_limited",
+                      "network_error",
+                      "invalid_target",
+                      "provider_error",
+                      "protocol_version_mismatch"
+                    ],
+                    "family": "bridge_http_v1",
+                    "operations": {
+                      "login": {
+                        "request": {
+                          "properties": {
+                            "account_id": {
+                              "type": "string"
+                            },
+                            "channel": {
+                              "type": "string"
+                            },
+                            "metadata": {
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "channel",
+                            "account_id"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "message": {
+                              "type": "string"
+                            },
+                            "protocol_version": {
+                              "const": "v1"
+                            },
+                            "status": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "status",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "logout": {
+                        "response_ref": "login.response"
+                      },
+                      "probe": {
+                        "response_ref": "login.response"
+                      },
+                      "resolve": {
+                        "request": {
+                          "required": [
+                            "channel",
+                            "account_id",
+                            "target"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "protocol_version": {
+                              "const": "v1"
+                            },
+                            "resolved_target": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "resolved_target"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "send": {
+                        "request": {
+                          "required": [
+                            "channel",
+                            "account_id",
+                            "target",
+                            "message"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "message_id": {
+                              "type": "string"
+                            },
+                            "protocol_version": {
+                              "const": "v1"
+                            }
+                          },
+                          "required": [
+                            "message_id"
+                          ],
+                          "type": "object"
+                        }
+                      }
+                    },
+                    "protocol_version": "v1",
+                    "request_headers": {
+                      "x-channel-protocol-version": "v1"
+                    }
+                  },
+                  "aliases": [
+                    "apple-messages"
+                  ],
+                  "capabilities": [
+                    "send-messages",
+                    "receive-messages",
+                    "health",
+                    "docs"
+                  ],
+                  "supports_lazy_load": true,
+                  "docs": {
+                    "summary": "iMessage compatibility channel for OpenClaw-style routing.",
+                    "help": "Registers iMessage with alias resolution, local-first config, and lazy runtime activation.",
+                    "docs_url": null,
+                    "aliases": []
+                  },
+                  "config_schema": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "endpoint": {
+                        "type": "string"
+                      },
+                      "room": {
+                        "type": "string"
+                      },
+                      "token": {
+                        "type": "string"
+                      }
+                    },
+                    "title": "iMessage Config",
+                    "type": "object"
+                  },
+                  "default_account_id": "release-gate",
+                  "ambiguity_warning": null,
+                  "accounts": [
+                    {
+                      "account_id": "release-gate",
+                      "enabled": true,
+                      "configured": true,
+                      "is_default": true,
+                      "credentials_ref": "channels.imessage.release-gate.credentials",
+                      "metadata": {
+                        "owner": "release-gate"
+                      },
+                      "routing_defaults": {
+                        "target": "target-imessage"
+                      },
+                      "health_state": {
+                        "status": "not_configured",
+                        "last_error": null,
+                        "failure_count": 0,
+                        "circuit_open_until_epoch_ms": null,
+                        "last_checked_epoch_ms": null,
+                        "last_connected_epoch_ms": null
+                      },
+                      "limits": {
+                        "rate_limit_per_minute": 60,
+                        "timeout_ms": 5000,
+                        "max_retries": 2,
+                        "backoff_base_ms": 250,
+                        "circuit_breaker_threshold": 3,
+                        "circuit_breaker_open_ms": 30000
+                      },
+                      "adapter_config": {},
+                      "session": {
+                        "status": "not_logged_in",
+                        "session_dir": null,
+                        "qr_code": null,
+                        "connected_at_epoch_ms": null,
+                        "disconnected_at_epoch_ms": null
+                      },
+                      "capabilities": [
+                        "resolve",
+                        "send",
+                        "probe"
+                      ]
+                    }
+                  ]
+                },
+                "canonical_error": null
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "imessage",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "status": "connected",
+                  "message": "bridge login ok",
+                  "details": {
+                    "message": "bridge login ok",
+                    "protocol_version": "v1",
+                    "status": "connected"
+                  }
+                },
+                "canonical_error": null
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "payload": [
+                  {
+                    "channel": "imessage",
+                    "account_id": "release-gate",
+                    "protocol_family": "bridge_http_v1",
+                    "protocol_version": "v1",
+                    "status": "healthy",
+                    "message": "bridge probe ok",
+                    "details": null
+                  }
+                ],
+                "canonical_error": null
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "imessage",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "requested_target": "target-imessage",
+                  "resolved_target": "canonical:target-imessage",
+                  "status": "resolved"
+                },
+                "canonical_error": null
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "imessage",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "target": "target-imessage",
+                  "message_id": "bridge-596873542",
+                  "status": "sent"
+                },
+                "canonical_error": null
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "imessage",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "status": "logged_out",
+                  "message": "bridge logout ok",
+                  "details": {
+                    "message": "bridge logout ok",
+                    "protocol_version": "v1",
+                    "status": "logged_out"
+                  }
+                },
+                "canonical_error": null
+              }
+            },
+            "recommendation": "Provisionar bridge/webhook do provedor alvo e repetir o script com endpoints reais no ambiente final."
+          }
+        },
+        {
+          "channel": "line",
+          "family": "bridge_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "line",
+            "protocol_family": "bridge_http_v1",
+            "activation_mode": "local_bridge_mock",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "id": "line",
+                  "name": "LINE",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "protocol_schema": {
+                    "error_codes": [
+                      "invalid_request",
+                      "auth_error",
+                      "permission_error",
+                      "rate_limited",
+                      "network_error",
+                      "invalid_target",
+                      "provider_error",
+                      "protocol_version_mismatch"
+                    ],
+                    "family": "bridge_http_v1",
+                    "operations": {
+                      "login": {
+                        "request": {
+                          "properties": {
+                            "account_id": {
+                              "type": "string"
+                            },
+                            "channel": {
+                              "type": "string"
+                            },
+                            "metadata": {
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "channel",
+                            "account_id"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "message": {
+                              "type": "string"
+                            },
+                            "protocol_version": {
+                              "const": "v1"
+                            },
+                            "status": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "status",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "logout": {
+                        "response_ref": "login.response"
+                      },
+                      "probe": {
+                        "response_ref": "login.response"
+                      },
+                      "resolve": {
+                        "request": {
+                          "required": [
+                            "channel",
+                            "account_id",
+                            "target"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "protocol_version": {
+                              "const": "v1"
+                            },
+                            "resolved_target": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "resolved_target"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "send": {
+                        "request": {
+                          "required": [
+                            "channel",
+                            "account_id",
+                            "target",
+                            "message"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "message_id": {
+                              "type": "string"
+                            },
+                            "protocol_version": {
+                              "const": "v1"
+                            }
+                          },
+                          "required": [
+                            "message_id"
+                          ],
+                          "type": "object"
+                        }
+                      }
+                    },
+                    "protocol_version": "v1",
+                    "request_headers": {
+                      "x-channel-protocol-version": "v1"
+                    }
+                  },
+                  "aliases": [],
+                  "capabilities": [
+                    "send-messages",
+                    "receive-messages",
+                    "health",
+                    "docs"
+                  ],
+                  "supports_lazy_load": true,
+                  "docs": {
+                    "summary": "LINE compatibility channel for OpenClaw-style routing.",
+                    "help": "Registers LINE with alias resolution, local-first config, and lazy runtime activation.",
+                    "docs_url": null,
+                    "aliases": []
+                  },
+                  "config_schema": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "endpoint": {
+                        "type": "string"
+                      },
+                      "room": {
+                        "type": "string"
+                      },
+                      "token": {
+                        "type": "string"
+                      }
+                    },
+                    "title": "LINE Config",
+                    "type": "object"
+                  },
+                  "default_account_id": "release-gate",
+                  "ambiguity_warning": null,
+                  "accounts": [
+                    {
+                      "account_id": "release-gate",
+                      "enabled": true,
+                      "configured": true,
+                      "is_default": true,
+                      "credentials_ref": "channels.line.release-gate.credentials",
+                      "metadata": {
+                        "owner": "release-gate"
+                      },
+                      "routing_defaults": {
+                        "target": "target-line"
+                      },
+                      "health_state": {
+                        "status": "not_configured",
+                        "last_error": null,
+                        "failure_count": 0,
+                        "circuit_open_until_epoch_ms": null,
+                        "last_checked_epoch_ms": null,
+                        "last_connected_epoch_ms": null
+                      },
+                      "limits": {
+                        "rate_limit_per_minute": 60,
+                        "timeout_ms": 5000,
+                        "max_retries": 2,
+                        "backoff_base_ms": 250,
+                        "circuit_breaker_threshold": 3,
+                        "circuit_breaker_open_ms": 30000
+                      },
+                      "adapter_config": {},
+                      "session": {
+                        "status": "not_logged_in",
+                        "session_dir": null,
+                        "qr_code": null,
+                        "connected_at_epoch_ms": null,
+                        "disconnected_at_epoch_ms": null
+                      },
+                      "capabilities": [
+                        "resolve",
+                        "send",
+                        "probe"
+                      ]
+                    }
+                  ]
+                },
+                "canonical_error": null
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "line",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "status": "connected",
+                  "message": "bridge login ok",
+                  "details": {
+                    "message": "bridge login ok",
+                    "protocol_version": "v1",
+                    "status": "connected"
+                  }
+                },
+                "canonical_error": null
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "payload": [
+                  {
+                    "channel": "line",
+                    "account_id": "release-gate",
+                    "protocol_family": "bridge_http_v1",
+                    "protocol_version": "v1",
+                    "status": "healthy",
+                    "message": "bridge probe ok",
+                    "details": null
+                  }
+                ],
+                "canonical_error": null
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "line",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "requested_target": "target-line",
+                  "resolved_target": "canonical:target-line",
+                  "status": "resolved"
+                },
+                "canonical_error": null
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "line",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "target": "target-line",
+                  "message_id": "bridge-1999596272",
+                  "status": "sent"
+                },
+                "canonical_error": null
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "line",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "status": "logged_out",
+                  "message": "bridge logout ok",
+                  "details": {
+                    "message": "bridge logout ok",
+                    "protocol_version": "v1",
+                    "status": "logged_out"
+                  }
+                },
+                "canonical_error": null
+              }
+            },
+            "recommendation": "Provisionar bridge/webhook do provedor alvo e repetir o script com endpoints reais no ambiente final."
+          }
+        },
+        {
+          "channel": "mattermost",
+          "family": "webhook_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "mattermost",
+            "protocol_family": "webhook_http_v1",
+            "activation_mode": "local_webhook_mock",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "id": "mattermost",
+                  "name": "Mattermost",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "protocol_schema": {
+                    "credentials": {
+                      "required": [
+                        "webhook_url"
+                      ],
+                      "type": "object"
+                    },
+                    "error_codes": [
+                      "invalid_request",
+                      "auth_error",
+                      "permission_error",
+                      "rate_limited",
+                      "network_error",
+                      "invalid_target",
+                      "provider_error",
+                      "protocol_version_mismatch"
+                    ],
+                    "family": "webhook_http_v1",
+                    "operations": [
+                      "login",
+                      "logout",
+                      "probe",
+                      "resolve",
+                      "send",
+                      "status"
+                    ],
+                    "protocol_version": "v1"
+                  },
+                  "aliases": [],
+                  "capabilities": [
+                    "send-messages",
+                    "receive-messages",
+                    "health",
+                    "docs"
+                  ],
+                  "supports_lazy_load": true,
+                  "docs": {
+                    "summary": "Mattermost compatibility channel for OpenClaw-style routing.",
+                    "help": "Registers Mattermost with alias resolution, local-first config, and lazy runtime activation.",
+                    "docs_url": null,
+                    "aliases": []
+                  },
+                  "config_schema": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "endpoint": {
+                        "type": "string"
+                      },
+                      "room": {
+                        "type": "string"
+                      },
+                      "token": {
+                        "type": "string"
+                      }
+                    },
+                    "title": "Mattermost Config",
+                    "type": "object"
+                  },
+                  "default_account_id": "release-gate",
+                  "ambiguity_warning": null,
+                  "accounts": [
+                    {
+                      "account_id": "release-gate",
+                      "enabled": true,
+                      "configured": true,
+                      "is_default": true,
+                      "credentials_ref": "channels.mattermost.release-gate.credentials",
+                      "metadata": {
+                        "owner": "release-gate"
+                      },
+                      "routing_defaults": {
+                        "target": "room-mattermost"
+                      },
+                      "health_state": {
+                        "status": "not_configured",
+                        "last_error": null,
+                        "failure_count": 0,
+                        "circuit_open_until_epoch_ms": null,
+                        "last_checked_epoch_ms": null,
+                        "last_connected_epoch_ms": null
+                      },
+                      "limits": {
+                        "rate_limit_per_minute": 60,
+                        "timeout_ms": 5000,
+                        "max_retries": 2,
+                        "backoff_base_ms": 250,
+                        "circuit_breaker_threshold": 3,
+                        "circuit_breaker_open_ms": 30000
+                      },
+                      "adapter_config": {},
+                      "session": {
+                        "status": "not_logged_in",
+                        "session_dir": null,
+                        "qr_code": null,
+                        "connected_at_epoch_ms": null,
+                        "disconnected_at_epoch_ms": null
+                      },
+                      "capabilities": [
+                        "send-messages",
+                        "webhook",
+                        "probe"
+                      ]
+                    }
+                  ]
+                },
+                "canonical_error": null
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "mattermost",
+                  "account_id": "release-gate",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "status": "connected",
+                  "message": "mattermost webhook registered for account.",
+                  "details": {
+                    "webhook_url": "http://127.0.0.1:56369/webhook"
+                  }
+                },
+                "canonical_error": null
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "payload": [
+                  {
+                    "channel": "mattermost",
+                    "account_id": "release-gate",
+                    "protocol_family": "webhook_http_v1",
+                    "protocol_version": "v1",
+                    "status": "healthy",
+                    "message": "mattermost webhook accepted the probe request.",
+                    "details": null
+                  }
+                ],
+                "canonical_error": null
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "mattermost",
+                  "account_id": "release-gate",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "requested_target": "room-mattermost",
+                  "resolved_target": "room-mattermost",
+                  "status": "resolved"
+                },
+                "canonical_error": null
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "mattermost",
+                  "account_id": "release-gate",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "target": "room-mattermost",
+                  "message_id": "mattermost-6cc1325716305f8e",
+                  "status": "sent"
+                },
+                "canonical_error": null
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "mattermost",
+                  "account_id": "release-gate",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "status": "logged_out",
+                  "message": "mattermost webhook account disconnected.",
+                  "details": null
+                },
+                "canonical_error": null
+              }
+            },
+            "recommendation": "Provisionar bridge/webhook do provedor alvo e repetir o script com endpoints reais no ambiente final."
+          }
+        },
+        {
+          "channel": "msteams",
+          "family": "webhook_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "msteams",
+            "protocol_family": "webhook_http_v1",
+            "activation_mode": "local_webhook_mock",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "id": "msteams",
+                  "name": "Microsoft Teams",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "protocol_schema": {
+                    "credentials": {
+                      "required": [
+                        "webhook_url"
+                      ],
+                      "type": "object"
+                    },
+                    "error_codes": [
+                      "invalid_request",
+                      "auth_error",
+                      "permission_error",
+                      "rate_limited",
+                      "network_error",
+                      "invalid_target",
+                      "provider_error",
+                      "protocol_version_mismatch"
+                    ],
+                    "family": "webhook_http_v1",
+                    "operations": [
+                      "login",
+                      "logout",
+                      "probe",
+                      "resolve",
+                      "send",
+                      "status"
+                    ],
+                    "protocol_version": "v1"
+                  },
+                  "aliases": [
+                    "ms-teams",
+                    "teams"
+                  ],
+                  "capabilities": [
+                    "send-messages",
+                    "receive-messages",
+                    "health",
+                    "docs"
+                  ],
+                  "supports_lazy_load": true,
+                  "docs": {
+                    "summary": "Microsoft Teams compatibility channel for OpenClaw-style routing.",
+                    "help": "Registers Microsoft Teams with alias resolution, local-first config, and lazy runtime activation.",
+                    "docs_url": null,
+                    "aliases": []
+                  },
+                  "config_schema": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "endpoint": {
+                        "type": "string"
+                      },
+                      "room": {
+                        "type": "string"
+                      },
+                      "token": {
+                        "type": "string"
+                      }
+                    },
+                    "title": "Microsoft Teams Config",
+                    "type": "object"
+                  },
+                  "default_account_id": "release-gate",
+                  "ambiguity_warning": null,
+                  "accounts": [
+                    {
+                      "account_id": "release-gate",
+                      "enabled": true,
+                      "configured": true,
+                      "is_default": true,
+                      "credentials_ref": "channels.msteams.release-gate.credentials",
+                      "metadata": {
+                        "owner": "release-gate"
+                      },
+                      "routing_defaults": {
+                        "target": "room-msteams"
+                      },
+                      "health_state": {
+                        "status": "not_configured",
+                        "last_error": null,
+                        "failure_count": 0,
+                        "circuit_open_until_epoch_ms": null,
+                        "last_checked_epoch_ms": null,
+                        "last_connected_epoch_ms": null
+                      },
+                      "limits": {
+                        "rate_limit_per_minute": 60,
+                        "timeout_ms": 5000,
+                        "max_retries": 2,
+                        "backoff_base_ms": 250,
+                        "circuit_breaker_threshold": 3,
+                        "circuit_breaker_open_ms": 30000
+                      },
+                      "adapter_config": {},
+                      "session": {
+                        "status": "not_logged_in",
+                        "session_dir": null,
+                        "qr_code": null,
+                        "connected_at_epoch_ms": null,
+                        "disconnected_at_epoch_ms": null
+                      },
+                      "capabilities": [
+                        "send-messages",
+                        "webhook",
+                        "probe"
+                      ]
+                    }
+                  ]
+                },
+                "canonical_error": null
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "msteams",
+                  "account_id": "release-gate",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "status": "connected",
+                  "message": "msteams webhook registered for account.",
+                  "details": {
+                    "webhook_url": "http://127.0.0.1:56369/webhook"
+                  }
+                },
+                "canonical_error": null
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "payload": [
+                  {
+                    "channel": "msteams",
+                    "account_id": "release-gate",
+                    "protocol_family": "webhook_http_v1",
+                    "protocol_version": "v1",
+                    "status": "healthy",
+                    "message": "msteams webhook accepted the probe request.",
+                    "details": null
+                  }
+                ],
+                "canonical_error": null
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "msteams",
+                  "account_id": "release-gate",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "requested_target": "room-msteams",
+                  "resolved_target": "room-msteams",
+                  "status": "resolved"
+                },
+                "canonical_error": null
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "msteams",
+                  "account_id": "release-gate",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "target": "room-msteams",
+                  "message_id": "msteams-e8e8d643bd1ff002",
+                  "status": "sent"
+                },
+                "canonical_error": null
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "msteams",
+                  "account_id": "release-gate",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "status": "logged_out",
+                  "message": "msteams webhook account disconnected.",
+                  "details": null
+                },
+                "canonical_error": null
+              }
+            },
+            "recommendation": "Provisionar bridge/webhook do provedor alvo e repetir o script com endpoints reais no ambiente final."
+          }
+        },
+        {
+          "channel": "nextcloud-talk",
+          "family": "bridge_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "nextcloud-talk",
+            "protocol_family": "bridge_http_v1",
+            "activation_mode": "local_bridge_mock",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "id": "nextcloud-talk",
+                  "name": "Nextcloud Talk",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "protocol_schema": {
+                    "error_codes": [
+                      "invalid_request",
+                      "auth_error",
+                      "permission_error",
+                      "rate_limited",
+                      "network_error",
+                      "invalid_target",
+                      "provider_error",
+                      "protocol_version_mismatch"
+                    ],
+                    "family": "bridge_http_v1",
+                    "operations": {
+                      "login": {
+                        "request": {
+                          "properties": {
+                            "account_id": {
+                              "type": "string"
+                            },
+                            "channel": {
+                              "type": "string"
+                            },
+                            "metadata": {
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "channel",
+                            "account_id"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "message": {
+                              "type": "string"
+                            },
+                            "protocol_version": {
+                              "const": "v1"
+                            },
+                            "status": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "status",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "logout": {
+                        "response_ref": "login.response"
+                      },
+                      "probe": {
+                        "response_ref": "login.response"
+                      },
+                      "resolve": {
+                        "request": {
+                          "required": [
+                            "channel",
+                            "account_id",
+                            "target"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "protocol_version": {
+                              "const": "v1"
+                            },
+                            "resolved_target": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "resolved_target"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "send": {
+                        "request": {
+                          "required": [
+                            "channel",
+                            "account_id",
+                            "target",
+                            "message"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "message_id": {
+                              "type": "string"
+                            },
+                            "protocol_version": {
+                              "const": "v1"
+                            }
+                          },
+                          "required": [
+                            "message_id"
+                          ],
+                          "type": "object"
+                        }
+                      }
+                    },
+                    "protocol_version": "v1",
+                    "request_headers": {
+                      "x-channel-protocol-version": "v1"
+                    }
+                  },
+                  "aliases": [
+                    "nextcloud_talk",
+                    "talk"
+                  ],
+                  "capabilities": [
+                    "send-messages",
+                    "receive-messages",
+                    "health",
+                    "docs"
+                  ],
+                  "supports_lazy_load": true,
+                  "docs": {
+                    "summary": "Nextcloud Talk compatibility channel for OpenClaw-style routing.",
+                    "help": "Registers Nextcloud Talk with alias resolution, local-first config, and lazy runtime activation.",
+                    "docs_url": null,
+                    "aliases": []
+                  },
+                  "config_schema": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "endpoint": {
+                        "type": "string"
+                      },
+                      "room": {
+                        "type": "string"
+                      },
+                      "token": {
+                        "type": "string"
+                      }
+                    },
+                    "title": "Nextcloud Talk Config",
+                    "type": "object"
+                  },
+                  "default_account_id": "release-gate",
+                  "ambiguity_warning": null,
+                  "accounts": [
+                    {
+                      "account_id": "release-gate",
+                      "enabled": true,
+                      "configured": true,
+                      "is_default": true,
+                      "credentials_ref": "channels.nextcloud-talk.release-gate.credentials",
+                      "metadata": {
+                        "owner": "release-gate"
+                      },
+                      "routing_defaults": {
+                        "target": "target-nextcloud-talk"
+                      },
+                      "health_state": {
+                        "status": "not_configured",
+                        "last_error": null,
+                        "failure_count": 0,
+                        "circuit_open_until_epoch_ms": null,
+                        "last_checked_epoch_ms": null,
+                        "last_connected_epoch_ms": null
+                      },
+                      "limits": {
+                        "rate_limit_per_minute": 60,
+                        "timeout_ms": 5000,
+                        "max_retries": 2,
+                        "backoff_base_ms": 250,
+                        "circuit_breaker_threshold": 3,
+                        "circuit_breaker_open_ms": 30000
+                      },
+                      "adapter_config": {},
+                      "session": {
+                        "status": "not_logged_in",
+                        "session_dir": null,
+                        "qr_code": null,
+                        "connected_at_epoch_ms": null,
+                        "disconnected_at_epoch_ms": null
+                      },
+                      "capabilities": [
+                        "resolve",
+                        "send",
+                        "probe"
+                      ]
+                    }
+                  ]
+                },
+                "canonical_error": null
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "nextcloud-talk",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "status": "connected",
+                  "message": "bridge login ok",
+                  "details": {
+                    "message": "bridge login ok",
+                    "protocol_version": "v1",
+                    "status": "connected"
+                  }
+                },
+                "canonical_error": null
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "payload": [
+                  {
+                    "channel": "nextcloud-talk",
+                    "account_id": "release-gate",
+                    "protocol_family": "bridge_http_v1",
+                    "protocol_version": "v1",
+                    "status": "healthy",
+                    "message": "bridge probe ok",
+                    "details": null
+                  }
+                ],
+                "canonical_error": null
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "nextcloud-talk",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "requested_target": "target-nextcloud-talk",
+                  "resolved_target": "canonical:target-nextcloud-talk",
+                  "status": "resolved"
+                },
+                "canonical_error": null
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "nextcloud-talk",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "target": "target-nextcloud-talk",
+                  "message_id": "bridge-362899115",
+                  "status": "sent"
+                },
+                "canonical_error": null
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "nextcloud-talk",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "status": "logged_out",
+                  "message": "bridge logout ok",
+                  "details": {
+                    "message": "bridge logout ok",
+                    "protocol_version": "v1",
+                    "status": "logged_out"
+                  }
+                },
+                "canonical_error": null
+              }
+            },
+            "recommendation": "Provisionar bridge/webhook do provedor alvo e repetir o script com endpoints reais no ambiente final."
+          }
+        },
+        {
+          "channel": "nostr",
+          "family": "bridge_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "nostr",
+            "protocol_family": "bridge_http_v1",
+            "activation_mode": "local_bridge_mock",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "id": "nostr",
+                  "name": "Nostr",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "protocol_schema": {
+                    "error_codes": [
+                      "invalid_request",
+                      "auth_error",
+                      "permission_error",
+                      "rate_limited",
+                      "network_error",
+                      "invalid_target",
+                      "provider_error",
+                      "protocol_version_mismatch"
+                    ],
+                    "family": "bridge_http_v1",
+                    "operations": {
+                      "login": {
+                        "request": {
+                          "properties": {
+                            "account_id": {
+                              "type": "string"
+                            },
+                            "channel": {
+                              "type": "string"
+                            },
+                            "metadata": {
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "channel",
+                            "account_id"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "message": {
+                              "type": "string"
+                            },
+                            "protocol_version": {
+                              "const": "v1"
+                            },
+                            "status": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "status",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "logout": {
+                        "response_ref": "login.response"
+                      },
+                      "probe": {
+                        "response_ref": "login.response"
+                      },
+                      "resolve": {
+                        "request": {
+                          "required": [
+                            "channel",
+                            "account_id",
+                            "target"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "protocol_version": {
+                              "const": "v1"
+                            },
+                            "resolved_target": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "resolved_target"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "send": {
+                        "request": {
+                          "required": [
+                            "channel",
+                            "account_id",
+                            "target",
+                            "message"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "message_id": {
+                              "type": "string"
+                            },
+                            "protocol_version": {
+                              "const": "v1"
+                            }
+                          },
+                          "required": [
+                            "message_id"
+                          ],
+                          "type": "object"
+                        }
+                      }
+                    },
+                    "protocol_version": "v1",
+                    "request_headers": {
+                      "x-channel-protocol-version": "v1"
+                    }
+                  },
+                  "aliases": [],
+                  "capabilities": [
+                    "send-messages",
+                    "receive-messages",
+                    "health",
+                    "docs"
+                  ],
+                  "supports_lazy_load": true,
+                  "docs": {
+                    "summary": "Nostr compatibility channel for OpenClaw-style routing.",
+                    "help": "Registers Nostr with alias resolution, local-first config, and lazy runtime activation.",
+                    "docs_url": null,
+                    "aliases": []
+                  },
+                  "config_schema": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "endpoint": {
+                        "type": "string"
+                      },
+                      "room": {
+                        "type": "string"
+                      },
+                      "token": {
+                        "type": "string"
+                      }
+                    },
+                    "title": "Nostr Config",
+                    "type": "object"
+                  },
+                  "default_account_id": "release-gate",
+                  "ambiguity_warning": null,
+                  "accounts": [
+                    {
+                      "account_id": "release-gate",
+                      "enabled": true,
+                      "configured": true,
+                      "is_default": true,
+                      "credentials_ref": "channels.nostr.release-gate.credentials",
+                      "metadata": {
+                        "owner": "release-gate"
+                      },
+                      "routing_defaults": {
+                        "target": "target-nostr"
+                      },
+                      "health_state": {
+                        "status": "not_configured",
+                        "last_error": null,
+                        "failure_count": 0,
+                        "circuit_open_until_epoch_ms": null,
+                        "last_checked_epoch_ms": null,
+                        "last_connected_epoch_ms": null
+                      },
+                      "limits": {
+                        "rate_limit_per_minute": 60,
+                        "timeout_ms": 5000,
+                        "max_retries": 2,
+                        "backoff_base_ms": 250,
+                        "circuit_breaker_threshold": 3,
+                        "circuit_breaker_open_ms": 30000
+                      },
+                      "adapter_config": {},
+                      "session": {
+                        "status": "not_logged_in",
+                        "session_dir": null,
+                        "qr_code": null,
+                        "connected_at_epoch_ms": null,
+                        "disconnected_at_epoch_ms": null
+                      },
+                      "capabilities": [
+                        "resolve",
+                        "send",
+                        "probe"
+                      ]
+                    }
+                  ]
+                },
+                "canonical_error": null
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "nostr",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "status": "connected",
+                  "message": "bridge login ok",
+                  "details": {
+                    "message": "bridge login ok",
+                    "protocol_version": "v1",
+                    "status": "connected"
+                  }
+                },
+                "canonical_error": null
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "payload": [
+                  {
+                    "channel": "nostr",
+                    "account_id": "release-gate",
+                    "protocol_family": "bridge_http_v1",
+                    "protocol_version": "v1",
+                    "status": "healthy",
+                    "message": "bridge probe ok",
+                    "details": null
+                  }
+                ],
+                "canonical_error": null
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "nostr",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "requested_target": "target-nostr",
+                  "resolved_target": "canonical:target-nostr",
+                  "status": "resolved"
+                },
+                "canonical_error": null
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "nostr",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "target": "target-nostr",
+                  "message_id": "bridge-556682848",
+                  "status": "sent"
+                },
+                "canonical_error": null
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "nostr",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "status": "logged_out",
+                  "message": "bridge logout ok",
+                  "details": {
+                    "message": "bridge logout ok",
+                    "protocol_version": "v1",
+                    "status": "logged_out"
+                  }
+                },
+                "canonical_error": null
+              }
+            },
+            "recommendation": "Provisionar bridge/webhook do provedor alvo e repetir o script com endpoints reais no ambiente final."
+          }
+        },
+        {
+          "channel": "signal",
+          "family": "bridge_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "signal",
+            "protocol_family": "bridge_http_v1",
+            "activation_mode": "local_bridge_mock",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "id": "signal",
+                  "name": "Signal",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "protocol_schema": {
+                    "error_codes": [
+                      "invalid_request",
+                      "auth_error",
+                      "permission_error",
+                      "rate_limited",
+                      "network_error",
+                      "invalid_target",
+                      "provider_error",
+                      "protocol_version_mismatch"
+                    ],
+                    "family": "bridge_http_v1",
+                    "operations": {
+                      "login": {
+                        "request": {
+                          "properties": {
+                            "account_id": {
+                              "type": "string"
+                            },
+                            "channel": {
+                              "type": "string"
+                            },
+                            "metadata": {
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "channel",
+                            "account_id"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "message": {
+                              "type": "string"
+                            },
+                            "protocol_version": {
+                              "const": "v1"
+                            },
+                            "status": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "status",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "logout": {
+                        "response_ref": "login.response"
+                      },
+                      "probe": {
+                        "response_ref": "login.response"
+                      },
+                      "resolve": {
+                        "request": {
+                          "required": [
+                            "channel",
+                            "account_id",
+                            "target"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "protocol_version": {
+                              "const": "v1"
+                            },
+                            "resolved_target": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "resolved_target"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "send": {
+                        "request": {
+                          "required": [
+                            "channel",
+                            "account_id",
+                            "target",
+                            "message"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "message_id": {
+                              "type": "string"
+                            },
+                            "protocol_version": {
+                              "const": "v1"
+                            }
+                          },
+                          "required": [
+                            "message_id"
+                          ],
+                          "type": "object"
+                        }
+                      }
+                    },
+                    "protocol_version": "v1",
+                    "request_headers": {
+                      "x-channel-protocol-version": "v1"
+                    }
+                  },
+                  "aliases": [],
+                  "capabilities": [
+                    "send-messages",
+                    "receive-messages",
+                    "health",
+                    "docs"
+                  ],
+                  "supports_lazy_load": true,
+                  "docs": {
+                    "summary": "Signal compatibility channel for OpenClaw-style routing.",
+                    "help": "Registers Signal with alias resolution, local-first config, and lazy runtime activation.",
+                    "docs_url": null,
+                    "aliases": []
+                  },
+                  "config_schema": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "endpoint": {
+                        "type": "string"
+                      },
+                      "room": {
+                        "type": "string"
+                      },
+                      "token": {
+                        "type": "string"
+                      }
+                    },
+                    "title": "Signal Config",
+                    "type": "object"
+                  },
+                  "default_account_id": "release-gate",
+                  "ambiguity_warning": null,
+                  "accounts": [
+                    {
+                      "account_id": "release-gate",
+                      "enabled": true,
+                      "configured": true,
+                      "is_default": true,
+                      "credentials_ref": "channels.signal.release-gate.credentials",
+                      "metadata": {
+                        "owner": "release-gate"
+                      },
+                      "routing_defaults": {
+                        "target": "target-signal"
+                      },
+                      "health_state": {
+                        "status": "not_configured",
+                        "last_error": null,
+                        "failure_count": 0,
+                        "circuit_open_until_epoch_ms": null,
+                        "last_checked_epoch_ms": null,
+                        "last_connected_epoch_ms": null
+                      },
+                      "limits": {
+                        "rate_limit_per_minute": 60,
+                        "timeout_ms": 5000,
+                        "max_retries": 2,
+                        "backoff_base_ms": 250,
+                        "circuit_breaker_threshold": 3,
+                        "circuit_breaker_open_ms": 30000
+                      },
+                      "adapter_config": {},
+                      "session": {
+                        "status": "not_logged_in",
+                        "session_dir": null,
+                        "qr_code": null,
+                        "connected_at_epoch_ms": null,
+                        "disconnected_at_epoch_ms": null
+                      },
+                      "capabilities": [
+                        "resolve",
+                        "send",
+                        "probe"
+                      ]
+                    }
+                  ]
+                },
+                "canonical_error": null
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "signal",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "status": "connected",
+                  "message": "bridge login ok",
+                  "details": {
+                    "message": "bridge login ok",
+                    "protocol_version": "v1",
+                    "status": "connected"
+                  }
+                },
+                "canonical_error": null
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "payload": [
+                  {
+                    "channel": "signal",
+                    "account_id": "release-gate",
+                    "protocol_family": "bridge_http_v1",
+                    "protocol_version": "v1",
+                    "status": "healthy",
+                    "message": "bridge probe ok",
+                    "details": null
+                  }
+                ],
+                "canonical_error": null
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "signal",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "requested_target": "target-signal",
+                  "resolved_target": "canonical:target-signal",
+                  "status": "resolved"
+                },
+                "canonical_error": null
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "signal",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "target": "target-signal",
+                  "message_id": "bridge-2035814584",
+                  "status": "sent"
+                },
+                "canonical_error": null
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "signal",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "status": "logged_out",
+                  "message": "bridge logout ok",
+                  "details": {
+                    "message": "bridge logout ok",
+                    "protocol_version": "v1",
+                    "status": "logged_out"
+                  }
+                },
+                "canonical_error": null
+              }
+            },
+            "recommendation": "Provisionar bridge/webhook do provedor alvo e repetir o script com endpoints reais no ambiente final."
+          }
+        },
+        {
+          "channel": "synology-chat",
+          "family": "webhook_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "synology-chat",
+            "protocol_family": "webhook_http_v1",
+            "activation_mode": "local_webhook_mock",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "id": "synology-chat",
+                  "name": "Synology Chat",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "protocol_schema": {
+                    "credentials": {
+                      "required": [
+                        "webhook_url"
+                      ],
+                      "type": "object"
+                    },
+                    "error_codes": [
+                      "invalid_request",
+                      "auth_error",
+                      "permission_error",
+                      "rate_limited",
+                      "network_error",
+                      "invalid_target",
+                      "provider_error",
+                      "protocol_version_mismatch"
+                    ],
+                    "family": "webhook_http_v1",
+                    "operations": [
+                      "login",
+                      "logout",
+                      "probe",
+                      "resolve",
+                      "send",
+                      "status"
+                    ],
+                    "protocol_version": "v1"
+                  },
+                  "aliases": [
+                    "synology_chat",
+                    "synology"
+                  ],
+                  "capabilities": [
+                    "send-messages",
+                    "receive-messages",
+                    "health",
+                    "docs"
+                  ],
+                  "supports_lazy_load": true,
+                  "docs": {
+                    "summary": "Synology Chat compatibility channel for OpenClaw-style routing.",
+                    "help": "Registers Synology Chat with alias resolution, local-first config, and lazy runtime activation.",
+                    "docs_url": null,
+                    "aliases": []
+                  },
+                  "config_schema": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "endpoint": {
+                        "type": "string"
+                      },
+                      "room": {
+                        "type": "string"
+                      },
+                      "token": {
+                        "type": "string"
+                      }
+                    },
+                    "title": "Synology Chat Config",
+                    "type": "object"
+                  },
+                  "default_account_id": "release-gate",
+                  "ambiguity_warning": null,
+                  "accounts": [
+                    {
+                      "account_id": "release-gate",
+                      "enabled": true,
+                      "configured": true,
+                      "is_default": true,
+                      "credentials_ref": "channels.synology-chat.release-gate.credentials",
+                      "metadata": {
+                        "owner": "release-gate"
+                      },
+                      "routing_defaults": {
+                        "target": "room-synology-chat"
+                      },
+                      "health_state": {
+                        "status": "not_configured",
+                        "last_error": null,
+                        "failure_count": 0,
+                        "circuit_open_until_epoch_ms": null,
+                        "last_checked_epoch_ms": null,
+                        "last_connected_epoch_ms": null
+                      },
+                      "limits": {
+                        "rate_limit_per_minute": 60,
+                        "timeout_ms": 5000,
+                        "max_retries": 2,
+                        "backoff_base_ms": 250,
+                        "circuit_breaker_threshold": 3,
+                        "circuit_breaker_open_ms": 30000
+                      },
+                      "adapter_config": {},
+                      "session": {
+                        "status": "not_logged_in",
+                        "session_dir": null,
+                        "qr_code": null,
+                        "connected_at_epoch_ms": null,
+                        "disconnected_at_epoch_ms": null
+                      },
+                      "capabilities": [
+                        "send-messages",
+                        "webhook",
+                        "probe"
+                      ]
+                    }
+                  ]
+                },
+                "canonical_error": null
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "synology-chat",
+                  "account_id": "release-gate",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "status": "connected",
+                  "message": "synology-chat webhook registered for account.",
+                  "details": {
+                    "webhook_url": "http://127.0.0.1:56369/webhook"
+                  }
+                },
+                "canonical_error": null
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "payload": [
+                  {
+                    "channel": "synology-chat",
+                    "account_id": "release-gate",
+                    "protocol_family": "webhook_http_v1",
+                    "protocol_version": "v1",
+                    "status": "healthy",
+                    "message": "synology-chat webhook accepted the probe request.",
+                    "details": null
+                  }
+                ],
+                "canonical_error": null
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "synology-chat",
+                  "account_id": "release-gate",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "requested_target": "room-synology-chat",
+                  "resolved_target": "room-synology-chat",
+                  "status": "resolved"
+                },
+                "canonical_error": null
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "synology-chat",
+                  "account_id": "release-gate",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "target": "room-synology-chat",
+                  "message_id": "synology-chat-53c0921398b73e3f",
+                  "status": "sent"
+                },
+                "canonical_error": null
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "synology-chat",
+                  "account_id": "release-gate",
+                  "protocol_family": "webhook_http_v1",
+                  "protocol_version": "v1",
+                  "status": "logged_out",
+                  "message": "synology-chat webhook account disconnected.",
+                  "details": null
+                },
+                "canonical_error": null
+              }
+            },
+            "recommendation": "Provisionar bridge/webhook do provedor alvo e repetir o script com endpoints reais no ambiente final."
+          }
+        },
+        {
+          "channel": "tlon",
+          "family": "bridge_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "tlon",
+            "protocol_family": "bridge_http_v1",
+            "activation_mode": "local_bridge_mock",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "id": "tlon",
+                  "name": "Tlon",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "protocol_schema": {
+                    "error_codes": [
+                      "invalid_request",
+                      "auth_error",
+                      "permission_error",
+                      "rate_limited",
+                      "network_error",
+                      "invalid_target",
+                      "provider_error",
+                      "protocol_version_mismatch"
+                    ],
+                    "family": "bridge_http_v1",
+                    "operations": {
+                      "login": {
+                        "request": {
+                          "properties": {
+                            "account_id": {
+                              "type": "string"
+                            },
+                            "channel": {
+                              "type": "string"
+                            },
+                            "metadata": {
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "channel",
+                            "account_id"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "message": {
+                              "type": "string"
+                            },
+                            "protocol_version": {
+                              "const": "v1"
+                            },
+                            "status": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "status",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "logout": {
+                        "response_ref": "login.response"
+                      },
+                      "probe": {
+                        "response_ref": "login.response"
+                      },
+                      "resolve": {
+                        "request": {
+                          "required": [
+                            "channel",
+                            "account_id",
+                            "target"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "protocol_version": {
+                              "const": "v1"
+                            },
+                            "resolved_target": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "resolved_target"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "send": {
+                        "request": {
+                          "required": [
+                            "channel",
+                            "account_id",
+                            "target",
+                            "message"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "message_id": {
+                              "type": "string"
+                            },
+                            "protocol_version": {
+                              "const": "v1"
+                            }
+                          },
+                          "required": [
+                            "message_id"
+                          ],
+                          "type": "object"
+                        }
+                      }
+                    },
+                    "protocol_version": "v1",
+                    "request_headers": {
+                      "x-channel-protocol-version": "v1"
+                    }
+                  },
+                  "aliases": [],
+                  "capabilities": [
+                    "send-messages",
+                    "receive-messages",
+                    "health",
+                    "docs"
+                  ],
+                  "supports_lazy_load": true,
+                  "docs": {
+                    "summary": "Tlon compatibility channel for OpenClaw-style routing.",
+                    "help": "Registers Tlon with alias resolution, local-first config, and lazy runtime activation.",
+                    "docs_url": null,
+                    "aliases": []
+                  },
+                  "config_schema": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "endpoint": {
+                        "type": "string"
+                      },
+                      "room": {
+                        "type": "string"
+                      },
+                      "token": {
+                        "type": "string"
+                      }
+                    },
+                    "title": "Tlon Config",
+                    "type": "object"
+                  },
+                  "default_account_id": "release-gate",
+                  "ambiguity_warning": null,
+                  "accounts": [
+                    {
+                      "account_id": "release-gate",
+                      "enabled": true,
+                      "configured": true,
+                      "is_default": true,
+                      "credentials_ref": "channels.tlon.release-gate.credentials",
+                      "metadata": {
+                        "owner": "release-gate"
+                      },
+                      "routing_defaults": {
+                        "target": "target-tlon"
+                      },
+                      "health_state": {
+                        "status": "not_configured",
+                        "last_error": null,
+                        "failure_count": 0,
+                        "circuit_open_until_epoch_ms": null,
+                        "last_checked_epoch_ms": null,
+                        "last_connected_epoch_ms": null
+                      },
+                      "limits": {
+                        "rate_limit_per_minute": 60,
+                        "timeout_ms": 5000,
+                        "max_retries": 2,
+                        "backoff_base_ms": 250,
+                        "circuit_breaker_threshold": 3,
+                        "circuit_breaker_open_ms": 30000
+                      },
+                      "adapter_config": {},
+                      "session": {
+                        "status": "not_logged_in",
+                        "session_dir": null,
+                        "qr_code": null,
+                        "connected_at_epoch_ms": null,
+                        "disconnected_at_epoch_ms": null
+                      },
+                      "capabilities": [
+                        "resolve",
+                        "send",
+                        "probe"
+                      ]
+                    }
+                  ]
+                },
+                "canonical_error": null
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "tlon",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "status": "connected",
+                  "message": "bridge login ok",
+                  "details": {
+                    "message": "bridge login ok",
+                    "protocol_version": "v1",
+                    "status": "connected"
+                  }
+                },
+                "canonical_error": null
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "payload": [
+                  {
+                    "channel": "tlon",
+                    "account_id": "release-gate",
+                    "protocol_family": "bridge_http_v1",
+                    "protocol_version": "v1",
+                    "status": "healthy",
+                    "message": "bridge probe ok",
+                    "details": null
+                  }
+                ],
+                "canonical_error": null
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "tlon",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "requested_target": "target-tlon",
+                  "resolved_target": "canonical:target-tlon",
+                  "status": "resolved"
+                },
+                "canonical_error": null
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "tlon",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "target": "target-tlon",
+                  "message_id": "bridge-2017632623",
+                  "status": "sent"
+                },
+                "canonical_error": null
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "tlon",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "status": "logged_out",
+                  "message": "bridge logout ok",
+                  "details": {
+                    "message": "bridge logout ok",
+                    "protocol_version": "v1",
+                    "status": "logged_out"
+                  }
+                },
+                "canonical_error": null
+              }
+            },
+            "recommendation": "Provisionar bridge/webhook do provedor alvo e repetir o script com endpoints reais no ambiente final."
+          }
+        },
+        {
+          "channel": "zalo",
+          "family": "bridge_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "zalo",
+            "protocol_family": "bridge_http_v1",
+            "activation_mode": "local_bridge_mock",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "id": "zalo",
+                  "name": "Zalo",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "protocol_schema": {
+                    "error_codes": [
+                      "invalid_request",
+                      "auth_error",
+                      "permission_error",
+                      "rate_limited",
+                      "network_error",
+                      "invalid_target",
+                      "provider_error",
+                      "protocol_version_mismatch"
+                    ],
+                    "family": "bridge_http_v1",
+                    "operations": {
+                      "login": {
+                        "request": {
+                          "properties": {
+                            "account_id": {
+                              "type": "string"
+                            },
+                            "channel": {
+                              "type": "string"
+                            },
+                            "metadata": {
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "channel",
+                            "account_id"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "message": {
+                              "type": "string"
+                            },
+                            "protocol_version": {
+                              "const": "v1"
+                            },
+                            "status": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "status",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "logout": {
+                        "response_ref": "login.response"
+                      },
+                      "probe": {
+                        "response_ref": "login.response"
+                      },
+                      "resolve": {
+                        "request": {
+                          "required": [
+                            "channel",
+                            "account_id",
+                            "target"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "protocol_version": {
+                              "const": "v1"
+                            },
+                            "resolved_target": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "resolved_target"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "send": {
+                        "request": {
+                          "required": [
+                            "channel",
+                            "account_id",
+                            "target",
+                            "message"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "message_id": {
+                              "type": "string"
+                            },
+                            "protocol_version": {
+                              "const": "v1"
+                            }
+                          },
+                          "required": [
+                            "message_id"
+                          ],
+                          "type": "object"
+                        }
+                      }
+                    },
+                    "protocol_version": "v1",
+                    "request_headers": {
+                      "x-channel-protocol-version": "v1"
+                    }
+                  },
+                  "aliases": [],
+                  "capabilities": [
+                    "send-messages",
+                    "receive-messages",
+                    "health",
+                    "docs"
+                  ],
+                  "supports_lazy_load": true,
+                  "docs": {
+                    "summary": "Zalo compatibility channel for OpenClaw-style routing.",
+                    "help": "Registers Zalo with alias resolution, local-first config, and lazy runtime activation.",
+                    "docs_url": null,
+                    "aliases": []
+                  },
+                  "config_schema": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "endpoint": {
+                        "type": "string"
+                      },
+                      "room": {
+                        "type": "string"
+                      },
+                      "token": {
+                        "type": "string"
+                      }
+                    },
+                    "title": "Zalo Config",
+                    "type": "object"
+                  },
+                  "default_account_id": "release-gate",
+                  "ambiguity_warning": null,
+                  "accounts": [
+                    {
+                      "account_id": "release-gate",
+                      "enabled": true,
+                      "configured": true,
+                      "is_default": true,
+                      "credentials_ref": "channels.zalo.release-gate.credentials",
+                      "metadata": {
+                        "owner": "release-gate"
+                      },
+                      "routing_defaults": {
+                        "target": "target-zalo"
+                      },
+                      "health_state": {
+                        "status": "not_configured",
+                        "last_error": null,
+                        "failure_count": 0,
+                        "circuit_open_until_epoch_ms": null,
+                        "last_checked_epoch_ms": null,
+                        "last_connected_epoch_ms": null
+                      },
+                      "limits": {
+                        "rate_limit_per_minute": 60,
+                        "timeout_ms": 5000,
+                        "max_retries": 2,
+                        "backoff_base_ms": 250,
+                        "circuit_breaker_threshold": 3,
+                        "circuit_breaker_open_ms": 30000
+                      },
+                      "adapter_config": {},
+                      "session": {
+                        "status": "not_logged_in",
+                        "session_dir": null,
+                        "qr_code": null,
+                        "connected_at_epoch_ms": null,
+                        "disconnected_at_epoch_ms": null
+                      },
+                      "capabilities": [
+                        "resolve",
+                        "send",
+                        "probe"
+                      ]
+                    }
+                  ]
+                },
+                "canonical_error": null
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "zalo",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "status": "connected",
+                  "message": "bridge login ok",
+                  "details": {
+                    "message": "bridge login ok",
+                    "protocol_version": "v1",
+                    "status": "connected"
+                  }
+                },
+                "canonical_error": null
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "payload": [
+                  {
+                    "channel": "zalo",
+                    "account_id": "release-gate",
+                    "protocol_family": "bridge_http_v1",
+                    "protocol_version": "v1",
+                    "status": "healthy",
+                    "message": "bridge probe ok",
+                    "details": null
+                  }
+                ],
+                "canonical_error": null
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "zalo",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "requested_target": "target-zalo",
+                  "resolved_target": "canonical:target-zalo",
+                  "status": "resolved"
+                },
+                "canonical_error": null
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "zalo",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "target": "target-zalo",
+                  "message_id": "bridge-2030932006",
+                  "status": "sent"
+                },
+                "canonical_error": null
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "zalo",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "status": "logged_out",
+                  "message": "bridge logout ok",
+                  "details": {
+                    "message": "bridge logout ok",
+                    "protocol_version": "v1",
+                    "status": "logged_out"
+                  }
+                },
+                "canonical_error": null
+              }
+            },
+            "recommendation": "Provisionar bridge/webhook do provedor alvo e repetir o script com endpoints reais no ambiente final."
+          }
+        },
+        {
+          "channel": "zalouser",
+          "family": "bridge_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "zalouser",
+            "protocol_family": "bridge_http_v1",
+            "activation_mode": "local_bridge_mock",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "id": "zalouser",
+                  "name": "Zalo User",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "protocol_schema": {
+                    "error_codes": [
+                      "invalid_request",
+                      "auth_error",
+                      "permission_error",
+                      "rate_limited",
+                      "network_error",
+                      "invalid_target",
+                      "provider_error",
+                      "protocol_version_mismatch"
+                    ],
+                    "family": "bridge_http_v1",
+                    "operations": {
+                      "login": {
+                        "request": {
+                          "properties": {
+                            "account_id": {
+                              "type": "string"
+                            },
+                            "channel": {
+                              "type": "string"
+                            },
+                            "metadata": {
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "channel",
+                            "account_id"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "message": {
+                              "type": "string"
+                            },
+                            "protocol_version": {
+                              "const": "v1"
+                            },
+                            "status": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "status",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "logout": {
+                        "response_ref": "login.response"
+                      },
+                      "probe": {
+                        "response_ref": "login.response"
+                      },
+                      "resolve": {
+                        "request": {
+                          "required": [
+                            "channel",
+                            "account_id",
+                            "target"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "protocol_version": {
+                              "const": "v1"
+                            },
+                            "resolved_target": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "resolved_target"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "send": {
+                        "request": {
+                          "required": [
+                            "channel",
+                            "account_id",
+                            "target",
+                            "message"
+                          ],
+                          "type": "object"
+                        },
+                        "response": {
+                          "properties": {
+                            "message_id": {
+                              "type": "string"
+                            },
+                            "protocol_version": {
+                              "const": "v1"
+                            }
+                          },
+                          "required": [
+                            "message_id"
+                          ],
+                          "type": "object"
+                        }
+                      }
+                    },
+                    "protocol_version": "v1",
+                    "request_headers": {
+                      "x-channel-protocol-version": "v1"
+                    }
+                  },
+                  "aliases": [
+                    "zalo-user"
+                  ],
+                  "capabilities": [
+                    "send-messages",
+                    "receive-messages",
+                    "health",
+                    "docs"
+                  ],
+                  "supports_lazy_load": true,
+                  "docs": {
+                    "summary": "Zalo User compatibility channel for OpenClaw-style routing.",
+                    "help": "Registers Zalo User with alias resolution, local-first config, and lazy runtime activation.",
+                    "docs_url": null,
+                    "aliases": []
+                  },
+                  "config_schema": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "endpoint": {
+                        "type": "string"
+                      },
+                      "room": {
+                        "type": "string"
+                      },
+                      "token": {
+                        "type": "string"
+                      }
+                    },
+                    "title": "Zalo User Config",
+                    "type": "object"
+                  },
+                  "default_account_id": "release-gate",
+                  "ambiguity_warning": null,
+                  "accounts": [
+                    {
+                      "account_id": "release-gate",
+                      "enabled": true,
+                      "configured": true,
+                      "is_default": true,
+                      "credentials_ref": "channels.zalouser.release-gate.credentials",
+                      "metadata": {
+                        "owner": "release-gate"
+                      },
+                      "routing_defaults": {
+                        "target": "target-zalouser"
+                      },
+                      "health_state": {
+                        "status": "not_configured",
+                        "last_error": null,
+                        "failure_count": 0,
+                        "circuit_open_until_epoch_ms": null,
+                        "last_checked_epoch_ms": null,
+                        "last_connected_epoch_ms": null
+                      },
+                      "limits": {
+                        "rate_limit_per_minute": 60,
+                        "timeout_ms": 5000,
+                        "max_retries": 2,
+                        "backoff_base_ms": 250,
+                        "circuit_breaker_threshold": 3,
+                        "circuit_breaker_open_ms": 30000
+                      },
+                      "adapter_config": {},
+                      "session": {
+                        "status": "not_logged_in",
+                        "session_dir": null,
+                        "qr_code": null,
+                        "connected_at_epoch_ms": null,
+                        "disconnected_at_epoch_ms": null
+                      },
+                      "capabilities": [
+                        "resolve",
+                        "send",
+                        "probe"
+                      ]
+                    }
+                  ]
+                },
+                "canonical_error": null
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "zalouser",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "status": "connected",
+                  "message": "bridge login ok",
+                  "details": {
+                    "message": "bridge login ok",
+                    "protocol_version": "v1",
+                    "status": "connected"
+                  }
+                },
+                "canonical_error": null
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "payload": [
+                  {
+                    "channel": "zalouser",
+                    "account_id": "release-gate",
+                    "protocol_family": "bridge_http_v1",
+                    "protocol_version": "v1",
+                    "status": "healthy",
+                    "message": "bridge probe ok",
+                    "details": null
+                  }
+                ],
+                "canonical_error": null
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "zalouser",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "requested_target": "target-zalouser",
+                  "resolved_target": "canonical:target-zalouser",
+                  "status": "resolved"
+                },
+                "canonical_error": null
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "zalouser",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "target": "target-zalouser",
+                  "message_id": "bridge-327194359",
+                  "status": "sent"
+                },
+                "canonical_error": null
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "payload": {
+                  "channel": "zalouser",
+                  "account_id": "release-gate",
+                  "protocol_family": "bridge_http_v1",
+                  "protocol_version": "v1",
+                  "status": "logged_out",
+                  "message": "bridge logout ok",
+                  "details": {
+                    "message": "bridge logout ok",
+                    "protocol_version": "v1",
+                    "status": "logged_out"
+                  }
+                },
+                "canonical_error": null
+              }
+            },
+            "recommendation": "Provisionar bridge/webhook do provedor alvo e repetir o script com endpoints reais no ambiente final."
+          }
+        }
+      ],
+      "artifacts": {
+        "daemon_log": "/var/folders/9w/z7z0kw055w72bdrg847g196w0000gn/T/mlx-pilot-release-gate-channels-xpCLHr/release-gate-channels.log",
+        "bridge_requests": 45,
+        "webhook_requests": 10
+      }
+    },
+    "load_smoke": {
+      "block": "load_smoke",
+      "title": "Bloco 2 - Carga curta e concorrencia",
+      "status": "pass",
+      "summary": {
+        "endpoint_batches": 9,
+        "crash_detected": false,
+        "critical_log_hit": null,
+        "functional_health_after_load": "healthy"
+      },
+      "blockers": [],
+      "observations": {
+        "batches_with_errors": 6,
+        "batches": [
+          {
+            "endpoint": "/agent/run",
+            "metrics": {
+              "concurrency": 10,
+              "total_requests": 20,
+              "duration_ms": 79,
+              "error_rate": 0,
+              "timeouts": 0,
+              "status_codes": {
+                "200": 20
+              },
+              "count": 20,
+              "min_ms": 29,
+              "max_ms": 50,
+              "p50_ms": 34,
+              "p95_ms": 49,
+              "p99_ms": 50
+            }
+          },
+          {
+            "endpoint": "/agent/message/send",
+            "metrics": {
+              "concurrency": 10,
+              "total_requests": 20,
+              "duration_ms": 14,
+              "error_rate": 0.05,
+              "timeouts": 0,
+              "status_codes": {
+                "200": 19,
+                "502": 1
+              },
+              "count": 20,
+              "min_ms": 2,
+              "max_ms": 10,
+              "p50_ms": 4,
+              "p95_ms": 9,
+              "p99_ms": 10
+            }
+          },
+          {
+            "endpoint": "/agent/channels/probe",
+            "metrics": {
+              "concurrency": 10,
+              "total_requests": 20,
+              "duration_ms": 12,
+              "error_rate": 0.1,
+              "timeouts": 0,
+              "status_codes": {
+                "200": 18,
+                "502": 2
+              },
+              "count": 20,
+              "min_ms": 2,
+              "max_ms": 8,
+              "p50_ms": 5,
+              "p95_ms": 7,
+              "p99_ms": 8
+            }
+          },
+          {
+            "endpoint": "/agent/run",
+            "metrics": {
+              "concurrency": 25,
+              "total_requests": 50,
+              "duration_ms": 85,
+              "error_rate": 0,
+              "timeouts": 0,
+              "status_codes": {
+                "200": 50
+              },
+              "count": 50,
+              "min_ms": 30,
+              "max_ms": 51,
+              "p50_ms": 36,
+              "p95_ms": 51,
+              "p99_ms": 51
+            }
+          },
+          {
+            "endpoint": "/agent/message/send",
+            "metrics": {
+              "concurrency": 25,
+              "total_requests": 50,
+              "duration_ms": 33,
+              "error_rate": 0.06,
+              "timeouts": 0,
+              "status_codes": {
+                "200": 47,
+                "502": 3
+              },
+              "count": 50,
+              "min_ms": 4,
+              "max_ms": 20,
+              "p50_ms": 13,
+              "p95_ms": 18,
+              "p99_ms": 20
+            }
+          },
+          {
+            "endpoint": "/agent/channels/probe",
+            "metrics": {
+              "concurrency": 25,
+              "total_requests": 50,
+              "duration_ms": 22,
+              "error_rate": 0.2,
+              "timeouts": 0,
+              "status_codes": {
+                "200": 40,
+                "502": 10
+              },
+              "count": 50,
+              "min_ms": 3,
+              "max_ms": 17,
+              "p50_ms": 8,
+              "p95_ms": 17,
+              "p99_ms": 17
+            }
+          },
+          {
+            "endpoint": "/agent/run",
+            "metrics": {
+              "concurrency": 50,
+              "total_requests": 100,
+              "duration_ms": 153,
+              "error_rate": 0,
+              "timeouts": 0,
+              "status_codes": {
+                "200": 100
+              },
+              "count": 100,
+              "min_ms": 38,
+              "max_ms": 107,
+              "p50_ms": 63,
+              "p95_ms": 101,
+              "p99_ms": 105
+            }
+          },
+          {
+            "endpoint": "/agent/message/send",
+            "metrics": {
+              "concurrency": 50,
+              "total_requests": 100,
+              "duration_ms": 76,
+              "error_rate": 0.04,
+              "timeouts": 0,
+              "status_codes": {
+                "200": 96,
+                "502": 4
+              },
+              "count": 100,
+              "min_ms": 1,
+              "max_ms": 42,
+              "p50_ms": 27,
+              "p95_ms": 40,
+              "p99_ms": 42
+            }
+          },
+          {
+            "endpoint": "/agent/channels/probe",
+            "metrics": {
+              "concurrency": 50,
+              "total_requests": 100,
+              "duration_ms": 57,
+              "error_rate": 0.03,
+              "timeouts": 0,
+              "status_codes": {
+                "200": 97,
+                "502": 3
+              },
+              "count": 100,
+              "min_ms": 2,
+              "max_ms": 32,
+              "p50_ms": 23,
+              "p95_ms": 30,
+              "p99_ms": 31
+            }
+          }
+        ]
+      },
+      "commands": [
+        "node scripts/release-gate/load-smoke.mjs"
+      ],
+      "artifacts": {
+        "daemon_log": "/var/folders/9w/z7z0kw055w72bdrg847g196w0000gn/T/mlx-pilot-release-gate-load-yrthXM/release-gate-load.log",
+        "provider_requests": 170
+      }
+    },
+    "migration_upgrade_rollback": {
+      "block": "migration_upgrade_rollback",
+      "title": "Bloco 3 - Upgrade e rollback de migracao",
+      "status": "pass",
+      "summary": {
+        "backup_created": true,
+        "upgraded_schema_version": 2,
+        "rollback_restored_exact_backup": true,
+        "migrated_enabled_skills": [
+          "mock-install",
+          "summarize"
+        ],
+        "migrated_tool_profile": "coding"
+      },
+      "validation": {
+        "upgrade": {
+          "effective_policy_profile": "coding",
+          "default_agent_allow_count": 12,
+          "channels": [
+            {
+              "id": "telegram",
+              "default_account_id": "ops",
+              "accounts": [
+                "ops"
+              ]
+            },
+            {
+              "id": "whatsapp",
+              "default_account_id": "personal",
+              "accounts": [
+                "personal"
+              ]
+            }
+          ],
+          "plugins_before": [
+            {
+              "id": "memory",
+              "enabled": true
+            }
+          ],
+          "plugin_toggle": {
+            "disabled": false,
+            "reenabled": true
+          },
+          "legacy_endpoint_upsert": {
+            "id": "whatsapp",
+            "default_account_id": "legacy-whatsapp"
+          }
+        },
+        "rollback": {
+          "config_provider": "custom",
+          "config_enabled_skills": [
+            "mock-install",
+            "summarize"
+          ],
+          "effective_policy_profile": "coding",
+          "legacy_endpoint_remove": null,
+          "channels_remaining": [
+            "bluebubbles",
+            "discord",
+            "feishu",
+            "googlechat",
+            "imessage",
+            "irc",
+            "line",
+            "matrix",
+            "mattermost",
+            "msteams",
+            "nextcloud-talk",
+            "nostr",
+            "signal",
+            "slack",
+            "synology-chat",
+            "telegram",
+            "tlon",
+            "whatsapp",
+            "zalo",
+            "zalouser"
+          ]
+        }
+      },
+      "blockers": [],
+      "commands": [
+        "node scripts/release-gate/migration-upgrade-rollback.mjs"
+      ],
+      "artifacts": {
+        "settings_path": "/var/folders/9w/z7z0kw055w72bdrg847g196w0000gn/T/mlx-pilot-release-gate-migration-Mzu8XR/settings.json",
+        "backup_dir": "/var/folders/9w/z7z0kw055w72bdrg847g196w0000gn/T/mlx-pilot-release-gate-migration-Mzu8XR/backup",
+        "session_state_path": "/var/folders/9w/z7z0kw055w72bdrg847g196w0000gn/T/mlx-pilot-release-gate-migration-Mzu8XR/channel-sessions/telegram/ops/session.json"
+      }
+    },
+    "security_audit_smoke": {
+      "block": "security_audit_smoke",
+      "title": "Bloco 4 - Auditoria pratica de seguranca",
+      "status": "pass",
+      "summary": {
+        "leaked_secret_files": 0,
+        "vault_key_mode": "600",
+        "vault_data_mode": "644",
+        "findings_total": 0
+      },
+      "checklist": {
+        "secrets_not_in_settings_or_logs": true,
+        "vault_used_for_agent_api_key": true,
+        "vault_used_for_skill_env": true,
+        "vault_used_for_channel_credentials": true,
+        "profile_policy_effective": {
+          "minimal": {
+            "exec_allowed": false,
+            "message_allowed": false
+          },
+          "coding": {
+            "exec_allowed": true,
+            "message_allowed": false
+          },
+          "messaging": {
+            "exec_allowed": false,
+            "message_allowed": true
+          },
+          "full": {
+            "exec_allowed": true,
+            "message_allowed": true
+          }
+        },
+        "allow_deny_runtime": {
+          "minimal_exec_denied": true,
+          "agent_allow_exec_passed": true,
+          "global_deny_exec_denied": true
+        }
+      },
+      "findings": [],
+      "commands": [
+        "node scripts/release-gate/security-audit-smoke.mjs"
+      ],
+      "artifacts": {
+        "settings_path": "/var/folders/9w/z7z0kw055w72bdrg847g196w0000gn/T/mlx-pilot-release-gate-security-wZw3Lr/settings.json",
+        "daemon_log": "/var/folders/9w/z7z0kw055w72bdrg847g196w0000gn/T/mlx-pilot-release-gate-security-wZw3Lr/release-gate-security.log",
+        "vault_key_path": "/var/folders/9w/z7z0kw055w72bdrg847g196w0000gn/T/mlx-pilot-release-gate-security-wZw3Lr/agent_secrets.key",
+        "vault_data_path": "/var/folders/9w/z7z0kw055w72bdrg847g196w0000gn/T/mlx-pilot-release-gate-security-wZw3Lr/agent_secrets.v1.json",
+        "skills_checked": 2
+      }
+    },
+    "crash_recovery_smoke": {
+      "block": "crash_recovery_smoke",
+      "title": "Bloco 5 - Recuperacao de falha",
+      "status": "pass",
+      "summary": {
+        "in_flight_request_status": 0,
+        "config_rehydrated": true,
+        "channels_rehydrated": 20,
+        "saved_schema_version": 2
+      },
+      "validation": {
+        "config_after_restart": {
+          "provider": "custom",
+          "model_id": "mock-small",
+          "tool_profile": "full",
+          "enabled_skills": [
+            "mock-install",
+            "summarize"
+          ]
+        },
+        "channels_after_restart": [
+          {
+            "id": "telegram",
+            "default_account_id": "bot",
+            "accounts": [
+              {
+                "account_id": "bot",
+                "session_status": "connected"
+              }
+            ]
+          },
+          {
+            "id": "whatsapp",
+            "default_account_id": "ops",
+            "accounts": [
+              {
+                "account_id": "ops",
+                "session_status": "connected"
+              }
+            ]
+          }
+        ],
+        "idempotence": {
+          "first_message_id": "telegram-732fa44e64775e11",
+          "second_message_id": "telegram-732fa44e64775e11",
+          "first_status": "sent",
+          "second_status": "sent"
+        }
+      },
+      "blockers": [],
+      "commands": [
+        "node scripts/release-gate/crash-recovery-smoke.mjs"
+      ],
+      "artifacts": {
+        "settings_path": "/var/folders/9w/z7z0kw055w72bdrg847g196w0000gn/T/mlx-pilot-release-gate-crash-l6y9gY/settings.json"
+      }
+    },
+    "release_dry_run": {
+      "block": "release_dry_run",
+      "title": "Bloco 6 - Release dry-run",
+      "status": "pass",
+      "summary": {
+        "mode": "simulated_clean_env_with_guided_checklist",
+        "clean_settings_path": "/var/folders/9w/z7z0kw055w72bdrg847g196w0000gn/T/mlx-pilot-release-gate-dry-run-hhzbs8/settings.json",
+        "compat_coverage_percent": 98.2,
+        "send_status": "sent"
+      },
+      "checklist": [
+        {
+          "item": "Instalar artefato/binario em ambiente limpo ou VM isolada",
+          "status": "manual_required"
+        },
+        {
+          "item": "Abrir app desktop e confirmar health visual/daemon online",
+          "status": "manual_required"
+        },
+        {
+          "item": "Configurar uma skill minima pelo onboarding",
+          "status": "validated_in_simulation"
+        },
+        {
+          "item": "Conectar WhatsApp ou Telegram; neste ambiente foi usado Telegram mock/token local",
+          "status": "validated_in_simulation"
+        },
+        {
+          "item": "Enviar mensagem teste e conferir compat/report atualizado",
+          "status": "validated_in_simulation"
+        }
+      ],
+      "notes": [
+        "Nao houve acesso a uma maquina limpa dedicada neste workspace; o dry-run foi executado em diretorio temporario isolado.",
+        "O fluxo minimo foi validado com provider local OpenAI-compatible mock e Telegram token-bot declarado como mock equivalente."
+      ],
+      "commands": [
+        "node scripts/release-gate/release-dry-run-checklist.mjs"
+      ],
+      "artifacts": {
+        "settings_path": "/var/folders/9w/z7z0kw055w72bdrg847g196w0000gn/T/mlx-pilot-release-gate-dry-run-hhzbs8/settings.json"
+      }
+    }
+  },
+  "reproduction_commands": [
+    "cargo check -p mlx-ollama-daemon",
+    "cargo test -p mlx-ollama-daemon",
+    "cd apps/desktop-ui && npm run test:e2e:channels-smoke",
+    "cd apps/desktop-ui && npm run test:e2e:skills-smoke",
+    "node scripts/release-gate/run-all.mjs"
+  ]
+}
