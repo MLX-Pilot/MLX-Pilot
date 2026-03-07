@@ -48,8 +48,7 @@
         <summary>Conexao</summary>
         <label class="field-label" for="daemon-url">Daemon URL</label>
         <input id="daemon-url" class="input" value="http://127.0.0.1:11435" />
-        <label class="field-label" for="brave-api-key">Brave API Key (opcional)</label>
-        <input id="brave-api-key" class="input" type="password" placeholder="BSA..." autocomplete="off" />
+        <p class="meta-note" style="margin-top: 8px;">APIs em Configuracoes > Environment.</p>
         <button id="save-url" class="ghost-btn">Salvar</button>
       </details>
     </aside>
@@ -75,6 +74,9 @@
             <button class="tab-btn" data-tab="openclaw" role="tab" aria-selected="false">
               <span id="agent-tab-label">OpenClaw</span>
             </button>
+            <button class="tab-btn" data-tab="agent" role="tab" aria-selected="false">
+              Agent
+            </button>
             <button class="tab-btn" data-tab="ai-interaction" role="tab" aria-selected="false">
               Interacao IA
             </button>
@@ -99,6 +101,15 @@
             <div id="chat-model-menu" class="model-picker-menu hidden" role="listbox"></div>
 
             <select id="chat-model-select" class="input compact-input hidden" tabindex="-1"></select>
+            <button
+              id="chat-airllm-toggle"
+              class="ghost-btn model-airllm-btn"
+              type="button"
+              aria-pressed="false"
+              title="Ativar/desativar AIRLLM para modelos grandes"
+            >
+              AIRLLM OFF
+            </button>
             <button id="refresh-models" class="ghost-btn model-refresh-btn" title="Atualizar modelos">
               Atualizar
             </button>
@@ -155,43 +166,67 @@
           </div>
         </header>
 
-        <section class="discover-controls glass">
-          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-            <label class="field-group">
-              <span>Fonte</span>
-              <select id="catalog-source" class="input"></select>
-            </label>
-
-            <label class="field-group field-grow">
-              <span>Busca</span>
-              <input id="catalog-query" class="input" placeholder="Ex: mlx-community qwen coder" />
-            </label>
-
-            <button id="catalog-search-btn" class="primary-btn">Buscar</button>
-          </div>
-
-          <div style="margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px;">
-            <label class="field-group">
-              <span style="display: flex; justify-content: space-between;">
-                Diretorio de Instalacao (Models Path)
-                <span id="discover-models-feedback" class="meta-note"
-                  style="color: var(--ok); opacity: 0; transition: opacity 0.3s;">Salvo!</span>
-              </span>
-              <input id="discover-models-dir" class="input" placeholder="Ex: /Users/kaike/models" />
-            </label>
-          </div>
+        <section class="discover-subtabs">
+          <button id="discover-subtab-catalog" type="button" class="tab-btn active" data-discover-subtab="catalog"
+            role="tab" aria-selected="true">
+            Catalogo e Downloads
+          </button>
+          <button id="discover-subtab-installed" type="button" class="tab-btn" data-discover-subtab="installed"
+            role="tab" aria-selected="false">
+            Modelos Instalados
+          </button>
         </section>
 
-        <p id="catalog-meta" class="meta-note">Carregando catalogo...</p>
-        <section id="remote-results" class="remote-grid"></section>
+        <div id="discover-view-catalog" class="discover-subtab-view discover-catalog-view active">
+          <section class="discover-controls glass">
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <label class="field-group">
+                <span>Fonte</span>
+                <select id="catalog-source" class="input"></select>
+              </label>
 
-        <section class="downloads-panel glass">
-          <div class="panel-title-row">
-            <h3>Downloads</h3>
-            <button id="refresh-downloads" class="ghost-btn">Atualizar</button>
-          </div>
-          <ul id="download-list" class="download-list"></ul>
-        </section>
+              <label class="field-group field-grow">
+                <span>Busca</span>
+                <input id="catalog-query" class="input" placeholder="Ex: mlx-community qwen coder" />
+              </label>
+
+              <button id="catalog-search-btn" class="primary-btn">Buscar</button>
+            </div>
+
+            <div style="margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px;">
+              <label class="field-group">
+                <span style="display: flex; justify-content: space-between;">
+                  Diretorio de Instalacao (Models Path)
+                  <span id="discover-models-feedback" class="meta-note"
+                    style="color: var(--ok); opacity: 0; transition: opacity 0.3s;">Salvo!</span>
+                </span>
+                <input id="discover-models-dir" class="input" placeholder="Ex: /Users/kaike/models" />
+              </label>
+            </div>
+          </section>
+
+          <p id="catalog-meta" class="meta-note">Carregando catalogo...</p>
+          <section id="remote-results" class="remote-grid"></section>
+
+          <section class="downloads-panel glass">
+            <div class="panel-title-row">
+              <h3>Downloads</h3>
+              <button id="refresh-downloads" class="ghost-btn">Atualizar</button>
+            </div>
+            <ul id="download-list" class="download-list"></ul>
+          </section>
+        </div>
+
+        <div id="discover-view-installed" class="discover-subtab-view discover-installed-view">
+          <section id="installed-models-panel" class="installed-models-panel glass">
+            <div class="panel-title-row">
+              <h3>Modelos instalados</h3>
+              <button id="refresh-installed-models" class="ghost-btn">Atualizar lista</button>
+            </div>
+            <p id="installed-models-meta" class="meta-note">-</p>
+            <ul id="installed-models-list" class="installed-models-list"></ul>
+          </section>
+        </div>
       </section>
 
       <section id="panel-openclaw" class="main-panel" role="tabpanel">
@@ -331,6 +366,522 @@
         </section>
       </section>
 
+      <section id="panel-agent" class="main-panel" role="tabpanel">
+        <header class="agent-header glass">
+          <div>
+            <p class="chat-eyebrow">Agent Control Plane</p>
+            <h2>Controle completo do runtime do agente</h2>
+            <p id="agent-meta" class="meta-note">Channels, plugins, skills, policy, contexto e health em uma unica aba.</p>
+          </div>
+          <div class="agent-header-actions">
+            <button id="agent-refresh-btn" class="ghost-btn">Atualizar</button>
+            <button id="agent-save-config-btn" class="primary-btn">Salvar configuracoes</button>
+          </div>
+        </header>
+
+        <nav class="agent-section-nav glass" aria-label="Agent sections">
+          <a class="agent-nav-chip" href="#agent-section-channels">Channels</a>
+          <a class="agent-nav-chip" href="#agent-section-plugins">Plugins</a>
+          <a class="agent-nav-chip" href="#agent-section-skills">Skills</a>
+          <a class="agent-nav-chip" href="#agent-section-tools">Tools & Policies</a>
+          <a class="agent-nav-chip" href="#agent-section-context">Context & Memory</a>
+          <a class="agent-nav-chip" href="#agent-section-runtime">Runtime & Health</a>
+        </nav>
+
+        <div class="agent-section-stack">
+          <section id="agent-section-channels" class="agent-control-section glass">
+            <header class="agent-section-head">
+              <div>
+                <p class="chat-eyebrow">Channels</p>
+                <h3>Catalogo, contas, login e operacao</h3>
+              </div>
+              <button id="agent-channels-refresh-btn" class="ghost-btn">Atualizar canais</button>
+            </header>
+
+            <div class="agent-grid agent-grid-wide">
+              <article class="agent-card">
+                <h4 class="agent-card-title">Catalogo e status</h4>
+                <p class="meta-note">Cada card mostra protocolo, capabilities, health, sessao e contas configuradas.</p>
+                <div id="agent-channel-list" class="agent-channel-list"></div>
+              </article>
+
+              <article class="agent-card">
+                <h4 class="agent-card-title">Add / edit conta</h4>
+                <label class="field-group">
+                  <span>Canal</span>
+                  <select id="agent-channel-select" class="input"></select>
+                </label>
+                <label class="field-group">
+                  <span>Account ID</span>
+                  <input id="agent-channel-account-id" class="input" placeholder="work, personal, bot-a" />
+                </label>
+                <label class="field-group">
+                  <span>Credencial (token ou JSON)</span>
+                  <textarea id="agent-channel-credentials" class="input" rows="4" placeholder='{"token":"..."} ou xoxb-...'></textarea>
+                </label>
+                <label class="field-group">
+                  <span>Metadata (JSON)</span>
+                  <textarea id="agent-channel-metadata" class="input" rows="3" placeholder='{"workspace":"ops"}'></textarea>
+                </label>
+                <label class="field-group">
+                  <span>Routing defaults (JSON)</span>
+                  <textarea id="agent-channel-routing-defaults" class="input" rows="3" placeholder='{"target":"#alerts"}'></textarea>
+                </label>
+                <label class="agent-toggle-row">
+                  <input id="agent-channel-enabled" type="checkbox" checked />
+                  <span>Conta habilitada</span>
+                </label>
+                <label class="agent-toggle-row">
+                  <input id="agent-channel-set-default" type="checkbox" />
+                  <span>Marcar como default do canal</span>
+                </label>
+                <div class="agent-inline-actions">
+                  <button id="agent-channel-save-btn" class="primary-btn" type="button">Salvar conta</button>
+                  <button id="agent-channel-clear-btn" class="ghost-btn" type="button">Limpar</button>
+                </div>
+                <p id="agent-channel-form-feedback" class="meta-note">-</p>
+              </article>
+
+              <article class="agent-card">
+                <h4 class="agent-card-title">Login, probe e teste</h4>
+                <div class="agent-quad-grid">
+                  <label class="field-group">
+                    <span>Canal</span>
+                    <select id="agent-send-channel" class="input"></select>
+                  </label>
+                  <label class="field-group">
+                    <span>Conta</span>
+                    <select id="agent-send-account" class="input">
+                      <option value="">Resolver automaticamente</option>
+                    </select>
+                  </label>
+                  <label class="field-group">
+                    <span>Target</span>
+                    <input id="agent-send-target" class="input" placeholder="@team ou #alerts" />
+                  </label>
+                  <label class="field-group">
+                    <span>Mensagem</span>
+                    <input id="agent-send-message" class="input" placeholder="Mensagem de teste" />
+                  </label>
+                </div>
+                <div class="agent-inline-actions">
+                  <button id="agent-send-test-btn" class="primary-btn" type="button">Enviar teste</button>
+                  <button id="agent-probe-channel-btn" class="ghost-btn" type="button">Probe</button>
+                  <button id="agent-resolve-target-btn" class="ghost-btn" type="button">Resolver alvo</button>
+                </div>
+                <p id="agent-channel-action-feedback" class="meta-note">-</p>
+
+                <div class="panel-title-row" style="margin-top: 10px;">
+                  <h4 style="margin: 0;">Logs por canal/conta</h4>
+                  <button id="agent-channel-logs-refresh-btn" class="ghost-btn" type="button">Atualizar logs</button>
+                </div>
+                <div class="agent-inline-actions">
+                  <select id="agent-channel-logs-channel" class="input compact-input">
+                    <option value="">Todos canais</option>
+                  </select>
+                  <select id="agent-channel-logs-account" class="input compact-input">
+                    <option value="">Todas contas</option>
+                  </select>
+                </div>
+                <ul id="agent-channel-logs-list" class="agent-audit-list"></ul>
+              </article>
+            </div>
+          </section>
+
+          <section id="agent-section-plugins" class="agent-control-section glass">
+            <header class="agent-section-head">
+              <div>
+                <p class="chat-eyebrow">Plugins</p>
+                <h3>Enable/disable e schema dinâmico</h3>
+              </div>
+              <button id="agent-plugins-refresh-btn" class="ghost-btn">Atualizar plugins</button>
+            </header>
+
+            <div class="agent-grid agent-grid-wide">
+              <article class="agent-card">
+                <h4 class="agent-card-title">Runtime plugins</h4>
+                <div id="agent-plugins-list" class="agent-plugin-list"></div>
+              </article>
+
+              <article class="agent-card">
+                <div class="panel-title-row">
+                  <h4 id="agent-plugin-detail-title" style="margin: 0;">Selecione um plugin</h4>
+                  <label class="agent-toggle-row">
+                    <input id="agent-plugin-config-enabled" type="checkbox" />
+                    <span>Habilitado</span>
+                  </label>
+                </div>
+                <p id="agent-plugin-detail-meta" class="meta-note">Selecione um plugin para editar schema/config.</p>
+                <div id="agent-plugin-config-form" class="agent-plugin-config-form"></div>
+                <div class="agent-inline-actions">
+                  <button id="agent-plugin-save-btn" class="primary-btn" type="button">Salvar plugin</button>
+                  <button id="agent-plugin-reset-btn" class="ghost-btn" type="button">Restaurar form</button>
+                </div>
+                <p id="agent-plugin-feedback" class="meta-note">-</p>
+              </article>
+            </div>
+          </section>
+
+          <section id="agent-section-skills" class="agent-control-section glass">
+            <header class="agent-section-head">
+              <div>
+                <p class="chat-eyebrow">Skills</p>
+                <h3>Status, dependencias e configuracao</h3>
+              </div>
+              <div class="agent-inline-actions">
+                <button id="agent-check-skills-btn" class="ghost-btn">Check</button>
+                <button id="agent-configure-skills-btn" class="ghost-btn">Configurar</button>
+                <button id="agent-install-skills-btn" class="ghost-btn">Instalar deps</button>
+                <button id="agent-reload-skills-btn" class="ghost-btn">Reload</button>
+              </div>
+            </header>
+
+            <div class="agent-grid">
+              <article class="agent-card">
+                <label class="field-group">
+                  <span>Node manager</span>
+                  <select id="agent-node-manager-select" class="input">
+                    <option value="npm">npm</option>
+                    <option value="pnpm">pnpm</option>
+                    <option value="bun">bun</option>
+                  </select>
+                </label>
+                <p id="agent-skills-summary" class="meta-note">Check das skills pendente.</p>
+              </article>
+
+              <article class="agent-card">
+                <ul id="agent-skills-list" class="agent-toggle-list"></ul>
+              </article>
+            </div>
+          </section>
+
+          <section id="agent-section-tools" class="agent-control-section glass">
+            <header class="agent-section-head">
+              <div>
+                <p class="chat-eyebrow">Tools & Policies</p>
+                <h3>Profile, allow/deny e política efetiva</h3>
+              </div>
+            </header>
+
+            <div class="agent-grid agent-grid-wide">
+              <article class="agent-card">
+                <h4 class="agent-card-title">Provider e runtime base</h4>
+                <label class="field-group">
+                  <span>Provider</span>
+                  <select id="agent-provider-select" class="input"></select>
+                </label>
+                <label class="field-group">
+                  <span>Model</span>
+                  <select id="agent-model-select" class="input"></select>
+                </label>
+                <label class="field-group">
+                  <span>API Key</span>
+                  <input id="agent-api-key-input" class="input" type="password" placeholder="sk-..." autocomplete="off" />
+                </label>
+                <label class="field-group">
+                  <span>Base URL</span>
+                  <input id="agent-base-url-input" class="input" placeholder="https://..." />
+                </label>
+                <label class="field-group">
+                  <span>Execution mode</span>
+                  <select id="agent-execution-mode-select" class="input">
+                    <option value="full">Full</option>
+                    <option value="read_only">ReadOnly</option>
+                    <option value="dry_run">DryRun</option>
+                  </select>
+                </label>
+                <label class="field-group">
+                  <span>Approval mode</span>
+                  <select id="agent-approval-mode-select" class="input">
+                    <option value="ask">ask</option>
+                    <option value="auto">auto</option>
+                    <option value="deny">deny</option>
+                  </select>
+                </label>
+                <label class="agent-toggle-row">
+                  <input id="agent-streaming-toggle" type="checkbox" />
+                  <span>Streaming</span>
+                </label>
+                <label class="agent-toggle-row">
+                  <input id="agent-fallback-toggle" type="checkbox" />
+                  <span>Fallback automatico</span>
+                </label>
+                <label class="field-group">
+                  <span>Provider fallback</span>
+                  <select id="agent-fallback-provider-select" class="input"></select>
+                </label>
+                <label class="field-group">
+                  <span>Model fallback</span>
+                  <input id="agent-fallback-model-input" class="input" placeholder="model-id" />
+                </label>
+              </article>
+
+              <article class="agent-card">
+                <h4 class="agent-card-title">Policy editor</h4>
+                <label class="field-group">
+                  <span>Profile</span>
+                  <select id="agent-tool-profile-select" class="input"></select>
+                </label>
+                <div class="agent-inline-actions">
+                  <button id="agent-tool-profile-apply-btn" class="primary-btn" type="button">Aplicar profile</button>
+                </div>
+                <p id="agent-tool-catalog-summary" class="meta-note">Catalogo de tools carregando...</p>
+                <label class="field-group">
+                  <span>Escopo do override</span>
+                  <select id="agent-policy-scope-select" class="input">
+                    <option value="agent">agent/default</option>
+                    <option value="global">global</option>
+                  </select>
+                </label>
+                <label class="field-group">
+                  <span>Allow patterns</span>
+                  <textarea id="agent-policy-allow-input" class="input" rows="5" placeholder="read_file&#10;list_dir&#10;sessions_*"></textarea>
+                </label>
+                <label class="field-group">
+                  <span>Deny patterns</span>
+                  <textarea id="agent-policy-deny-input" class="input" rows="5" placeholder="exec&#10;write_*"></textarea>
+                </label>
+                <label class="field-group">
+                  <span>Egress allowlist (dominios, separados por virgula)</span>
+                  <input id="agent-egress-input" class="input" placeholder="api.github.com,openrouter.ai" />
+                </label>
+                <label class="field-group">
+                  <span>Paths sensiveis bloqueados (glob, separados por virgula)</span>
+                  <input id="agent-sensitive-paths-input" class="input" placeholder="~/.ssh/*,**/.env" />
+                </label>
+                <label class="agent-toggle-row">
+                  <input id="agent-aggressive-tools-toggle" type="checkbox" />
+                  <span>Aggressive tool filtering</span>
+                </label>
+                <label class="agent-toggle-row">
+                  <input id="agent-tool-fallback-toggle" type="checkbox" />
+                  <span>Tool-call fallback reprompt</span>
+                </label>
+                <div class="agent-inline-actions">
+                  <button id="agent-policy-save-btn" class="primary-btn" type="button">Salvar allow/deny</button>
+                  <button id="agent-policy-reset-btn" class="ghost-btn" type="button">Restaurar</button>
+                </div>
+                <p id="agent-policy-feedback" class="meta-note">-</p>
+              </article>
+
+              <article class="agent-card">
+                <h4 class="agent-card-title">Tools habilitados</h4>
+                <ul id="agent-tools-list" class="agent-toggle-list"></ul>
+              </article>
+
+              <article class="agent-card">
+                <h4 class="agent-card-title">Politica efetiva</h4>
+                <ul id="agent-effective-policy-list" class="agent-audit-list agent-effective-policy-list"></ul>
+              </article>
+            </div>
+          </section>
+
+          <section id="agent-section-context" class="agent-control-section glass">
+            <header class="agent-section-head">
+              <div>
+                <p class="chat-eyebrow">Context & Memory</p>
+                <h3>Budget, compressao e backend de memoria</h3>
+              </div>
+            </header>
+
+            <div class="agent-grid agent-grid-wide">
+              <article class="agent-card">
+                <h4 class="agent-card-title">Prompt budget</h4>
+                <label class="field-group">
+                  <span>Max prompt tokens</span>
+                  <input id="agent-max-prompt-input" class="input" type="range" min="512" max="8192" step="128" />
+                </label>
+                <p id="agent-max-prompt-value" class="meta-note">-</p>
+
+                <label class="field-group">
+                  <span>Max history messages</span>
+                  <input id="agent-max-history-input" class="input" type="range" min="1" max="40" step="1" />
+                </label>
+                <p id="agent-max-history-value" class="meta-note">-</p>
+
+                <label class="field-group">
+                  <span>Max tools in prompt</span>
+                  <input id="agent-max-tools-input" class="input" type="range" min="1" max="20" step="1" />
+                </label>
+                <p id="agent-max-tools-value" class="meta-note">-</p>
+              </article>
+
+              <article class="agent-card">
+                <h4 class="agent-card-title">Memoria local</h4>
+                <label class="agent-toggle-row">
+                  <input id="agent-memory-local-toggle" type="checkbox" />
+                  <span>Memoria local ligada</span>
+                </label>
+                <label class="field-group">
+                  <span>Backend</span>
+                  <select id="agent-memory-backend-select" class="input">
+                    <option value="local">local</option>
+                    <option value="json">json</option>
+                    <option value="sqlite">sqlite</option>
+                  </select>
+                </label>
+                <label class="field-group">
+                  <span>Estrategia de compressao</span>
+                  <select id="agent-memory-compression-select" class="input">
+                    <option value="adaptive">adaptive</option>
+                    <option value="conservative">conservative</option>
+                    <option value="aggressive">aggressive</option>
+                  </select>
+                </label>
+                <div class="agent-inline-actions">
+                  <button id="agent-memory-save-btn" class="primary-btn" type="button">Salvar memoria</button>
+                </div>
+                <p id="agent-memory-feedback" class="meta-note">-</p>
+              </article>
+
+              <article class="agent-card">
+                <div class="panel-title-row">
+                  <h4 style="margin: 0;">Telemetria de budget</h4>
+                  <button id="agent-budget-refresh-btn" class="ghost-btn" type="button">Atualizar</button>
+                </div>
+                <pre id="agent-budget-telemetry" class="agent-runtime-pre">Nenhuma telemetria de budget disponivel.</pre>
+              </article>
+            </div>
+          </section>
+
+          <section id="agent-section-runtime" class="agent-control-section glass">
+            <header class="agent-section-head">
+              <div>
+                <p class="chat-eyebrow">Runtime & Health</p>
+                <h3>Health checks, logs e diagnostico rapido</h3>
+              </div>
+              <button id="agent-runtime-refresh-btn" class="ghost-btn" type="button">Atualizar health</button>
+            </header>
+
+            <div class="agent-grid agent-grid-wide">
+              <article class="agent-card">
+                <h4 class="agent-card-title">Snapshot</h4>
+                <p id="agent-runtime-summary" class="meta-note">daemon n/d</p>
+                <p id="agent-runtime-framework-meta" class="meta-note">framework n/d</p>
+              </article>
+
+              <article class="agent-card">
+                <div class="panel-title-row">
+                  <h4 style="margin: 0;">Logs filtraveis</h4>
+                </div>
+                <div class="agent-inline-actions">
+                  <select id="agent-runtime-log-mode" class="input compact-input">
+                    <option value="channel">channel</option>
+                    <option value="plugin">plugin</option>
+                  </select>
+                  <select id="agent-runtime-log-source" class="input compact-input"></select>
+                  <select id="agent-runtime-log-account" class="input compact-input">
+                    <option value="">Todas contas</option>
+                  </select>
+                </div>
+                <ul id="agent-runtime-log-list" class="agent-audit-list"></ul>
+              </article>
+
+              <article class="agent-card">
+                <h4 class="agent-card-title">Diagnostico rapido</h4>
+                <ul id="agent-runtime-diagnostics-list" class="agent-audit-list"></ul>
+              </article>
+            </div>
+          </section>
+
+          <section class="agent-console-panel glass">
+          <header style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
+            <div>
+              <p class="chat-eyebrow">Observability Console</p>
+              <h3>Agent Audit Feed</h3>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <select id="audit-filter-session" class="input compact-input" style="min-width: 140px; margin-bottom: 0;">
+                <option value="">Todas Sessoes</option>
+              </select>
+              <select id="audit-filter-event" class="input compact-input" style="min-width: 140px; margin-bottom: 0;">
+                <option value="">Todos Eventos</option>
+                <option value="PromptBuilt">PromptBuilt</option>
+                <option value="ProviderCall">ProviderCall</option>
+                <option value="ToolRequested">ToolRequested</option>
+                <option value="ToolExecuted">ToolExecuted</option>
+                <option value="ToolFailed">ToolFailed</option>
+                <option value="ApprovalPending">ApprovalPending</option>
+                <option value="ApprovalDecision">ApprovalDecision</option>
+                <option value="ResponseFinal">ResponseFinal</option>
+                <option value="Error">Error</option>
+              </select>
+              <select id="audit-filter-status" class="input compact-input" style="min-width: 110px; margin-bottom: 0;">
+                <option value="">Todo Status</option>
+                <option value="success">Success</option>
+                <option value="error">Error</option>
+                <option value="denied">Denied</option>
+              </select>
+              <input id="audit-filter-tool" class="input compact-input" placeholder="Tool name..."
+                style="max-width: 120px; margin-bottom: 0;" />
+
+              <label class="agent-toggle-row" style="margin: 0 0 0 8px; font-size: 0.85rem;">
+                <input id="audit-follow-toggle" type="checkbox" checked />
+                <span>Follow current session</span>
+              </label>
+
+              <button id="audit-export-btn" class="ghost-btn text-sm" style="margin-left: 8px;">Exportar</button>
+            </div>
+          </header>
+
+          <div style="display: flex; gap: 16px; height: 400px;">
+            <div
+              style="flex: 1; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; overflow-y: auto; background: rgba(0,0,0,0.1);">
+              <ul id="agent-observability-list" class="agent-audit-list"
+                style="padding: 0; margin: 0; list-style: none;">
+                <!-- Audit items injected via JS -->
+                <li style="padding: 16px; text-align: center; color: var(--muted); font-size: 0.9rem;">
+                  Carregando feed...
+                </li>
+              </ul>
+            </div>
+
+            <div id="audit-detail-panel"
+              style="width: 350px; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; background: rgba(0,0,0,0.2); padding: 16px; overflow-y: auto; display: none; flex-direction: column;">
+              <div
+                style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px;">
+                <h4 style="margin: 0; font-size: 0.95rem;">Detalhes do Evento</h4>
+                <button id="audit-detail-close" class="ghost-btn text-sm"
+                  style="padding: 2px 8px; min-width: auto;">✕</button>
+              </div>
+              <div id="audit-detail-content"
+                style="flex: 1; font-size: 0.85rem; word-break: break-all; white-space: pre-wrap; color: var(--text);">
+                <!-- Details injected via JS -->
+              </div>
+            </div>
+          </div>
+          </section>
+
+          <section class="agent-chat-panel glass">
+          <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 12px;">
+            <div style="flex: 1;">
+              <p class="chat-eyebrow">Sessoes do Agent</p>
+              <div style="display: flex; gap: 8px; margin-bottom: 12px; margin-top: 8px; align-items: center;">
+                <button id="agent-new-session-btn" type="button" class="ghost-btn text-sm">Nova Sessao</button>
+                <select id="agent-session-select" class="input compact-input"
+                  style="max-width: 300px; margin-bottom: 0;"></select>
+                <button id="agent-rename-session-btn" type="button" class="ghost-btn text-sm" disabled>Renomear</button>
+                <button id="agent-export-session-btn" type="button" class="ghost-btn text-sm" disabled>Exportar</button>
+                <button id="agent-delete-session-btn" type="button" class="ghost-btn danger text-sm" disabled
+                  style="color: var(--danger);">Deletar</button>
+              </div>
+            </div>
+            <span id="agent-chat-status" class="meta-note" style="margin-bottom: 8px;">pronto</span>
+          </div>
+          <div class="panel-title-row">
+            <h3 id="agent-chat-title">Chat do agente</h3>
+          </div>
+          <div id="agent-chat-log" class="agent-chat-log"></div>
+          <form id="agent-chat-form" class="chat-form">
+            <textarea id="agent-message-input" rows="1" placeholder="Mensagem para o Agent" required></textarea>
+            <div class="chat-form-actions">
+              <button id="agent-send-btn" type="submit" class="primary-btn">Enviar</button>
+            </div>
+          </form>
+          </section>
+        </div>
+      </section>
+
       <section id="panel-settings" class="main-panel" role="tabpanel">
         <header class="settings-header glass">
           <div>
@@ -426,7 +977,8 @@
                 <button id="check-openclaw-status-btn" type="button" class="ghost-btn">Checar status OpenClaw</button>
               </div>
               <p id="openclaw-install-status-feedback" class="meta-note mt-2" style="margin-top: 8px;">-</p>
-              <pre id="openclaw-install-status-output" class="openclaw-log-viewer" style="max-height: 220px; margin-top: 8px;">-</pre>
+              <pre id="openclaw-install-status-output" class="openclaw-log-viewer"
+                style="max-height: 220px; margin-top: 8px;">-</pre>
             </section>
           </div>
 
@@ -443,8 +995,7 @@
 
               <label class="field-group">
                 <span>NanoBot CLI (comando, binario ou pasta do repo)</span>
-                <input id="setting-nanobot-cli" class="input"
-                  placeholder="Ex: nanobot ou /Users/kaike/prod/nanobot" />
+                <input id="setting-nanobot-cli" class="input" placeholder="Ex: nanobot ou /Users/kaike/prod/nanobot" />
               </label>
             </section>
 
@@ -465,13 +1016,14 @@
                 <button id="init-nanobot-btn" type="button" class="ghost-btn">Inicializar (onboard)</button>
               </div>
               <p id="nanobot-status-feedback" class="meta-note mt-2" style="margin-top: 8px;">-</p>
-              <pre id="nanobot-status-output" class="openclaw-log-viewer" style="max-height: 220px; margin-top: 8px;">-</pre>
+              <pre id="nanobot-status-output" class="openclaw-log-viewer"
+                style="max-height: 220px; margin-top: 8px;">-</pre>
             </section>
           </div>
 
           <section id="environment-settings-group" class="settings-controls glass">
-            <h3>Environment e Secrets (OpenClaw + NanoBot)</h3>
-            <p class="meta-note">Gerencie chaves e tokens usados pelo OpenClaw e sincronizados com o NanoBot cloud.</p>
+            <h3>Environment e Secrets (Global)</h3>
+            <p class="meta-note">Gerencie chaves e tokens compartilhados por Chat, Agent, OpenClaw e NanoBot.</p>
             <div class="openclaw-config-actions" style="margin-top: 12px;">
               <button id="refresh-openclaw-env-btn" type="button" class="ghost-btn">Atualizar environment</button>
               <button id="save-openclaw-env-btn" type="button" class="primary-btn">Salvar environment</button>
@@ -536,6 +1088,7 @@
 
       <div class="assistant-state-row">
         <span class="assistant-state-label">aguardando</span>
+        <span class="assistant-runtime-badge hidden"></span>
         <div class="typing-indicator">
           <span></span>
           <span></span>
@@ -550,7 +1103,7 @@
 
       <section class="assistant-answer hidden">
         <h4>resposta</h4>
-        <pre class="assistant-answer-text"></pre>
+        <div class="assistant-answer-text markdown-view"></div>
       </section>
 
       <section class="assistant-metrics hidden">

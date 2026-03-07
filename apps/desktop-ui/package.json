@@ -1,0 +1,14 @@
+{
+  "name": "mlx-pilot-desktop-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:e2e:channels-smoke": "node --test e2e/channels-smoke.test.js",
+    "test:e2e:skills-smoke": "node --test e2e/skills-smoke.test.js",
+    "test:e2e:agent-control-plane": "node --test e2e/agent-control-plane.test.js",
+    "test:e2e:openclaw-compat": "node ../../scripts/openclaw-compat-smoke.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}

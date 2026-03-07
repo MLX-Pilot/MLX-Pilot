@@ -1,0 +1,1208 @@
+{
+  "mode": "openclaw-compatible",
+  "target": "OpenClaw parity for local production",
+  "generated_at": "2026-03-07T01:01:35.644821+00:00",
+  "coverage_methodology": "Coverage counts implemented compatibility surfaces: registered channels, managed plugins, skill subsystem availability, tool-profile coverage, preserved endpoints, and synthetic small-local context benchmark.",
+  "summary": {
+    "total_checks": 57,
+    "passed_checks": 56,
+    "coverage_percent": 98.2,
+    "critical_gaps": 0,
+    "warning_gaps": 2
+  },
+  "migration": {
+    "schema_version": 2,
+    "current_schema_version": 2,
+    "migrated": true,
+    "backward_compatible": true,
+    "migration_flags": [
+      "config_schema_v2",
+      "legacy_enabled_tools_sync",
+      "compatibility_state_roundtrip"
+    ]
+  },
+  "channels": [
+    {
+      "id": "bluebubbles",
+      "name": "BlueBubbles",
+      "state": "adapter_ready_external",
+      "local_testable": false,
+      "requires_external_activation": true,
+      "protocol_family": "bridge_http_v1",
+      "protocol_version": "v1",
+      "account_count": 0,
+      "configured_accounts": 0,
+      "healthy_accounts": 0,
+      "capabilities": [
+        "send-messages",
+        "receive-messages",
+        "health",
+        "docs"
+      ],
+      "notes": [
+        "Adapter completo disponível; a ativação real depende de bridge/webhook externo."
+      ],
+      "activation_checklist": [
+        "Provisionar o bridge/webhook real do conector.",
+        "Configurar endpoint/token no account ou adapter_config.",
+        "Executar /agent/channels/login e /probe no ambiente alvo."
+      ]
+    },
+    {
+      "id": "discord",
+      "name": "Discord",
+      "state": "supported_local",
+      "local_testable": true,
+      "requires_external_activation": false,
+      "protocol_family": "token_bot_v1",
+      "protocol_version": "v1",
+      "account_count": 0,
+      "configured_accounts": 0,
+      "healthy_accounts": 0,
+      "capabilities": [
+        "send-messages",
+        "receive-messages",
+        "health",
+        "docs"
+      ],
+      "notes": [],
+      "activation_checklist": []
+    },
+    {
+      "id": "feishu",
+      "name": "Feishu",
+      "state": "adapter_ready_external",
+      "local_testable": false,
+      "requires_external_activation": true,
+      "protocol_family": "webhook_http_v1",
+      "protocol_version": "v1",
+      "account_count": 0,
+      "configured_accounts": 0,
+      "healthy_accounts": 0,
+      "capabilities": [
+        "send-messages",
+        "receive-messages",
+        "health",
+        "docs"
+      ],
+      "notes": [
+        "Adapter completo disponível; a ativação real depende de bridge/webhook externo."
+      ],
+      "activation_checklist": [
+        "Provisionar o bridge/webhook real do conector.",
+        "Configurar endpoint/token no account ou adapter_config.",
+        "Executar /agent/channels/login e /probe no ambiente alvo."
+      ]
+    },
+    {
+      "id": "googlechat",
+      "name": "Google Chat",
+      "state": "adapter_ready_external",
+      "local_testable": false,
+      "requires_external_activation": true,
+      "protocol_family": "webhook_http_v1",
+      "protocol_version": "v1",
+      "account_count": 0,
+      "configured_accounts": 0,
+      "healthy_accounts": 0,
+      "capabilities": [
+        "send-messages",
+        "receive-messages",
+        "health",
+        "docs"
+      ],
+      "notes": [
+        "Adapter completo disponível; a ativação real depende de bridge/webhook externo."
+      ],
+      "activation_checklist": [
+        "Provisionar o bridge/webhook real do conector.",
+        "Configurar endpoint/token no account ou adapter_config.",
+        "Executar /agent/channels/login e /probe no ambiente alvo."
+      ]
+    },
+    {
+      "id": "imessage",
+      "name": "iMessage",
+      "state": "adapter_ready_external",
+      "local_testable": false,
+      "requires_external_activation": true,
+      "protocol_family": "bridge_http_v1",
+      "protocol_version": "v1",
+      "account_count": 0,
+      "configured_accounts": 0,
+      "healthy_accounts": 0,
+      "capabilities": [
+        "send-messages",
+        "receive-messages",
+        "health",
+        "docs"
+      ],
+      "notes": [
+        "Adapter completo disponível; a ativação real depende de bridge/webhook externo."
+      ],
+      "activation_checklist": [
+        "Provisionar o bridge/webhook real do conector.",
+        "Configurar endpoint/token no account ou adapter_config.",
+        "Executar /agent/channels/login e /probe no ambiente alvo."
+      ]
+    },
+    {
+      "id": "irc",
+      "name": "IRC",
+      "state": "supported_local",
+      "local_testable": true,
+      "requires_external_activation": false,
+      "protocol_family": "irc_tcp_v1",
+      "protocol_version": "v1",
+      "account_count": 0,
+      "configured_accounts": 0,
+      "healthy_accounts": 0,
+      "capabilities": [
+        "send-messages",
+        "receive-messages",
+        "health",
+        "docs"
+      ],
+      "notes": [],
+      "activation_checklist": []
+    },
+    {
+      "id": "line",
+      "name": "LINE",
+      "state": "adapter_ready_external",
+      "local_testable": false,
+      "requires_external_activation": true,
+      "protocol_family": "bridge_http_v1",
+      "protocol_version": "v1",
+      "account_count": 0,
+      "configured_accounts": 0,
+      "healthy_accounts": 0,
+      "capabilities": [
+        "send-messages",
+        "receive-messages",
+        "health",
+        "docs"
+      ],
+      "notes": [
+        "Adapter completo disponível; a ativação real depende de bridge/webhook externo."
+      ],
+      "activation_checklist": [
+        "Provisionar o bridge/webhook real do conector.",
+        "Configurar endpoint/token no account ou adapter_config.",
+        "Executar /agent/channels/login e /probe no ambiente alvo."
+      ]
+    },
+    {
+      "id": "matrix",
+      "name": "Matrix",
+      "state": "supported_local",
+      "local_testable": true,
+      "requires_external_activation": false,
+      "protocol_family": "matrix_http_v1",
+      "protocol_version": "v1",
+      "account_count": 0,
+      "configured_accounts": 0,
+      "healthy_accounts": 0,
+      "capabilities": [
+        "send-messages",
+        "receive-messages",
+        "health",
+        "docs"
+      ],
+      "notes": [],
+      "activation_checklist": []
+    },
+    {
+      "id": "mattermost",
+      "name": "Mattermost",
+      "state": "adapter_ready_external",
+      "local_testable": false,
+      "requires_external_activation": true,
+      "protocol_family": "webhook_http_v1",
+      "protocol_version": "v1",
+      "account_count": 0,
+      "configured_accounts": 0,
+      "healthy_accounts": 0,
+      "capabilities": [
+        "send-messages",
+        "receive-messages",
+        "health",
+        "docs"
+      ],
+      "notes": [
+        "Adapter completo disponível; a ativação real depende de bridge/webhook externo."
+      ],
+      "activation_checklist": [
+        "Provisionar o bridge/webhook real do conector.",
+        "Configurar endpoint/token no account ou adapter_config.",
+        "Executar /agent/channels/login e /probe no ambiente alvo."
+      ]
+    },
+    {
+      "id": "msteams",
+      "name": "Microsoft Teams",
+      "state": "adapter_ready_external",
+      "local_testable": false,
+      "requires_external_activation": true,
+      "protocol_family": "webhook_http_v1",
+      "protocol_version": "v1",
+      "account_count": 0,
+      "configured_accounts": 0,
+      "healthy_accounts": 0,
+      "capabilities": [
+        "send-messages",
+        "receive-messages",
+        "health",
+        "docs"
+      ],
+      "notes": [
+        "Adapter completo disponível; a ativação real depende de bridge/webhook externo."
+      ],
+      "activation_checklist": [
+        "Provisionar o bridge/webhook real do conector.",
+        "Configurar endpoint/token no account ou adapter_config.",
+        "Executar /agent/channels/login e /probe no ambiente alvo."
+      ]
+    },
+    {
+      "id": "nextcloud-talk",
+      "name": "Nextcloud Talk",
+      "state": "adapter_ready_external",
+      "local_testable": false,
+      "requires_external_activation": true,
+      "protocol_family": "bridge_http_v1",
+      "protocol_version": "v1",
+      "account_count": 0,
+      "configured_accounts": 0,
+      "healthy_accounts": 0,
+      "capabilities": [
+        "send-messages",
+        "receive-messages",
+        "health",
+        "docs"
+      ],
+      "notes": [
+        "Adapter completo disponível; a ativação real depende de bridge/webhook externo."
+      ],
+      "activation_checklist": [
+        "Provisionar o bridge/webhook real do conector.",
+        "Configurar endpoint/token no account ou adapter_config.",
+        "Executar /agent/channels/login e /probe no ambiente alvo."
+      ]
+    },
+    {
+      "id": "nostr",
+      "name": "Nostr",
+      "state": "adapter_ready_external",
+      "local_testable": false,
+      "requires_external_activation": true,
+      "protocol_family": "bridge_http_v1",
+      "protocol_version": "v1",
+      "account_count": 0,
+      "configured_accounts": 0,
+      "healthy_accounts": 0,
+      "capabilities": [
+        "send-messages",
+        "receive-messages",
+        "health",
+        "docs"
+      ],
+      "notes": [
+        "Adapter completo disponível; a ativação real depende de bridge/webhook externo."
+      ],
+      "activation_checklist": [
+        "Provisionar o bridge/webhook real do conector.",
+        "Configurar endpoint/token no account ou adapter_config.",
+        "Executar /agent/channels/login e /probe no ambiente alvo."
+      ]
+    },
+    {
+      "id": "signal",
+      "name": "Signal",
+      "state": "adapter_ready_external",
+      "local_testable": false,
+      "requires_external_activation": true,
+      "protocol_family": "bridge_http_v1",
+      "protocol_version": "v1",
+      "account_count": 0,
+      "configured_accounts": 0,
+      "healthy_accounts": 0,
+      "capabilities": [
+        "send-messages",
+        "receive-messages",
+        "health",
+        "docs"
+      ],
+      "notes": [
+        "Adapter completo disponível; a ativação real depende de bridge/webhook externo."
+      ],
+      "activation_checklist": [
+        "Provisionar o bridge/webhook real do conector.",
+        "Configurar endpoint/token no account ou adapter_config.",
+        "Executar /agent/channels/login e /probe no ambiente alvo."
+      ]
+    },
+    {
+      "id": "slack",
+      "name": "Slack",
+      "state": "supported_local",
+      "local_testable": true,
+      "requires_external_activation": false,
+      "protocol_family": "token_bot_v1",
+      "protocol_version": "v1",
+      "account_count": 0,
+      "configured_accounts": 0,
+      "healthy_accounts": 0,
+      "capabilities": [
+        "send-messages",
+        "receive-messages",
+        "health",
+        "docs"
+      ],
+      "notes": [],
+      "activation_checklist": []
+    },
+    {
+      "id": "synology-chat",
+      "name": "Synology Chat",
+      "state": "adapter_ready_external",
+      "local_testable": false,
+      "requires_external_activation": true,
+      "protocol_family": "webhook_http_v1",
+      "protocol_version": "v1",
+      "account_count": 0,
+      "configured_accounts": 0,
+      "healthy_accounts": 0,
+      "capabilities": [
+        "send-messages",
+        "receive-messages",
+        "health",
+        "docs"
+      ],
+      "notes": [
+        "Adapter completo disponível; a ativação real depende de bridge/webhook externo."
+      ],
+      "activation_checklist": [
+        "Provisionar o bridge/webhook real do conector.",
+        "Configurar endpoint/token no account ou adapter_config.",
+        "Executar /agent/channels/login e /probe no ambiente alvo."
+      ]
+    },
+    {
+      "id": "telegram",
+      "name": "Telegram",
+      "state": "supported_local",
+      "local_testable": true,
+      "requires_external_activation": false,
+      "protocol_family": "token_bot_v1",
+      "protocol_version": "v1",
+      "account_count": 1,
+      "configured_accounts": 1,
+      "healthy_accounts": 1,
+      "capabilities": [
+        "send-messages",
+        "receive-messages",
+        "health",
+        "docs"
+      ],
+      "notes": [],
+      "activation_checklist": []
+    },
+    {
+      "id": "tlon",
+      "name": "Tlon",
+      "state": "adapter_ready_external",
+      "local_testable": false,
+      "requires_external_activation": true,
+      "protocol_family": "bridge_http_v1",
+      "protocol_version": "v1",
+      "account_count": 0,
+      "configured_accounts": 0,
+      "healthy_accounts": 0,
+      "capabilities": [
+        "send-messages",
+        "receive-messages",
+        "health",
+        "docs"
+      ],
+      "notes": [
+        "Adapter completo disponível; a ativação real depende de bridge/webhook externo."
+      ],
+      "activation_checklist": [
+        "Provisionar o bridge/webhook real do conector.",
+        "Configurar endpoint/token no account ou adapter_config.",
+        "Executar /agent/channels/login e /probe no ambiente alvo."
+      ]
+    },
+    {
+      "id": "whatsapp",
+      "name": "WhatsApp",
+      "state": "supported_local",
+      "local_testable": true,
+      "requires_external_activation": false,
+      "protocol_family": "native_runtime_v1",
+      "protocol_version": "v1",
+      "account_count": 1,
+      "configured_accounts": 1,
+      "healthy_accounts": 1,
+      "capabilities": [
+        "send-messages",
+        "receive-messages",
+        "health",
+        "docs"
+      ],
+      "notes": [],
+      "activation_checklist": []
+    },
+    {
+      "id": "zalo",
+      "name": "Zalo",
+      "state": "adapter_ready_external",
+      "local_testable": false,
+      "requires_external_activation": true,
+      "protocol_family": "bridge_http_v1",
+      "protocol_version": "v1",
+      "account_count": 0,
+      "configured_accounts": 0,
+      "healthy_accounts": 0,
+      "capabilities": [
+        "send-messages",
+        "receive-messages",
+        "health",
+        "docs"
+      ],
+      "notes": [
+        "Adapter completo disponível; a ativação real depende de bridge/webhook externo."
+      ],
+      "activation_checklist": [
+        "Provisionar o bridge/webhook real do conector.",
+        "Configurar endpoint/token no account ou adapter_config.",
+        "Executar /agent/channels/login e /probe no ambiente alvo."
+      ]
+    },
+    {
+      "id": "zalouser",
+      "name": "Zalo User",
+      "state": "adapter_ready_external",
+      "local_testable": false,
+      "requires_external_activation": true,
+      "protocol_family": "bridge_http_v1",
+      "protocol_version": "v1",
+      "account_count": 0,
+      "configured_accounts": 0,
+      "healthy_accounts": 0,
+      "capabilities": [
+        "send-messages",
+        "receive-messages",
+        "health",
+        "docs"
+      ],
+      "notes": [
+        "Adapter completo disponível; a ativação real depende de bridge/webhook externo."
+      ],
+      "activation_checklist": [
+        "Provisionar o bridge/webhook real do conector.",
+        "Configurar endpoint/token no account ou adapter_config.",
+        "Executar /agent/channels/login e /probe no ambiente alvo."
+      ]
+    }
+  ],
+  "plugins": [
+    {
+      "id": "auth",
+      "name": "Auth Plugins",
+      "state": "managed",
+      "enabled": false,
+      "configured": false,
+      "loaded": false,
+      "health": "disabled",
+      "capabilities": [
+        "credentials",
+        "token-broker",
+        "local-auth"
+      ],
+      "errors": []
+    },
+    {
+      "id": "automation-helpers",
+      "name": "Automation Helpers",
+      "state": "managed",
+      "enabled": false,
+      "configured": false,
+      "loaded": false,
+      "health": "disabled",
+      "capabilities": [
+        "scheduler",
+        "jobs",
+        "triggers"
+      ],
+      "errors": []
+    },
+    {
+      "id": "device-pair",
+      "name": "Device Pair",
+      "state": "managed",
+      "enabled": false,
+      "configured": false,
+      "loaded": false,
+      "health": "disabled",
+      "capabilities": [
+        "pairing",
+        "handshake",
+        "qr"
+      ],
+      "errors": []
+    },
+    {
+      "id": "diffs",
+      "name": "Diffs",
+      "state": "managed",
+      "enabled": false,
+      "configured": false,
+      "loaded": false,
+      "health": "disabled",
+      "capabilities": [
+        "patch-preview",
+        "apply",
+        "review"
+      ],
+      "errors": []
+    },
+    {
+      "id": "memory",
+      "name": "Memory",
+      "state": "managed",
+      "enabled": false,
+      "configured": false,
+      "loaded": false,
+      "health": "disabled",
+      "capabilities": [
+        "state",
+        "summaries",
+        "budget-aware-context"
+      ],
+      "errors": []
+    },
+    {
+      "id": "voice-call",
+      "name": "Voice Call",
+      "state": "managed",
+      "enabled": false,
+      "configured": false,
+      "loaded": false,
+      "health": "disabled",
+      "capabilities": [
+        "audio-io",
+        "realtime",
+        "transport-bridge"
+      ],
+      "errors": []
+    }
+  ],
+  "skills": {
+    "subsystem_status": "operational",
+    "summary": {
+      "total": 3,
+      "eligible": 3,
+      "active": 3,
+      "missing_dependencies": 0,
+      "missing_configuration": 0,
+      "configure_now": false,
+      "installable": 0,
+      "node_manager": "npm"
+    },
+    "entries": [
+      {
+        "name": "mock-install",
+        "status": "active",
+        "eligible": true,
+        "enabled": true,
+        "active": true,
+        "integrity": "ok",
+        "installable": true,
+        "missing": [],
+        "capabilities": []
+      },
+      {
+        "name": "summarize",
+        "status": "active",
+        "eligible": true,
+        "enabled": true,
+        "active": true,
+        "integrity": "ok",
+        "installable": false,
+        "missing": [],
+        "capabilities": []
+      },
+      {
+        "name": "weather",
+        "status": "active",
+        "eligible": true,
+        "enabled": true,
+        "active": true,
+        "integrity": "ok",
+        "installable": false,
+        "missing": [],
+        "capabilities": []
+      }
+    ]
+  },
+  "tools": {
+    "selected_profile": "full",
+    "profiles": [
+      {
+        "id": "minimal",
+        "tools_in_profile": 7,
+        "implemented_tools": 7,
+        "allowed_tools": 7,
+        "blocked_tools": 0,
+        "coverage_percent": 100,
+        "status": "covered"
+      },
+      {
+        "id": "coding",
+        "tools_in_profile": 12,
+        "implemented_tools": 12,
+        "allowed_tools": 12,
+        "blocked_tools": 0,
+        "coverage_percent": 100,
+        "status": "covered"
+      },
+      {
+        "id": "messaging",
+        "tools_in_profile": 8,
+        "implemented_tools": 8,
+        "allowed_tools": 8,
+        "blocked_tools": 0,
+        "coverage_percent": 100,
+        "status": "covered"
+      },
+      {
+        "id": "full",
+        "tools_in_profile": 13,
+        "implemented_tools": 13,
+        "allowed_tools": 13,
+        "blocked_tools": 0,
+        "coverage_percent": 100,
+        "status": "covered"
+      }
+    ],
+    "effective_policy": {
+      "profile": "full",
+      "agent_id": "default",
+      "entries": [
+        {
+          "name": "edit_file",
+          "section": "filesystem",
+          "risk": "high",
+          "description": "Apply an exact-text edit to a file inside the workspace sandbox.",
+          "implemented": true,
+          "allowed": true,
+          "final_rule": "agent:default:allow:edit_file",
+          "trace": [
+            {
+              "scope": "profile",
+              "action": "allow",
+              "rule": "full",
+              "matched": true
+            },
+            {
+              "scope": "agent:default",
+              "action": "allow",
+              "rule": "edit_file",
+              "matched": true
+            }
+          ]
+        },
+        {
+          "name": "exec",
+          "section": "execution",
+          "risk": "critical",
+          "description": "Run a shell command in the workspace.",
+          "implemented": true,
+          "allowed": true,
+          "final_rule": "agent:default:allow:exec",
+          "trace": [
+            {
+              "scope": "profile",
+              "action": "allow",
+              "rule": "full",
+              "matched": true
+            },
+            {
+              "scope": "agent:default",
+              "action": "allow",
+              "rule": "exec",
+              "matched": true
+            }
+          ]
+        },
+        {
+          "name": "list_dir",
+          "section": "filesystem",
+          "risk": "low",
+          "description": "List files and directories inside the workspace sandbox.",
+          "implemented": true,
+          "allowed": true,
+          "final_rule": "agent:default:allow:list_dir",
+          "trace": [
+            {
+              "scope": "profile",
+              "action": "allow",
+              "rule": "full",
+              "matched": true
+            },
+            {
+              "scope": "agent:default",
+              "action": "allow",
+              "rule": "list_dir",
+              "matched": true
+            }
+          ]
+        },
+        {
+          "name": "memory_get",
+          "section": "memory",
+          "risk": "low",
+          "description": "Fetch a local memory artifact by id.",
+          "implemented": true,
+          "allowed": true,
+          "final_rule": "agent:default:allow:memory_get",
+          "trace": [
+            {
+              "scope": "profile",
+              "action": "allow",
+              "rule": "full",
+              "matched": true
+            },
+            {
+              "scope": "agent:default",
+              "action": "allow",
+              "rule": "memory_get",
+              "matched": true
+            }
+          ]
+        },
+        {
+          "name": "memory_search",
+          "section": "memory",
+          "risk": "low",
+          "description": "Search compact local memory artifacts generated from prior sessions.",
+          "implemented": true,
+          "allowed": true,
+          "final_rule": "agent:default:allow:memory_search",
+          "trace": [
+            {
+              "scope": "profile",
+              "action": "allow",
+              "rule": "full",
+              "matched": true
+            },
+            {
+              "scope": "agent:default",
+              "action": "allow",
+              "rule": "memory_search",
+              "matched": true
+            }
+          ]
+        },
+        {
+          "name": "message",
+          "section": "messaging",
+          "risk": "high",
+          "description": "Send an outbound message through a configured channel account.",
+          "implemented": true,
+          "allowed": true,
+          "final_rule": "agent:default:allow:message",
+          "trace": [
+            {
+              "scope": "profile",
+              "action": "allow",
+              "rule": "full",
+              "matched": true
+            },
+            {
+              "scope": "agent:default",
+              "action": "allow",
+              "rule": "message",
+              "matched": true
+            }
+          ]
+        },
+        {
+          "name": "read_file",
+          "section": "filesystem",
+          "risk": "low",
+          "description": "Read the contents of a file inside the workspace sandbox.",
+          "implemented": true,
+          "allowed": true,
+          "final_rule": "agent:default:allow:read_file",
+          "trace": [
+            {
+              "scope": "profile",
+              "action": "allow",
+              "rule": "full",
+              "matched": true
+            },
+            {
+              "scope": "agent:default",
+              "action": "allow",
+              "rule": "read_file",
+              "matched": true
+            }
+          ]
+        },
+        {
+          "name": "sessions_history",
+          "section": "sessions",
+          "risk": "low",
+          "description": "Read message history from a local agent session.",
+          "implemented": true,
+          "allowed": true,
+          "final_rule": "agent:default:allow:sessions_history",
+          "trace": [
+            {
+              "scope": "profile",
+              "action": "allow",
+              "rule": "full",
+              "matched": true
+            },
+            {
+              "scope": "agent:default",
+              "action": "allow",
+              "rule": "sessions_history",
+              "matched": true
+            }
+          ]
+        },
+        {
+          "name": "sessions_list",
+          "section": "sessions",
+          "risk": "low",
+          "description": "List locally stored agent sessions.",
+          "implemented": true,
+          "allowed": true,
+          "final_rule": "agent:default:allow:sessions_list",
+          "trace": [
+            {
+              "scope": "profile",
+              "action": "allow",
+              "rule": "full",
+              "matched": true
+            },
+            {
+              "scope": "agent:default",
+              "action": "allow",
+              "rule": "sessions_list",
+              "matched": true
+            }
+          ]
+        },
+        {
+          "name": "sessions_send",
+          "section": "sessions",
+          "risk": "medium",
+          "description": "Append a message to a local agent session.",
+          "implemented": true,
+          "allowed": true,
+          "final_rule": "agent:default:allow:sessions_send",
+          "trace": [
+            {
+              "scope": "profile",
+              "action": "allow",
+              "rule": "full",
+              "matched": true
+            },
+            {
+              "scope": "agent:default",
+              "action": "allow",
+              "rule": "sessions_send",
+              "matched": true
+            }
+          ]
+        },
+        {
+          "name": "sessions_spawn",
+          "section": "sessions",
+          "risk": "medium",
+          "description": "Create a new local agent session.",
+          "implemented": true,
+          "allowed": true,
+          "final_rule": "agent:default:allow:sessions_spawn",
+          "trace": [
+            {
+              "scope": "profile",
+              "action": "allow",
+              "rule": "full",
+              "matched": true
+            },
+            {
+              "scope": "agent:default",
+              "action": "allow",
+              "rule": "sessions_spawn",
+              "matched": true
+            }
+          ]
+        },
+        {
+          "name": "sessions_status",
+          "section": "sessions",
+          "risk": "low",
+          "description": "Inspect metadata and current status for a local agent session.",
+          "implemented": true,
+          "allowed": true,
+          "final_rule": "agent:default:allow:sessions_status",
+          "trace": [
+            {
+              "scope": "profile",
+              "action": "allow",
+              "rule": "full",
+              "matched": true
+            },
+            {
+              "scope": "agent:default",
+              "action": "allow",
+              "rule": "sessions_status",
+              "matched": true
+            }
+          ]
+        },
+        {
+          "name": "write_file",
+          "section": "filesystem",
+          "risk": "high",
+          "description": "Write or create a file inside the workspace sandbox.",
+          "implemented": true,
+          "allowed": true,
+          "final_rule": "agent:default:allow:write_file",
+          "trace": [
+            {
+              "scope": "profile",
+              "action": "allow",
+              "rule": "full",
+              "matched": true
+            },
+            {
+              "scope": "agent:default",
+              "action": "allow",
+              "rule": "write_file",
+              "matched": true
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "endpoint_compatibility": [
+    {
+      "method": "GET",
+      "path": "/agent/config",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "existing agent configuration contract preserved"
+    },
+    {
+      "method": "POST",
+      "path": "/agent/config",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "existing configuration mutation contract preserved"
+    },
+    {
+      "method": "GET",
+      "path": "/agent/skills",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "skill catalog listing preserved"
+    },
+    {
+      "method": "GET",
+      "path": "/agent/skills/check",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "skill eligibility inspection preserved"
+    },
+    {
+      "method": "POST",
+      "path": "/agent/skills/install",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "skill dependency install flow preserved"
+    },
+    {
+      "method": "POST",
+      "path": "/agent/skills/enable",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "skill toggle flow preserved"
+    },
+    {
+      "method": "POST",
+      "path": "/agent/skills/disable",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "skill toggle flow preserved"
+    },
+    {
+      "method": "GET",
+      "path": "/agent/tools",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "effective tool list preserved"
+    },
+    {
+      "method": "GET",
+      "path": "/agent/tools/catalog",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "tool catalog contract preserved"
+    },
+    {
+      "method": "GET",
+      "path": "/agent/tools/effective-policy",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "effective policy endpoint preserved"
+    },
+    {
+      "method": "POST",
+      "path": "/agent/tools/profile",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "profile switch endpoint preserved"
+    },
+    {
+      "method": "POST",
+      "path": "/agent/tools/allow-deny",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "allow/deny mutation preserved"
+    },
+    {
+      "method": "GET",
+      "path": "/agent/plugins",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "plugin inventory preserved"
+    },
+    {
+      "method": "POST",
+      "path": "/agent/plugins/enable",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "plugin enable mutation preserved"
+    },
+    {
+      "method": "POST",
+      "path": "/agent/plugins/disable",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "plugin disable mutation preserved"
+    },
+    {
+      "method": "GET",
+      "path": "/agent/channels",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "channel inventory preserved"
+    },
+    {
+      "method": "GET",
+      "path": "/agent/channels/catalog",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "channel catalog preserved"
+    },
+    {
+      "method": "POST",
+      "path": "/agent/channels/upsert-account",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "channel account mutation preserved"
+    },
+    {
+      "method": "POST",
+      "path": "/agent/channels/login",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "channel login flow preserved"
+    },
+    {
+      "method": "POST",
+      "path": "/agent/channels/logout",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "channel logout flow preserved"
+    },
+    {
+      "method": "POST",
+      "path": "/agent/channels/probe",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "channel probe flow preserved"
+    },
+    {
+      "method": "GET",
+      "path": "/agent/channels/status",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "channel status listing preserved"
+    },
+    {
+      "method": "GET",
+      "path": "/agent/channels/capabilities",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "channel capabilities preserved"
+    },
+    {
+      "method": "GET",
+      "path": "/agent/context/budget",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "budget telemetry endpoint preserved"
+    },
+    {
+      "method": "POST",
+      "path": "/agent/run",
+      "status": "preserved",
+      "backward_compatible": true,
+      "notes": "agent loop execution preserved"
+    }
+  ],
+  "context_benchmark": {
+    "provider_id": "ollama",
+    "model_id": "qwen2.5-coder:7b",
+    "model_profile": "small_local",
+    "tool_profile": "full",
+    "status": "tight",
+    "max_prompt_tokens": 1200,
+    "prompt_tokens_before_compression": 1199,
+    "prompt_tokens_after_compression": 1177,
+    "history_messages_total": 21,
+    "history_messages_used": 16,
+    "summarized_messages": 6,
+    "summary_entries": 1,
+    "tools_considered": 13,
+    "tools_in_prompt": 2,
+    "response_style": "short",
+    "critical": true,
+    "recommendation": "Reduzir ferramentas expostas e manter profile small_local com compressao agressiva."
+  },
+  "gaps": [
+    {
+      "area": "channels",
+      "id": "external_activation",
+      "severity": "warning",
+      "message": "14 channel adapters depend on external bridge/webhook activation for production use.",
+      "action": "Usar o mock E2E local para validar o adapter e seguir o checklist de ativacao real no ambiente alvo."
+    },
+    {
+      "area": "context",
+      "id": "small_local_budget",
+      "severity": "warning",
+      "message": "Synthetic small-local benchmark hit critical context headroom.",
+      "action": "Reduzir ferramentas expostas e manter profile small_local com compressao agressiva."
+    }
+  ]
+}

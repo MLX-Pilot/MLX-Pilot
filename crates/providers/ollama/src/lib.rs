@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use mlx_ollama_core::{
-    ChatMessage, ChatRequest, ChatResponse, MessageRole, ModelDescriptor, ModelProvider,
-    ProviderError, TokenUsage,
+    ChatMessage, ChatRequest, ChatResponse, ChatToolsRequest, GenerationOptions, MessageRole,
+    ModelDescriptor, ModelProvider, ProviderError, TokenUsage,
 };
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -321,12 +321,41 @@ struct OllamaChatRequestBody {
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     options: Option<OllamaOptions>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    tools: Vec<OllamaTool>,
+}
+
+#[derive(Debug, Serialize)]
+struct OllamaTool {
+    #[serde(rename = "type")]
+    tool_type: String,
+    function: OllamaFunction,
+}
+
+#[derive(Debug, Serialize)]
+struct OllamaFunction {
+    name: String,
+    description: String,
+    parameters: serde_json::Value,
 }
 
 #[derive(Debug, Serialize)]
 struct OllamaChatMessage {
     role: String,
     content: String,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    tool_calls: Vec<OllamaToolCall>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct OllamaToolCall {
+    function: OllamaToolCallFunction,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct OllamaToolCallFunction {
+    name: String,
+    arguments: serde_json::Value,
 }
 
 #[derive(Debug, Serialize)]
@@ -357,6 +386,8 @@ struct OllamaChatResponseBody {
 struct OllamaChatResponseMessage {
     #[serde(default)]
     content: String,
+    #[serde(default)]
+    tool_calls: Option<Vec<OllamaToolCall>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -429,7 +460,33 @@ impl ModelProvider for OllamaProvider {
     }
 
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, ProviderError> {
-        if request.messages.is_empty() {
+        self.do_chat(&request.model_id, &request.messages, &request.options, None)
+            .await
+    }
+
+    async fn chat_with_tools(
+        &self,
+        request: ChatToolsRequest,
+    ) -> Result<ChatResponse, ProviderError> {
+        self.do_chat(
+            &request.model_id,
+            &request.messages,
+            &request.options,
+            Some(request.tools),
+        )
+        .await
+    }
+}
+
+impl OllamaProvider {
+    async fn do_chat(
+        &self,
+        model_id: &str,
+        messages: &[ChatMessage],
+        options: &GenerationOptions,
+        tools: Option<Vec<mlx_ollama_core::FunctionDef>>,
+    ) -> Result<ChatResponse, ProviderError> {
+        if messages.is_empty() {
             return Err(ProviderError::InvalidRequest {
                 details: "messages cannot be empty".to_string(),
             });
@@ -440,26 +497,56 @@ impl ModelProvider for OllamaProvider {
         let endpoint = self.endpoint("/api/chat")?;
         let started = Instant::now();
 
-        let body = OllamaChatRequestBody {
-            model: request.model_id.clone(),
-            messages: request
-                .messages
+        let mut mapped_messages = Vec::with_capacity(messages.len());
+        for message in messages {
+            let role = match message.role {
+                MessageRole::System => "system".to_string(),
+                MessageRole::User => "user".to_string(),
+                MessageRole::Assistant => "assistant".to_string(),
+                MessageRole::Tool => "tool".to_string(),
+            };
+
+            let tool_calls = message
+                .tool_calls
                 .iter()
-                .map(|message| OllamaChatMessage {
-                    role: match message.role {
-                        MessageRole::System => "system".to_string(),
-                        MessageRole::User => "user".to_string(),
-                        MessageRole::Assistant => "assistant".to_string(),
+                .map(|tc| OllamaToolCall {
+                    function: OllamaToolCallFunction {
+                        name: tc.name.clone(),
+                        arguments: serde_json::from_str(&tc.arguments).unwrap_or_default(),
                     },
-                    content: message.content.clone(),
                 })
-                .collect::<Vec<_>>(),
+                .collect();
+
+            mapped_messages.push(OllamaChatMessage {
+                role,
+                content: message.content.clone(),
+                tool_calls,
+            });
+        }
+
+        let mapped_tools = tools
+            .unwrap_or_default()
+            .into_iter()
+            .map(|f| OllamaTool {
+                tool_type: "function".to_string(),
+                function: OllamaFunction {
+                    name: f.name,
+                    description: f.description,
+                    parameters: f.parameters,
+                },
+            })
+            .collect();
+
+        let body = OllamaChatRequestBody {
+            model: model_id.to_string(),
+            messages: mapped_messages,
             stream: false,
             options: Some(OllamaOptions {
-                temperature: request.options.temperature,
-                max_tokens: request.options.max_tokens,
-                top_p: request.options.top_p,
+                temperature: options.temperature,
+                max_tokens: options.max_tokens,
+                top_p: options.top_p,
             }),
+            tools: mapped_tools,
         };
 
         let response = self
@@ -493,6 +580,20 @@ impl ModelProvider for OllamaProvider {
             .map(|message| message.content.trim().to_string())
             .unwrap_or_default();
 
+        let mut tool_calls = Vec::new();
+        if let Some(msg) = &payload.message {
+            if let Some(calls) = &msg.tool_calls {
+                for call in calls {
+                    tool_calls.push(mlx_ollama_core::ToolCallRequest {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        name: call.function.name.clone(),
+                        arguments: serde_json::to_string(&call.function.arguments)
+                            .unwrap_or_default(),
+                    });
+                }
+            }
+        }
+
         let prompt_tokens = payload.prompt_eval_count.unwrap_or(0);
         let completion_tokens = payload
             .eval_count
@@ -510,17 +611,21 @@ impl ModelProvider for OllamaProvider {
 
         let raw_output = serde_json::to_string(&payload).ok();
 
+        let chat_message = ChatMessage {
+            role: MessageRole::Assistant,
+            content,
+            tool_calls,
+            tool_call_id: None,
+        };
+
         Ok(ChatResponse {
             model_id: if payload.model.trim().is_empty() {
-                request.model_id
+                model_id.to_string()
             } else {
                 payload.model
             },
             provider: self.provider_id().to_string(),
-            message: ChatMessage {
-                role: MessageRole::Assistant,
-                content,
-            },
+            message: chat_message,
             usage,
             latency_ms,
             raw_output,
@@ -580,5 +685,67 @@ async fn run_shell(script: &str, timeout: Duration) -> Result<(), ProviderError>
     #[cfg(not(target_os = "windows"))]
     {
         run_command("sh", &["-lc", script], timeout).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tool_serialization() {
+        let tools = vec![OllamaTool {
+            tool_type: "function".to_string(),
+            function: OllamaFunction {
+                name: "get_weather".to_string(),
+                description: "Get the weather".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "location": { "type": "string" }
+                    }
+                }),
+            },
+        }];
+
+        let json = serde_json::to_string(&tools).unwrap();
+        assert!(json.contains("get_weather"));
+        assert!(json.contains("Get the weather"));
+        assert!(json.contains("location"));
+    }
+
+    #[test]
+    fn test_tool_call_deserialization() {
+        let response_json = r#"{
+            "model": "llama3.1",
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "get_weather",
+                            "arguments": {
+                                "location": "San Francisco"
+                            }
+                        }
+                    }
+                ]
+            },
+            "done": true
+        }"#;
+
+        let payload: OllamaChatResponseBody = serde_json::from_str(response_json).unwrap();
+        let message = payload.message.unwrap();
+        let tool_calls = message.tool_calls.unwrap();
+
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].function.name, "get_weather");
+        assert_eq!(
+            tool_calls[0].function.arguments["location"]
+                .as_str()
+                .unwrap(),
+            "San Francisco"
+        );
     }
 }

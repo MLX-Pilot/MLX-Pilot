@@ -11,6 +11,10 @@ source "$HOME/.cargo/env"
 export APP_LOCAL_PROVIDER="${APP_LOCAL_PROVIDER:-auto}"
 export APP_LLAMACPP_AUTO_INSTALL="${APP_LLAMACPP_AUTO_INSTALL:-true}"
 export APP_LLAMACPP_AUTO_START="${APP_LLAMACPP_AUTO_START:-true}"
+export APP_MLX_AIRLLM_ENABLED="${APP_MLX_AIRLLM_ENABLED:-true}"
+export APP_MLX_AIRLLM_THRESHOLD_PERCENT="${APP_MLX_AIRLLM_THRESHOLD_PERCENT:-70}"
+export APP_MLX_AIRLLM_SAFE_MODE="${APP_MLX_AIRLLM_SAFE_MODE:-true}"
+export APP_MLX_AIRLLM_RUNNER="${APP_MLX_AIRLLM_RUNNER:-$ROOT_DIR/scripts/mlx_airllm_bridge.py}"
 
 if [ -x "$ROOT_DIR/bin/llama-server" ]; then
   export APP_LLAMACPP_SERVER_BINARY="$ROOT_DIR/bin/llama-server"
@@ -18,6 +22,7 @@ fi
 
 if [ -x "/Users/kaike/mlx-env/bin/mlx_lm.generate" ]; then
   export APP_MLX_COMMAND="/Users/kaike/mlx-env/bin/mlx_lm.generate"
+  export APP_MLX_AIRLLM_PYTHON_COMMAND="${APP_MLX_AIRLLM_PYTHON_COMMAND:-/Users/kaike/mlx-env/bin/python}"
   export PATH="/Users/kaike/mlx-env/bin:$PATH"
 fi
 

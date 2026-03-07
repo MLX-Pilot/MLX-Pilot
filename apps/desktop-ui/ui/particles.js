@@ -568,8 +568,8 @@ export class ParticleSystem {
       }
 
       if (state === 'neutral') {
-        if (i < this.COUNT * 0.08) {
-          const radius = 10 + Math.random() * 26;
+        if (i < this.COUNT * 0.18) {
+          const radius = 10 + Math.random() * 34;
           const theta = Math.random() * Math.PI * 2;
           const phi = Math.random() * Math.PI;
 
@@ -577,10 +577,10 @@ export class ParticleSystem {
           this.targetPositions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
           this.targetPositions[i * 3 + 2] = radius * Math.cos(phi);
 
-          this.targetColors[i * 3] = 0.08;
-          this.targetColors[i * 3 + 1] = 0.14;
-          this.targetColors[i * 3 + 2] = 0.36;
-          this.targetSizes[i] = 0.38;
+          this.targetColors[i * 3] = 0.14;
+          this.targetColors[i * 3 + 1] = 0.24;
+          this.targetColors[i * 3 + 2] = 0.58;
+          this.targetSizes[i] = 0.52;
         } else {
           this.targetPositions[i * 3] = 0;
           this.targetPositions[i * 3 + 1] = 0;

@@ -1,16 +1,24 @@
 import { ParticleSystem } from "./particles.js";
+import { createAgentChannelsController } from "./agent-channels.js";
+import { createAgentSkillsController } from "./agent-skills.js";
+import { createAgentControlPlaneController } from "./agent-control-plane.js";
 
 const STORAGE_DAEMON_URL = "mlxPilotDaemonUrl";
 const STORAGE_CHAT_THREADS = "mlxPilotChatThreadsV2";
 const STORAGE_AGENT_OBSERVABILITY_PREFIX = "mlxPilotAgentObservabilityV2";
-const STORAGE_BRAVE_API_KEY = "mlxPilotBraveApiKey";
 const STORAGE_CHAT_WEBSEARCH_ENABLED = "mlxPilotWebsearchEnabled";
+const STORAGE_CHAT_AIRLLM_ENABLED = "mlxPilotChatAirllmEnabled";
 
 const STREAM_CHARS_PER_TICK = 22;
 const STREAM_TICK_MS = 20;
 const CHAT_SCROLL_THRESHOLD_PX = 72;
 const OPENCLAW_LOG_POLL_MS = 1500;
 const OPENCLAW_LOG_MAX_CHARS = 120000;
+const DAEMON_BOOT_TIMEOUT_MS = 45000;
+const DAEMON_BOOT_POLL_MS = 500;
+const CHAT_MAX_TOKENS_DEFAULT = 512;
+const CHAT_MAX_TOKENS_THINKING = 1536;
+const ENVIRONMENT_ENDPOINT_CANDIDATES = ["/environment", "/openclaw/environment"];
 
 const appShell = document.getElementById("app-shell");
 const splashScreen = document.getElementById("splash-screen");
@@ -19,7 +27,6 @@ const chatSidebar = document.getElementById("chat-sidebar");
 const statusPill = document.getElementById("status-pill");
 
 const daemonInput = document.getElementById("daemon-url");
-const braveApiKeyInput = document.getElementById("brave-api-key");
 const saveUrlBtn = document.getElementById("save-url");
 
 const tabButtons = Array.from(document.querySelectorAll(".tab-btn[data-tab]"));
@@ -29,6 +36,7 @@ const panelDiscover = document.getElementById("panel-discover");
 const panelOpenClaw = document.getElementById("panel-openclaw");
 const panelSettings = document.getElementById("panel-settings");
 const panelAiInteraction = document.getElementById("panel-ai-interaction");
+const panelAgent = document.getElementById("panel-agent");
 const chatEmptyHero = document.getElementById("chat-empty-hero");
 
 const chatModelSwitcher = document.getElementById("chat-model-switcher");
@@ -36,6 +44,7 @@ const chatModelTrigger = document.getElementById("chat-model-trigger");
 const chatModelCurrent = document.getElementById("chat-model-current");
 const chatModelMenu = document.getElementById("chat-model-menu");
 const chatModelSelect = document.getElementById("chat-model-select");
+const chatAirllmToggleBtn = document.getElementById("chat-airllm-toggle");
 const refreshModelsBtn = document.getElementById("refresh-models");
 const newChatThreadTopBtn = document.getElementById("new-chat-thread-top");
 
@@ -61,10 +70,16 @@ const catalogQuery = document.getElementById("catalog-query");
 const catalogSearchBtn = document.getElementById("catalog-search-btn");
 const catalogMeta = document.getElementById("catalog-meta");
 const remoteResults = document.getElementById("remote-results");
+const discoverSubtabButtons = Array.from(document.querySelectorAll("[data-discover-subtab]"));
+const discoverCatalogView = document.getElementById("discover-view-catalog");
+const discoverInstalledView = document.getElementById("discover-view-installed");
 const remoteCardTemplate = document.getElementById("remote-card-template");
 const refreshDownloadsBtn = document.getElementById("refresh-downloads");
 const downloadList = document.getElementById("download-list");
 const downloadItemTemplate = document.getElementById("download-item-template");
+const refreshInstalledModelsBtn = document.getElementById("refresh-installed-models");
+const installedModelsMeta = document.getElementById("installed-models-meta");
+const installedModelsList = document.getElementById("installed-models-list");
 
 const openclawStatusText = document.getElementById("openclaw-status-text");
 const openclawRuntimeMeta = document.getElementById("openclaw-runtime-meta");
@@ -153,21 +168,146 @@ const openclawEnvFeedback = document.getElementById("openclaw-env-feedback");
 const openclawEnvPath = document.getElementById("openclaw-env-path");
 const openclawEnvList = document.getElementById("openclaw-env-list");
 
+const agentMeta = document.getElementById("agent-meta");
+const agentRefreshBtn = document.getElementById("agent-refresh-btn");
+const agentSaveConfigBtn = document.getElementById("agent-save-config-btn");
+const agentPluginsRefreshBtn = document.getElementById("agent-plugins-refresh-btn");
+const agentPluginsList = document.getElementById("agent-plugins-list");
+const agentPluginDetailTitle = document.getElementById("agent-plugin-detail-title");
+const agentPluginDetailMeta = document.getElementById("agent-plugin-detail-meta");
+const agentPluginConfigEnabled = document.getElementById("agent-plugin-config-enabled");
+const agentPluginConfigForm = document.getElementById("agent-plugin-config-form");
+const agentPluginSaveBtn = document.getElementById("agent-plugin-save-btn");
+const agentPluginResetBtn = document.getElementById("agent-plugin-reset-btn");
+const agentPluginFeedback = document.getElementById("agent-plugin-feedback");
+const agentProviderSelect = document.getElementById("agent-provider-select");
+const agentModelSelect = document.getElementById("agent-model-select");
+const agentApiKeyInput = document.getElementById("agent-api-key-input");
+const agentBaseUrlInput = document.getElementById("agent-base-url-input");
+const agentStreamingToggle = document.getElementById("agent-streaming-toggle");
+const agentFallbackToggle = document.getElementById("agent-fallback-toggle");
+const agentFallbackProviderSelect = document.getElementById("agent-fallback-provider-select");
+const agentFallbackModelInput = document.getElementById("agent-fallback-model-input");
+const agentExecutionModeSelect = document.getElementById("agent-execution-mode-select");
+const agentApprovalModeSelect = document.getElementById("agent-approval-mode-select");
+const agentMaxPromptInput = document.getElementById("agent-max-prompt-input");
+const agentMaxHistoryInput = document.getElementById("agent-max-history-input");
+const agentMaxToolsInput = document.getElementById("agent-max-tools-input");
+const agentAggressiveToolsToggle = document.getElementById("agent-aggressive-tools-toggle");
+const agentToolFallbackToggle = document.getElementById("agent-tool-fallback-toggle");
+const agentToolProfileSelect = document.getElementById("agent-tool-profile-select");
+const agentToolProfileApplyBtn = document.getElementById("agent-tool-profile-apply-btn");
+const agentPolicyScopeSelect = document.getElementById("agent-policy-scope-select");
+const agentPolicyAllowInput = document.getElementById("agent-policy-allow-input");
+const agentPolicyDenyInput = document.getElementById("agent-policy-deny-input");
+const agentPolicySaveBtn = document.getElementById("agent-policy-save-btn");
+const agentPolicyResetBtn = document.getElementById("agent-policy-reset-btn");
+const agentPolicyFeedback = document.getElementById("agent-policy-feedback");
+const agentToolCatalogSummary = document.getElementById("agent-tool-catalog-summary");
+const agentEffectivePolicyList = document.getElementById("agent-effective-policy-list");
+const agentReloadSkillsBtn = document.getElementById("agent-reload-skills-btn");
+const agentCheckSkillsBtn = document.getElementById("agent-check-skills-btn");
+const agentConfigureSkillsBtn = document.getElementById("agent-configure-skills-btn");
+const agentInstallSkillsBtn = document.getElementById("agent-install-skills-btn");
+const agentNodeManagerSelect = document.getElementById("agent-node-manager-select");
+const agentSkillsSummary = document.getElementById("agent-skills-summary");
+const agentSkillsList = document.getElementById("agent-skills-list");
+const agentToolsList = document.getElementById("agent-tools-list");
+const agentEgressInput = document.getElementById("agent-egress-input");
+const agentSensitivePathsInput = document.getElementById("agent-sensitive-paths-input");
+const agentMaxPromptValue = document.getElementById("agent-max-prompt-value");
+const agentMaxHistoryValue = document.getElementById("agent-max-history-value");
+const agentMaxToolsValue = document.getElementById("agent-max-tools-value");
+const agentMemoryLocalToggle = document.getElementById("agent-memory-local-toggle");
+const agentMemoryBackendSelect = document.getElementById("agent-memory-backend-select");
+const agentMemoryCompressionSelect = document.getElementById("agent-memory-compression-select");
+const agentMemorySaveBtn = document.getElementById("agent-memory-save-btn");
+const agentMemoryFeedback = document.getElementById("agent-memory-feedback");
+const agentBudgetRefreshBtn = document.getElementById("agent-budget-refresh-btn");
+const agentBudgetTelemetry = document.getElementById("agent-budget-telemetry");
+const agentChannelsRefreshBtn = document.getElementById("agent-channels-refresh-btn");
+const agentChannelSelect = document.getElementById("agent-channel-select");
+const agentChannelAccountIdInput = document.getElementById("agent-channel-account-id");
+const agentChannelCredentialsInput = document.getElementById("agent-channel-credentials");
+const agentChannelMetadataInput = document.getElementById("agent-channel-metadata");
+const agentChannelRoutingDefaultsInput = document.getElementById("agent-channel-routing-defaults");
+const agentChannelEnabledToggle = document.getElementById("agent-channel-enabled");
+const agentChannelSetDefaultToggle = document.getElementById("agent-channel-set-default");
+const agentChannelSaveBtn = document.getElementById("agent-channel-save-btn");
+const agentChannelClearBtn = document.getElementById("agent-channel-clear-btn");
+const agentChannelFormFeedback = document.getElementById("agent-channel-form-feedback");
+const agentSendChannelSelect = document.getElementById("agent-send-channel");
+const agentSendAccountSelect = document.getElementById("agent-send-account");
+const agentSendTargetInput = document.getElementById("agent-send-target");
+const agentSendMessageInput = document.getElementById("agent-send-message");
+const agentSendTestBtn = document.getElementById("agent-send-test-btn");
+const agentProbeChannelBtn = document.getElementById("agent-probe-channel-btn");
+const agentResolveTargetBtn = document.getElementById("agent-resolve-target-btn");
+const agentChannelActionFeedback = document.getElementById("agent-channel-action-feedback");
+const agentChannelList = document.getElementById("agent-channel-list");
+const agentChannelLogsRefreshBtn = document.getElementById("agent-channel-logs-refresh-btn");
+const agentChannelLogsChannelSelect = document.getElementById("agent-channel-logs-channel");
+const agentChannelLogsAccountSelect = document.getElementById("agent-channel-logs-account");
+const agentChannelLogsList = document.getElementById("agent-channel-logs-list");
+const agentAuditList = document.getElementById("agent-audit-list");
+const agentChatStatus = document.getElementById("agent-chat-status");
+const agentChatLog = document.getElementById("agent-chat-log");
+const agentChatForm = document.getElementById("agent-chat-form");
+const agentMessageInput = document.getElementById("agent-message-input");
+const agentSendBtn = document.getElementById("agent-send-btn");
+const agentRuntimeRefreshBtn = document.getElementById("agent-runtime-refresh-btn");
+const agentRuntimeSummary = document.getElementById("agent-runtime-summary");
+const agentRuntimeFrameworkMeta = document.getElementById("agent-runtime-framework-meta");
+const agentRuntimeDiagnosticsList = document.getElementById("agent-runtime-diagnostics-list");
+const agentRuntimeLogMode = document.getElementById("agent-runtime-log-mode");
+const agentRuntimeLogSource = document.getElementById("agent-runtime-log-source");
+const agentRuntimeLogAccount = document.getElementById("agent-runtime-log-account");
+const agentRuntimeLogList = document.getElementById("agent-runtime-log-list");
+
+// Agent Observability Console (Audit Feed)
+const auditFilterSession = document.getElementById("audit-filter-session");
+const auditFilterEvent = document.getElementById("audit-filter-event");
+const auditFilterStatus = document.getElementById("audit-filter-status");
+const auditFilterTool = document.getElementById("audit-filter-tool");
+const auditFollowToggle = document.getElementById("audit-follow-toggle");
+const auditExportBtn = document.getElementById("audit-export-btn");
+const agentObservabilityList = document.getElementById("agent-observability-list");
+
+const auditDetailPanel = document.getElementById("audit-detail-panel");
+const auditDetailContent = document.getElementById("audit-detail-content");
+const auditDetailCloseBtn = document.getElementById("audit-detail-close");
+
+let auditPollTimer = null;
+let auditConsoleLastParams = "";
+let auditActiveSessionFollowCache = null;
+
+const agentSessionSelect = document.getElementById("agent-session-select");
+const agentNewSessionBtn = document.getElementById("agent-new-session-btn");
+const agentRenameSessionBtn = document.getElementById("agent-rename-session-btn");
+const agentExportSessionBtn = document.getElementById("agent-export-session-btn");
+const agentDeleteSessionBtn = document.getElementById("agent-delete-session-btn");
+
 let daemonBaseUrl = localStorage.getItem(STORAGE_DAEMON_URL) || "http://127.0.0.1:11435";
 let selectedModelId = null;
 let localModels = [];
+let chatAirllmEnabled = true;
+let chatAirllmPersistInFlight = false;
 
 let chatThreads = [];
 let activeThreadId = null;
 let openThreadMenuId = null;
 
 let activeTab = "chat";
+let activeDiscoverSubtab = "catalog";
 let activeAgentFramework = "openclaw";
 let chatModelMenuOpen = false;
 let isGenerating = false;
 let activeStreamController = null;
 let streamFallbackNotified = false;
 let pendingEditMessageIndex = null;
+
+let agentSessions = [];
+let activeAgentSessionId = null;
 
 let lastDownloadsFingerprint = "";
 let downloadsTimer = null;
@@ -196,16 +336,21 @@ let openclawRuntimeActionInFlight = false;
 let openclawSelectedViews = new Set(["chat"]);
 let openclawMultiView = false;
 let openclawEnvironmentInFlight = false;
+let resolvedEnvironmentEndpoint = null;
 let openclawModelsCatalog = {
   cloud_models: [],
   local_models: [],
   current: null,
 };
 
+let agentProvidersCatalog = [];
+let agentModelsByProvider = {};
+let agentConfigCache = null;
+let agentToolsCache = [];
+let agentSkillsController = null;
+let agentControlPlaneController = null;
+
 daemonInput.value = daemonBaseUrl;
-if (braveApiKeyInput) {
-  braveApiKeyInput.value = localStorage.getItem(STORAGE_BRAVE_API_KEY) || "";
-}
 
 function setStatus(text, tone = "normal") {
   statusPill.textContent = text;
@@ -230,7 +375,7 @@ async function parseErrorDetail(response) {
   try {
     const body = await response.json();
     if (body?.error) {
-      detail = body.error;
+      detail = body.error_code ? `${body.error_code}: ${body.error}` : body.error;
     }
   } catch {
     // ignore parse errors
@@ -247,6 +392,199 @@ async function fetchJson(path, options = {}) {
   }
 
   return response.json();
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function showTextPrompt({ title, message = "", defaultValue = "", confirmLabel = "Salvar", cancelLabel = "Cancelar" }) {
+  if (!document?.body) {
+    return Promise.resolve(window.prompt(title || "", defaultValue || ""));
+  }
+
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "app-dialog-backdrop";
+
+    const dialog = document.createElement("div");
+    dialog.className = "app-dialog-card";
+
+    const heading = document.createElement("h3");
+    heading.className = "app-dialog-title";
+    heading.textContent = title || "Atualizar valor";
+
+    const body = document.createElement("p");
+    body.className = "app-dialog-message";
+    body.textContent = message || "";
+
+    const input = document.createElement("input");
+    input.className = "input app-dialog-input";
+    input.value = defaultValue || "";
+    input.autocomplete = "off";
+
+    const actions = document.createElement("div");
+    actions.className = "app-dialog-actions";
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "ghost-btn";
+    cancelBtn.textContent = cancelLabel;
+
+    const confirmBtn = document.createElement("button");
+    confirmBtn.type = "button";
+    confirmBtn.className = "primary-btn";
+    confirmBtn.textContent = confirmLabel;
+
+    const cleanup = (result) => {
+      window.removeEventListener("keydown", onKeydown);
+      backdrop.remove();
+      resolve(result);
+    };
+
+    const onConfirm = () => cleanup(input.value);
+    const onCancel = () => cleanup(null);
+    const onKeydown = (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        onConfirm();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel();
+      }
+    };
+
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) {
+        onCancel();
+      }
+    });
+    cancelBtn.addEventListener("click", onCancel);
+    confirmBtn.addEventListener("click", onConfirm);
+    window.addEventListener("keydown", onKeydown);
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(confirmBtn);
+    dialog.appendChild(heading);
+    if (message) {
+      dialog.appendChild(body);
+    }
+    dialog.appendChild(input);
+    dialog.appendChild(actions);
+    backdrop.appendChild(dialog);
+    document.body.appendChild(backdrop);
+
+    input.focus();
+    input.select();
+  });
+}
+
+function showConfirmDialog({ title, message = "", confirmLabel = "Confirmar", cancelLabel = "Cancelar", danger = false }) {
+  if (!document?.body) {
+    return Promise.resolve(window.confirm(message || title || ""));
+  }
+
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "app-dialog-backdrop";
+
+    const dialog = document.createElement("div");
+    dialog.className = "app-dialog-card";
+
+    const heading = document.createElement("h3");
+    heading.className = "app-dialog-title";
+    heading.textContent = title || "Confirmar";
+
+    const body = document.createElement("p");
+    body.className = "app-dialog-message";
+    body.textContent = message || "";
+
+    const actions = document.createElement("div");
+    actions.className = "app-dialog-actions";
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "ghost-btn";
+    cancelBtn.textContent = cancelLabel;
+
+    const confirmBtn = document.createElement("button");
+    confirmBtn.type = "button";
+    confirmBtn.className = danger ? "ghost-btn danger" : "primary-btn";
+    confirmBtn.textContent = confirmLabel;
+
+    const cleanup = (result) => {
+      window.removeEventListener("keydown", onKeydown);
+      backdrop.remove();
+      resolve(result);
+    };
+
+    const onConfirm = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    const onKeydown = (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        onConfirm();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel();
+      }
+    };
+
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) {
+        onCancel();
+      }
+    });
+    cancelBtn.addEventListener("click", onCancel);
+    confirmBtn.addEventListener("click", onConfirm);
+    window.addEventListener("keydown", onKeydown);
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(confirmBtn);
+    dialog.appendChild(heading);
+    if (message) {
+      dialog.appendChild(body);
+    }
+    dialog.appendChild(actions);
+    backdrop.appendChild(dialog);
+    document.body.appendChild(backdrop);
+
+    confirmBtn.focus();
+  });
+}
+
+function hideSplash() {
+  if (splashScreen) {
+    splashScreen.classList.add("hidden");
+  }
+}
+
+async function waitForDaemonReady() {
+  const startedAt = Date.now();
+  let lastError = "sem resposta";
+
+  while (Date.now() - startedAt < DAEMON_BOOT_TIMEOUT_MS) {
+    try {
+      const response = await fetch(`${daemonBaseUrl}/health`, {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      if (response.ok) {
+        return true;
+      }
+      lastError = `HTTP ${response.status}`;
+    } catch (error) {
+      lastError = error?.message || "falha de conexao";
+    }
+
+    await delay(DAEMON_BOOT_POLL_MS);
+  }
+
+  addSystemMessage(`Daemon indisponivel em ${daemonBaseUrl}: ${lastError}`);
+  return false;
 }
 
 function isNanobotActive() {
@@ -1145,7 +1483,26 @@ function threadStorageSafeParse(raw) {
         const messages = Array.isArray(entry.messages)
           ? entry.messages
             .filter((item) => item && typeof item.role === "string" && typeof item.content === "string")
-            .map((item) => ({ role: item.role, content: item.content }))
+            .map((item) => {
+              const normalized = {
+                role: item.role,
+                content: item.content,
+              };
+
+              if (normalized.role === "assistant") {
+                const thinking = typeof item.thinking === "string" ? item.thinking.trim() : "";
+                if (thinking) {
+                  normalized.thinking = thinking;
+                }
+
+                const metrics = normalizeAssistantMetrics(item.metrics);
+                if (metrics) {
+                  normalized.metrics = metrics;
+                }
+              }
+
+              return normalized;
+            })
           : [];
 
         return {
@@ -1208,7 +1565,7 @@ function deriveThreadTitle(content) {
   return `${text.slice(0, 52)}...`;
 }
 
-function renameThread(threadId) {
+async function renameThread(threadId) {
   if (isGenerating) {
     addSystemMessage("Pare a geracao atual antes de renomear uma conversa.");
     return;
@@ -1221,7 +1578,12 @@ function renameThread(threadId) {
     return;
   }
 
-  const proposed = window.prompt("Novo nome da conversa:", thread.title || "Nova conversa");
+  const proposed = await showTextPrompt({
+    title: "Renomear conversa",
+    message: "Defina um novo nome para esse chat.",
+    defaultValue: thread.title || "Nova conversa",
+    confirmLabel: "Salvar",
+  });
   if (proposed === null) {
     return;
   }
@@ -1240,7 +1602,7 @@ function renameThread(threadId) {
   setStatus("conversa renomeada");
 }
 
-function deleteThread(threadId) {
+async function deleteThread(threadId) {
   if (isGenerating) {
     addSystemMessage("Pare a geracao atual antes de apagar uma conversa.");
     return;
@@ -1265,7 +1627,12 @@ function deleteThread(threadId) {
     return;
   }
 
-  const confirmed = window.confirm(`Apagar conversa \"${thread.title || "Nova conversa"}\"?`);
+  const confirmed = await showConfirmDialog({
+    title: "Apagar conversa",
+    message: `Tem certeza que deseja apagar "${thread.title || "Nova conversa"}"?`,
+    confirmLabel: "Apagar",
+    danger: true,
+  });
   if (!confirmed) {
     return;
   }
@@ -1492,7 +1859,7 @@ function renderThreadList() {
       renameBtn.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        renameThread(thread.id);
+        void renameThread(thread.id);
       });
 
       const deleteBtn = document.createElement("button");
@@ -1502,7 +1869,7 @@ function renderThreadList() {
       deleteBtn.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        deleteThread(thread.id);
+        void deleteThread(thread.id);
       });
 
       menu.appendChild(renameBtn);
@@ -1607,6 +1974,280 @@ function roleClassFromValue(role) {
   return "assistant";
 }
 
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function sanitizeMarkdownLinkUrl(rawValue) {
+  const value = String(rawValue || "").trim();
+  if (!value) {
+    return "#";
+  }
+
+  if (value.startsWith("#")) {
+    return value;
+  }
+
+  const hasExplicitScheme = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(value);
+  if (!hasExplicitScheme && !value.startsWith("//")) {
+    return value;
+  }
+
+  try {
+    const parsed = new URL(value, "https://mlx-pilot.local");
+    if (["http:", "https:", "mailto:"].includes(parsed.protocol)) {
+      return parsed.href;
+    }
+  } catch {
+    // ignore invalid URL
+  }
+
+  return "#";
+}
+
+function renderInlineMarkdown(rawValue) {
+  let html = escapeHtml(rawValue);
+
+  html = html.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_match, label, href) => {
+    const safeUrl = escapeHtml(sanitizeMarkdownLinkUrl(href));
+    return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+  });
+
+  html = html.replace(/`([^`]+)`/g, (_match, code) => `<code>${code}</code>`);
+  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+
+  return html;
+}
+
+function renderMarkdownToHtml(rawMarkdown) {
+  const source = String(rawMarkdown || "").replace(/\r\n/g, "\n");
+  if (!source.trim()) {
+    return "";
+  }
+
+  const lines = source.split("\n");
+  const html = [];
+
+  let inCodeBlock = false;
+  let codeLang = "";
+  let codeLines = [];
+  let inUnorderedList = false;
+  let inOrderedList = false;
+  let paragraphLines = [];
+  let quoteLines = [];
+
+  const closeLists = () => {
+    if (inUnorderedList) {
+      html.push("</ul>");
+      inUnorderedList = false;
+    }
+    if (inOrderedList) {
+      html.push("</ol>");
+      inOrderedList = false;
+    }
+  };
+
+  const flushParagraph = () => {
+    if (!paragraphLines.length) {
+      return;
+    }
+    const rendered = paragraphLines
+      .map((line) => renderInlineMarkdown(line.trim()))
+      .join("<br />");
+    html.push(`<p>${rendered}</p>`);
+    paragraphLines = [];
+  };
+
+  const flushQuote = () => {
+    if (!quoteLines.length) {
+      return;
+    }
+    const rendered = quoteLines
+      .map((line) => renderInlineMarkdown(line.trim()))
+      .join("<br />");
+    html.push(`<blockquote>${rendered}</blockquote>`);
+    quoteLines = [];
+  };
+
+  const flushCodeBlock = () => {
+    if (!codeLines.length) {
+      html.push("<pre><code></code></pre>");
+      return;
+    }
+
+    const languageClass = codeLang
+      ? ` class="language-${escapeHtml(codeLang.replace(/[^\w-]/g, ""))}"`
+      : "";
+    html.push(`<pre><code${languageClass}>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+    codeLines = [];
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (inCodeBlock) {
+      if (trimmed.startsWith("```")) {
+        flushCodeBlock();
+        inCodeBlock = false;
+        codeLang = "";
+      } else {
+        codeLines.push(line);
+      }
+      continue;
+    }
+
+    if (trimmed.startsWith("```")) {
+      flushParagraph();
+      flushQuote();
+      closeLists();
+      inCodeBlock = true;
+      codeLang = trimmed.slice(3).trim();
+      codeLines = [];
+      continue;
+    }
+
+    if (!trimmed) {
+      flushParagraph();
+      flushQuote();
+      closeLists();
+      continue;
+    }
+
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+      flushParagraph();
+      flushQuote();
+      closeLists();
+      html.push("<hr />");
+      continue;
+    }
+
+    const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
+    if (headingMatch) {
+      flushParagraph();
+      flushQuote();
+      closeLists();
+      const level = headingMatch[1].length;
+      html.push(`<h${level}>${renderInlineMarkdown(headingMatch[2])}</h${level}>`);
+      continue;
+    }
+
+    const quoteMatch = line.match(/^\s*>\s?(.*)$/);
+    if (quoteMatch) {
+      flushParagraph();
+      closeLists();
+      quoteLines.push(quoteMatch[1]);
+      continue;
+    }
+
+    const unorderedMatch = line.match(/^\s*[-*+]\s*(.+)$/);
+    if (unorderedMatch) {
+      flushParagraph();
+      flushQuote();
+      if (!inUnorderedList) {
+        if (inOrderedList) {
+          html.push("</ol>");
+          inOrderedList = false;
+        }
+        html.push("<ul>");
+        inUnorderedList = true;
+      }
+      html.push(`<li>${renderInlineMarkdown(unorderedMatch[1])}</li>`);
+      continue;
+    }
+
+    const orderedMatch = line.match(/^\s*\d+\.\s*(.+)$/);
+    if (orderedMatch) {
+      flushParagraph();
+      flushQuote();
+      if (!inOrderedList) {
+        if (inUnorderedList) {
+          html.push("</ul>");
+          inUnorderedList = false;
+        }
+        html.push("<ol>");
+        inOrderedList = true;
+      }
+      html.push(`<li>${renderInlineMarkdown(orderedMatch[1])}</li>`);
+      continue;
+    }
+
+    flushQuote();
+    closeLists();
+    paragraphLines.push(line);
+  }
+
+  flushParagraph();
+  flushQuote();
+  closeLists();
+
+  if (inCodeBlock) {
+    flushCodeBlock();
+  }
+
+  return html.join("\n");
+}
+
+function renderMarkdownInto(element, markdownText) {
+  if (!element) {
+    return;
+  }
+
+  element.innerHTML = renderMarkdownToHtml(markdownText);
+}
+
+function normalizeAssistantMetrics(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const normalized = {};
+  const integerKeys = ["prompt_tokens", "completion_tokens", "total_tokens", "latency_ms"];
+  const floatKeys = ["prompt_tps", "generation_tps", "peak_memory_gb"];
+
+  integerKeys.forEach((key) => {
+    const parsed = Number(value[key]);
+    if (Number.isFinite(parsed)) {
+      normalized[key] = Math.round(parsed);
+    }
+  });
+
+  floatKeys.forEach((key) => {
+    const parsed = Number(value[key]);
+    if (Number.isFinite(parsed)) {
+      normalized[key] = parsed;
+    }
+  });
+
+  if (typeof value.raw_metrics === "string" && value.raw_metrics.trim()) {
+    normalized.raw_metrics = value.raw_metrics.trim();
+  }
+
+  if (value.airllm_required != null) {
+    normalized.airllm_required = Boolean(value.airllm_required);
+  }
+
+  if (value.airllm_used != null) {
+    normalized.airllm_used = Boolean(value.airllm_used);
+  }
+
+  if (Array.isArray(value.airllm_logs)) {
+    const logs = value.airllm_logs
+      .map((entry) => String(entry || "").trim())
+      .filter((entry) => entry.length > 0);
+    if (logs.length) {
+      normalized.airllm_logs = logs.slice(-40);
+    }
+  }
+
+  return Object.keys(normalized).length ? normalized : null;
+}
+
 function addSystemMessage(text) {
   const node = messageTemplate.content.firstElementChild.cloneNode(true);
   node.classList.add("role-system");
@@ -1633,9 +2274,16 @@ function scrollChatToBottom(force = false) {
 
 function addMessageCard(role, content, { editable = false, messageIndex = null, forceScroll = true } = {}) {
   const node = messageTemplate.content.firstElementChild.cloneNode(true);
-  node.classList.add(`role-${roleClassFromValue(role)}`);
+  const roleClass = roleClassFromValue(role);
+  node.classList.add(`role-${roleClass}`);
   node.querySelector(".message-role").textContent = role;
-  node.querySelector(".message-content").textContent = content;
+  const contentNode = node.querySelector(".message-content");
+  if (roleClass === "assistant") {
+    contentNode.classList.add("markdown-view");
+    renderMarkdownInto(contentNode, content);
+  } else {
+    contentNode.textContent = content;
+  }
 
   const actions = node.querySelector(".message-actions");
   const editBtn = node.querySelector(".edit-message-btn");
@@ -1689,6 +2337,11 @@ function rebuildChatFromThread() {
       return;
     }
 
+    if (message.role === "assistant" && (message.thinking || message.metrics)) {
+      addAssistantHistoryCard(message, { forceScroll: false });
+      return;
+    }
+
     addMessageCard(message.role, message.content, { forceScroll: false });
   });
 
@@ -1697,13 +2350,26 @@ function rebuildChatFromThread() {
   updateChatEmptyState();
 }
 
-function appendMessageToActiveThread(role, content) {
+function appendMessageToActiveThread(role, content, extra = {}) {
   const active = getActiveThread();
   if (!active) {
     return;
   }
 
-  active.messages.push({ role, content });
+  const message = { role, content };
+  if (role === "assistant") {
+    const thinking = typeof extra.thinking === "string" ? extra.thinking.trim() : "";
+    if (thinking) {
+      message.thinking = thinking;
+    }
+
+    const metrics = normalizeAssistantMetrics(extra.metrics);
+    if (metrics) {
+      message.metrics = metrics;
+    }
+  }
+
+  active.messages.push(message);
   active.updatedAt = Date.now();
 
   if (role === "user" && (active.title === "Nova conversa" || !active.title?.trim())) {
@@ -1757,12 +2423,13 @@ function applyEditedMessageAndTrim(messageIndex, nextContent) {
   return true;
 }
 
-function createAssistantStreamCard() {
+function createAssistantStreamCard({ forceScroll = true } = {}) {
   const node = assistantStreamTemplate.content.firstElementChild.cloneNode(true);
   node.classList.add("role-assistant");
   const ui = {
     node,
     stateLabel: node.querySelector(".assistant-state-label"),
+    runtimeBadge: node.querySelector(".assistant-runtime-badge"),
     typingIndicator: node.querySelector(".typing-indicator"),
     thinkingSection: node.querySelector(".assistant-thinking"),
     thinkingText: node.querySelector(".assistant-thinking-text"),
@@ -1771,20 +2438,69 @@ function createAssistantStreamCard() {
     metricsSection: node.querySelector(".assistant-metrics"),
     metricsText: node.querySelector(".assistant-metrics-text"),
     finalAnswer: "",
+    answerRaw: "",
     thinkingQueue: "",
     answerQueue: "",
     flushTimer: null,
     latestMetrics: null,
+    airllmRequired: false,
+    airllmUsed: false,
+    airllmLogs: [],
   };
 
   chatLog.appendChild(node);
-  scrollChatToBottom(true);
+  scrollChatToBottom(forceScroll);
   return ui;
+}
+
+function addAssistantHistoryCard(message, { forceScroll = true } = {}) {
+  const ui = createAssistantStreamCard({ forceScroll: false });
+  setAssistantState(ui, "completed");
+
+  const savedThinking = typeof message?.thinking === "string" ? message.thinking.trim() : "";
+  const savedAnswer = String(message?.content || "").trim();
+  const savedMetrics = normalizeAssistantMetrics(message?.metrics);
+
+  setAssistantRuntimeBadge(ui, {
+    airllmRequired: Boolean(savedMetrics?.airllm_required),
+    airllmUsed: Boolean(savedMetrics?.airllm_used),
+  });
+  if (Array.isArray(savedMetrics?.airllm_logs)) {
+    ui.airllmLogs = savedMetrics.airllm_logs.slice(-40);
+    updateAssistantRuntimeBadgeTooltip(ui);
+  }
+
+  if (savedThinking) {
+    ui.thinkingSection.classList.remove("hidden");
+    ui.thinkingText.textContent = savedThinking;
+  }
+
+  if (savedAnswer) {
+    ui.answerSection.classList.remove("hidden");
+    ui.answerRaw = message.content;
+    ui.finalAnswer = message.content;
+    renderMarkdownInto(ui.answerText, ui.answerRaw);
+  }
+
+  if (savedMetrics) {
+    renderAssistantMetrics(ui, savedMetrics);
+  }
+
+  if (!savedThinking && !savedAnswer && !savedMetrics) {
+    ui.answerSection.classList.remove("hidden");
+    ui.answerRaw = "(sem resposta textual)";
+    ui.finalAnswer = ui.answerRaw;
+    renderMarkdownInto(ui.answerText, ui.answerRaw);
+  }
+
+  scrollChatToBottom(forceScroll);
 }
 
 function setAssistantState(ui, status) {
   const labels = {
     waiting: "aguardando modelo",
+    airllm_required: "AIRLLM necessario",
+    fallback_airllm: "AIRLLM em uso",
     thinking: "thinking",
     answering: "respondendo",
     completed: "finalizado",
@@ -1794,7 +2510,7 @@ function setAssistantState(ui, status) {
 
   ui.stateLabel.textContent = labels[status] || status;
 
-  if (status === "waiting") {
+  if (["waiting", "airllm_required", "fallback_airllm"].includes(status)) {
     ui.typingIndicator.classList.remove("hidden");
   } else {
     ui.typingIndicator.classList.add("hidden");
@@ -1807,6 +2523,127 @@ function setAssistantState(ui, status) {
   if (["answering", "completed", "cancelled"].includes(status)) {
     ui.answerSection.classList.remove("hidden");
   }
+}
+
+function setAssistantRuntimeBadge(ui, { airllmRequired = false, airllmUsed = false } = {}) {
+  if (!ui?.runtimeBadge) {
+    return;
+  }
+
+  ui.airllmRequired = Boolean(airllmRequired);
+  ui.airllmUsed = Boolean(airllmUsed);
+  ui.runtimeBadge.classList.remove("hidden", "airllm-used");
+
+  if (!ui.airllmRequired && !ui.airllmUsed) {
+    ui.runtimeBadge.classList.add("hidden");
+    ui.runtimeBadge.textContent = "";
+    ui.runtimeBadge.removeAttribute("title");
+    ui.runtimeBadge.removeAttribute("aria-label");
+    return;
+  }
+
+  if (ui.airllmUsed) {
+    ui.runtimeBadge.textContent = "AIRLLM em uso";
+    ui.runtimeBadge.classList.add("airllm-used");
+    updateAssistantRuntimeBadgeTooltip(ui);
+    return;
+  }
+
+  ui.runtimeBadge.textContent = "AIRLLM necessario";
+  updateAssistantRuntimeBadgeTooltip(ui);
+}
+
+function updateAssistantRuntimeBadgeTooltip(ui) {
+  if (!ui?.runtimeBadge) {
+    return;
+  }
+
+  if (!ui.airllmRequired && !ui.airllmUsed) {
+    ui.runtimeBadge.removeAttribute("title");
+    ui.runtimeBadge.removeAttribute("aria-label");
+    ui.runtimeBadge.removeAttribute("data-airllm-tooltip");
+    return;
+  }
+
+  const lines = [];
+  if (ui.airllmUsed) {
+    lines.push("AIRLLM em uso.");
+  } else if (ui.airllmRequired) {
+    lines.push("AIRLLM necessario.");
+  }
+
+  if (Array.isArray(ui.airllmLogs) && ui.airllmLogs.length) {
+    lines.push("", "Logs AIRLLM (mais recentes):");
+    lines.push(...ui.airllmLogs.slice(-20));
+  } else {
+    lines.push("", "Sem logs do AIRLLM ainda.");
+  }
+
+  const tooltip = lines.join("\n").trim();
+  if (tooltip) {
+    ui.runtimeBadge.title = tooltip;
+    ui.runtimeBadge.setAttribute("aria-label", tooltip);
+    ui.runtimeBadge.setAttribute("data-airllm-tooltip", tooltip);
+  } else {
+    ui.runtimeBadge.removeAttribute("title");
+    ui.runtimeBadge.removeAttribute("aria-label");
+    ui.runtimeBadge.removeAttribute("data-airllm-tooltip");
+  }
+}
+
+function appendAirllmLog(ui, message) {
+  if (!ui) {
+    return;
+  }
+
+  const clean = String(message || "").trim();
+  if (!clean) {
+    return;
+  }
+
+  const timestamp = new Date().toLocaleTimeString("pt-BR", { hour12: false });
+  const lastRaw = ui.airllmLastLogRaw || "";
+  if (lastRaw === clean) {
+    return;
+  }
+  ui.airllmLastLogRaw = clean;
+
+  if (!Array.isArray(ui.airllmLogs)) {
+    ui.airllmLogs = [];
+  }
+  ui.airllmLogs.push(`[${timestamp}] ${clean}`);
+  if (ui.airllmLogs.length > 40) {
+    ui.airllmLogs = ui.airllmLogs.slice(-40);
+  }
+
+  if (ui.latestMetrics && typeof ui.latestMetrics === "object") {
+    ui.latestMetrics.airllm_logs = ui.airllmLogs.slice(-40);
+  }
+
+  updateAssistantRuntimeBadgeTooltip(ui);
+  renderAirllmLiveLogs(ui);
+}
+
+function renderAirllmLiveLogs(ui) {
+  if (!ui?.metricsSection || !ui?.metricsText) {
+    return;
+  }
+  if (!Array.isArray(ui.airllmLogs) || !ui.airllmLogs.length) {
+    return;
+  }
+
+  const lines = [];
+  if (ui.airllmUsed) {
+    lines.push("AIRLLM em uso.");
+  } else if (ui.airllmRequired) {
+    lines.push("AIRLLM necessario.");
+  }
+  lines.push("", "AIRLLM logs (ao vivo):");
+  lines.push(...ui.airllmLogs.slice(-12));
+
+  ui.metricsText.textContent = lines.join("\n");
+  ui.metricsSection.classList.remove("hidden");
+  scrollChatToBottom();
 }
 
 function flushAssistantQueues(ui) {
@@ -1824,8 +2661,9 @@ function flushAssistantQueues(ui) {
     const chunk = ui.answerQueue.slice(0, STREAM_CHARS_PER_TICK);
     ui.answerQueue = ui.answerQueue.slice(chunk.length);
     ui.answerSection.classList.remove("hidden");
-    ui.answerText.textContent += chunk;
-    ui.finalAnswer = ui.answerText.textContent;
+    ui.answerRaw += chunk;
+    renderMarkdownInto(ui.answerText, ui.answerRaw);
+    ui.finalAnswer = ui.answerRaw;
     changed = true;
   }
 
@@ -1904,6 +2742,25 @@ function extractRawMetrics(rawOutput) {
   return metrics || null;
 }
 
+function extractMlxPilotRuntimeMeta(rawOutput) {
+  if (typeof rawOutput !== "string" || !rawOutput.trim()) {
+    return null;
+  }
+
+  const firstLine = rawOutput.replace(/\r\n/g, "\n").split("\n", 1)[0]?.trim() || "";
+  if (!firstLine.startsWith("[[MLX-PILOT-META")) {
+    return null;
+  }
+
+  const requiredMatch = firstLine.match(/airllm_required=(\d+)/i);
+  const usedMatch = firstLine.match(/airllm_used=(\d+)/i);
+
+  return {
+    airllm_required: requiredMatch ? requiredMatch[1] === "1" : false,
+    airllm_used: usedMatch ? usedMatch[1] === "1" : false,
+  };
+}
+
 function splitThinkingAndAnswer(content) {
   if (!content) {
     return { thinking: "", answer: "" };
@@ -1929,38 +2786,113 @@ function splitThinkingAndAnswer(content) {
   };
 }
 
+function isThinkingModel(modelId) {
+  const normalized = String(modelId || "").trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized.includes("deepseek-r1")
+    || normalized.includes("reason")
+    || normalized.includes("thinking")
+    || normalized.includes("qwq")
+    || /(?:^|[-_/])r1(?:$|[-_/])/.test(normalized)
+  );
+}
+
+function resolveChatMaxTokens(modelId) {
+  return isThinkingModel(modelId) ? CHAT_MAX_TOKENS_THINKING : CHAT_MAX_TOKENS_DEFAULT;
+}
+
+function promoteThinkingToAnswerIfNeeded(ui) {
+  if (!ui || String(ui.finalAnswer || "").trim()) {
+    return false;
+  }
+
+  const fallbackAnswer = String(ui.thinkingText?.textContent || "").trim();
+  if (!fallbackAnswer) {
+    return false;
+  }
+
+  ui.thinkingText.textContent = "";
+  ui.thinkingSection.classList.add("hidden");
+  setAssistantState(ui, "answering");
+  appendAnswer(ui, fallbackAnswer);
+  return true;
+}
+
 function renderAssistantMetrics(ui, event) {
-  if (!event) {
+  const normalizedEvent = normalizeAssistantMetrics(event);
+  if (!normalizedEvent) {
     return;
   }
 
-  const lines = [];
-  const hasRawMetrics = typeof event.raw_metrics === "string" && event.raw_metrics.trim().length > 0;
+  const airllmRequired = normalizedEvent.airllm_required != null
+    ? Boolean(normalizedEvent.airllm_required)
+    : Boolean(ui.airllmRequired);
+  const airllmUsed = normalizedEvent.airllm_used != null
+    ? Boolean(normalizedEvent.airllm_used)
+    : Boolean(ui.airllmUsed);
 
-  if (!hasRawMetrics && event.prompt_tokens != null) {
-    lines.push(`Prompt: ${event.prompt_tokens} tokens`);
+  setAssistantRuntimeBadge(ui, {
+    airllmRequired,
+    airllmUsed,
+  });
+
+  ui.latestMetrics = {
+    ...normalizedEvent,
+    airllm_required: airllmRequired,
+    airllm_used: airllmUsed,
+    airllm_logs: Array.isArray(normalizedEvent.airllm_logs)
+      ? normalizedEvent.airllm_logs.slice(-40)
+      : Array.isArray(ui.airllmLogs)
+        ? ui.airllmLogs.slice(-40)
+        : undefined,
+  };
+  if (Array.isArray(ui.latestMetrics.airllm_logs)) {
+    ui.airllmLogs = ui.latestMetrics.airllm_logs.slice(-40);
+    updateAssistantRuntimeBadgeTooltip(ui);
   }
-  if (!hasRawMetrics && event.completion_tokens != null) {
-    lines.push(`Generation: ${event.completion_tokens} tokens`);
+
+  const lines = [];
+  const hasRawMetrics = typeof normalizedEvent.raw_metrics === "string" && normalizedEvent.raw_metrics.trim().length > 0;
+
+  if (!hasRawMetrics && normalizedEvent.prompt_tokens != null) {
+    lines.push(`Prompt: ${normalizedEvent.prompt_tokens} tokens`);
   }
-  if (event.total_tokens != null) {
-    lines.push(`Total: ${event.total_tokens} tokens`);
+  if (!hasRawMetrics && normalizedEvent.completion_tokens != null) {
+    lines.push(`Generation: ${normalizedEvent.completion_tokens} tokens`);
   }
-  if (!hasRawMetrics && event.prompt_tps != null) {
-    lines.push(`Prompt rate: ${Number(event.prompt_tps).toFixed(3)} tokens/sec`);
+  if (normalizedEvent.total_tokens != null) {
+    lines.push(`Total: ${normalizedEvent.total_tokens} tokens`);
   }
-  if (!hasRawMetrics && event.generation_tps != null) {
-    lines.push(`Generation rate: ${Number(event.generation_tps).toFixed(3)} tokens/sec`);
+  if (!hasRawMetrics && normalizedEvent.prompt_tps != null) {
+    lines.push(`Prompt rate: ${Number(normalizedEvent.prompt_tps).toFixed(3)} tokens/sec`);
   }
-  if (!hasRawMetrics && event.peak_memory_gb != null) {
-    lines.push(`Peak memory: ${Number(event.peak_memory_gb).toFixed(3)} GB`);
+  if (!hasRawMetrics && normalizedEvent.generation_tps != null) {
+    lines.push(`Generation rate: ${Number(normalizedEvent.generation_tps).toFixed(3)} tokens/sec`);
   }
-  if (event.latency_ms != null) {
-    lines.push(`Latency: ${event.latency_ms} ms`);
+  if (!hasRawMetrics && normalizedEvent.peak_memory_gb != null) {
+    lines.push(`Peak memory: ${Number(normalizedEvent.peak_memory_gb).toFixed(3)} GB`);
+  }
+  if (normalizedEvent.latency_ms != null) {
+    lines.push(`Latency: ${normalizedEvent.latency_ms} ms`);
+  }
+  if (airllmRequired) {
+    lines.push(`AIRLLM necessario: sim`);
+  }
+  if (airllmUsed) {
+    lines.push(`AIRLLM usado: sim`);
+  }
+  if (Array.isArray(ui.airllmLogs) && ui.airllmLogs.length) {
+    lines.push("");
+    lines.push("AIRLLM logs:");
+    lines.push(...ui.airllmLogs.slice(-8));
   }
 
   if (hasRawMetrics) {
-    lines.unshift(event.raw_metrics.trim());
+    lines.unshift(normalizedEvent.raw_metrics.trim());
   }
 
   if (lines.length) {
@@ -1989,8 +2921,68 @@ function setWebsearchToggleState(nextState, { persist = true } = {}) {
   }
 }
 
+function setChatAirllmToggleState(nextState, { persist = true } = {}) {
+  const enabled = Boolean(nextState);
+  chatAirllmEnabled = enabled;
+  if (chatAirllmToggleBtn) {
+    chatAirllmToggleBtn.classList.toggle("enabled", enabled);
+    chatAirllmToggleBtn.setAttribute("aria-pressed", enabled ? "true" : "false");
+    chatAirllmToggleBtn.textContent = enabled ? "AIRLLM ON" : "AIRLLM OFF";
+  }
+  if (persist) {
+    localStorage.setItem(STORAGE_CHAT_AIRLLM_ENABLED, enabled ? "1" : "0");
+  }
+}
+
+async function persistChatAirllmToggle(nextState) {
+  if (chatAirllmPersistInFlight) {
+    return;
+  }
+
+  chatAirllmPersistInFlight = true;
+  if (chatAirllmToggleBtn) {
+    chatAirllmToggleBtn.disabled = true;
+  }
+
+  try {
+    const payload = await fetchJson("/config", { method: "GET" });
+    payload.mlx_airllm_enabled = Boolean(nextState);
+
+    await fetchJson("/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    console.error("Falha ao persistir toggle AIRLLM", error);
+    addSystemMessage(
+      `AIRLLM mudou localmente, mas nao foi possivel salvar no backend: ${error.message}`,
+    );
+  } finally {
+    chatAirllmPersistInFlight = false;
+    if (chatAirllmToggleBtn) {
+      chatAirllmToggleBtn.disabled = false;
+    }
+  }
+}
+
+function getEnvironmentValue(key) {
+  if (!openclawEnvList) {
+    return "";
+  }
+  const normalized = String(key || "").trim().toUpperCase();
+  if (!normalized) {
+    return "";
+  }
+
+  const envInput = Array.from(openclawEnvList.querySelectorAll("input[data-env-key]")).find(
+    (input) => String(input.dataset.envKey || "").trim().toUpperCase() === normalized
+  );
+  return (envInput?.value || "").trim();
+}
+
 function getBraveApiKey() {
-  return (braveApiKeyInput?.value || "").trim();
+  return getEnvironmentValue("BRAVE_API_KEY");
 }
 
 function buildWebsearchSkeletonPrompt({ apiKeyConfigured, searchSummary }) {
@@ -2038,7 +3030,12 @@ async function maybeInjectWebsearchContext(messages) {
     return messages;
   }
 
-  const apiKey = getBraveApiKey();
+  let apiKey = getBraveApiKey();
+  const hasEnvironmentSnapshot = Boolean(openclawEnvList?.querySelector("input[data-env-key]"));
+  if (!apiKey && !hasEnvironmentSnapshot) {
+    await loadOpenclawEnvironment({ showLoading: false });
+    apiKey = getBraveApiKey();
+  }
   const latestUserMessage = [...messages]
     .reverse()
     .find((entry) => entry.role === "user")
@@ -2061,7 +3058,7 @@ async function maybeInjectWebsearchContext(messages) {
         body: JSON.stringify(payload),
       });
       searchSummary = formatBraveSearchSummary(response.results);
-      keyConfigured = keyConfigured || Boolean(response?.key_source === "server");
+      keyConfigured = keyConfigured || Boolean(response?.key_source);
     } catch (error) {
       addSystemMessage(`WebSearch Brave indisponivel: ${error.message}`);
     }
@@ -2076,13 +3073,20 @@ async function maybeInjectWebsearchContext(messages) {
 }
 
 async function buildChatPayload(messages) {
-  const payloadMessages = await maybeInjectWebsearchContext(messages);
+  const promptMessages = Array.isArray(messages)
+    ? messages
+      .filter((entry) => entry && typeof entry.role === "string" && typeof entry.content === "string")
+      .map((entry) => ({ role: entry.role, content: entry.content }))
+    : [];
+
+  const payloadMessages = await maybeInjectWebsearchContext(promptMessages);
   return {
     model_id: selectedModelId,
     messages: payloadMessages,
     options: {
       temperature: 0.2,
-      max_tokens: 512,
+      max_tokens: resolveChatMaxTokens(selectedModelId),
+      airllm_enabled: chatAirllmEnabled,
     },
   };
 }
@@ -2102,6 +3106,7 @@ async function consumeChatClassic(payload, ui, signal) {
 
   const body = await response.json();
   const split = splitThinkingAndAnswer(body?.message?.content || "");
+  const runtimeMeta = extractMlxPilotRuntimeMeta(body?.raw_output);
 
   if (split.thinking) {
     setAssistantState(ui, "thinking");
@@ -2114,6 +3119,15 @@ async function consumeChatClassic(payload, ui, signal) {
   }
 
   await waitForAssistantFlush(ui);
+  if (promoteThinkingToAnswerIfNeeded(ui)) {
+    await waitForAssistantFlush(ui);
+  }
+
+  setAssistantRuntimeBadge(ui, {
+    airllmRequired: Boolean(runtimeMeta?.airllm_required),
+    airllmUsed: Boolean(runtimeMeta?.airllm_used),
+  });
+
   setAssistantState(ui, "completed");
   renderAssistantMetrics(ui, {
     prompt_tokens: body?.usage?.prompt_tokens,
@@ -2121,6 +3135,8 @@ async function consumeChatClassic(payload, ui, signal) {
     total_tokens: body?.usage?.total_tokens,
     latency_ms: body?.latency_ms,
     raw_metrics: extractRawMetrics(body?.raw_output),
+    airllm_required: runtimeMeta?.airllm_required,
+    airllm_used: runtimeMeta?.airllm_used,
   });
 }
 
@@ -2182,7 +3198,20 @@ async function consumeChatStream(payload, ui, signal) {
       }
 
       if (event.event === "status") {
-        setAssistantState(ui, event.status || "waiting");
+        const streamStatus = event.status || "waiting";
+        if (streamStatus === "airllm_required") {
+          setAssistantRuntimeBadge(ui, {
+            airllmRequired: true,
+            airllmUsed: Boolean(ui.airllmUsed),
+          });
+        }
+        if (streamStatus === "fallback_airllm") {
+          setAssistantRuntimeBadge(ui, {
+            airllmRequired: true,
+            airllmUsed: true,
+          });
+        }
+        setAssistantState(ui, streamStatus);
         continue;
       }
 
@@ -2203,7 +3232,18 @@ async function consumeChatStream(payload, ui, signal) {
         continue;
       }
 
+      if (event.event === "airllm_log") {
+        appendAirllmLog(ui, event.message || "");
+        continue;
+      }
+
       if (event.event === "done") {
+        if (event.airllm_required != null || event.airllm_used != null) {
+          setAssistantRuntimeBadge(ui, {
+            airllmRequired: Boolean(event.airllm_required),
+            airllmUsed: Boolean(event.airllm_used),
+          });
+        }
         doneEvent = event;
         break outer;
       }
@@ -2218,6 +3258,12 @@ async function consumeChatStream(payload, ui, signal) {
     try {
       const trailing = JSON.parse(buffer.trim());
       if (trailing.event === "done") {
+        if (trailing.airllm_required != null || trailing.airllm_used != null) {
+          setAssistantRuntimeBadge(ui, {
+            airllmRequired: Boolean(trailing.airllm_required),
+            airllmUsed: Boolean(trailing.airllm_used),
+          });
+        }
         doneEvent = trailing;
       } else if (trailing.event === "metrics") {
         ui.latestMetrics = trailing;
@@ -2234,6 +3280,9 @@ async function consumeChatStream(payload, ui, signal) {
   }
 
   await waitForAssistantFlush(ui);
+  if (promoteThinkingToAnswerIfNeeded(ui)) {
+    await waitForAssistantFlush(ui);
+  }
   setAssistantState(ui, "completed");
   renderAssistantMetrics(ui, doneEvent || ui.latestMetrics);
 }
@@ -2257,8 +3306,22 @@ async function runAssistantGeneration() {
     await consumeChatStream(payload, assistantUi, activeStreamController.signal);
 
     const finalAnswer = assistantUi.finalAnswer.trim();
-    if (finalAnswer) {
-      appendMessageToActiveThread("assistant", finalAnswer);
+    const finalThinking = String(assistantUi.thinkingText?.textContent || "").trim();
+    const finalMetrics = normalizeAssistantMetrics({
+      ...(assistantUi.latestMetrics || {}),
+      airllm_required: assistantUi.airllmRequired,
+      airllm_used: assistantUi.airllmUsed,
+      airllm_logs: Array.isArray(assistantUi.airllmLogs) ? assistantUi.airllmLogs.slice(-40) : undefined,
+    });
+    if (finalAnswer || finalThinking || finalMetrics) {
+      appendMessageToActiveThread(
+        "assistant",
+        finalAnswer || "(sem resposta textual)",
+        {
+          thinking: finalThinking,
+          metrics: finalMetrics,
+        },
+      );
     }
 
     setStatus("resposta concluida");
@@ -2268,8 +3331,22 @@ async function runAssistantGeneration() {
       assistantUi.metricsSection.classList.remove("hidden");
       assistantUi.metricsText.textContent = "Geracao interrompida pelo usuario.";
       const partialAnswer = assistantUi.finalAnswer.trim();
-      if (partialAnswer) {
-        appendMessageToActiveThread("assistant", partialAnswer);
+      const partialThinking = String(assistantUi.thinkingText?.textContent || "").trim();
+      const partialMetrics = normalizeAssistantMetrics({
+        ...(assistantUi.latestMetrics || {}),
+        airllm_required: assistantUi.airllmRequired,
+        airllm_used: assistantUi.airllmUsed,
+        airllm_logs: Array.isArray(assistantUi.airllmLogs) ? assistantUi.airllmLogs.slice(-40) : undefined,
+      });
+      if (partialAnswer || partialThinking || partialMetrics) {
+        appendMessageToActiveThread(
+          "assistant",
+          partialAnswer || "(geracao interrompida sem resposta final)",
+          {
+            thinking: partialThinking,
+            metrics: partialMetrics,
+          },
+        );
       }
       setStatus("geracao interrompida");
       scrollChatToBottom(true);
@@ -2326,6 +3403,7 @@ async function loadModels() {
     renderThreadList();
     renderSelectedThreadMeta();
     renderOpenClawModelSelectors();
+    renderInstalledModelsList();
 
     setStatus("pronto");
   } catch (error) {
@@ -2334,19 +3412,229 @@ async function loadModels() {
   }
 }
 
-async function loadCatalogSources() {
-  const sources = await fetchJson("/catalog/sources");
+function renderInstalledModelsList() {
+  if (!installedModelsList || !installedModelsMeta) {
+    return;
+  }
 
-  catalogSource.innerHTML = "";
-  sources.forEach((source) => {
-    const option = document.createElement("option");
-    option.value = source.id;
-    option.textContent = source.name;
-    catalogSource.appendChild(option);
+  installedModelsList.innerHTML = "";
+  const installed = localModels.filter((entry) => String(entry.provider || "").toLowerCase() === "mlx");
+  installedModelsMeta.textContent = `${installed.length} modelo(s) local(is) instalado(s).`;
+
+  if (!installed.length) {
+    const empty = document.createElement("li");
+    empty.className = "installed-model-empty";
+    empty.textContent = "Nenhum modelo local instalado encontrado no diretorio atual.";
+    installedModelsList.appendChild(empty);
+    return;
+  }
+
+  installed.forEach((model) => {
+    const item = document.createElement("li");
+    item.className = "installed-model-item";
+
+    const main = document.createElement("div");
+    main.className = "installed-model-main";
+
+    const name = document.createElement("p");
+    name.className = "installed-model-name";
+    name.textContent = model.name || model.id || "-";
+
+    const meta = document.createElement("p");
+    meta.className = "installed-model-meta";
+    meta.textContent = `${model.id || "-"} • ${model.path || "-"}`;
+
+    main.appendChild(name);
+    main.appendChild(meta);
+
+    const actions = document.createElement("div");
+    actions.className = "installed-model-actions";
+
+    const renameBtn = document.createElement("button");
+    renameBtn.type = "button";
+    renameBtn.className = "ghost-btn";
+    renameBtn.textContent = "Renomear";
+    renameBtn.addEventListener("click", () => {
+      void renameInstalledModel(model.id);
+    });
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "ghost-btn danger";
+    deleteBtn.textContent = "Apagar";
+    deleteBtn.addEventListener("click", () => {
+      void deleteInstalledModel(model.id);
+    });
+
+    actions.appendChild(renameBtn);
+    actions.appendChild(deleteBtn);
+    item.appendChild(main);
+    item.appendChild(actions);
+    installedModelsList.appendChild(item);
+  });
+}
+
+function normalizeMlxModelSelectionId(modelId) {
+  const raw = String(modelId || "").trim();
+  if (!raw) {
+    return "";
+  }
+  if (raw.toLowerCase().startsWith("mlx::")) {
+    return raw.slice(5).trim();
+  }
+  return raw;
+}
+
+function buildMlxModelSelectionId(rawLocalId, sampleSelectionId) {
+  const normalizedLocalId = normalizeMlxModelSelectionId(rawLocalId);
+  const sample = String(sampleSelectionId || "").trim().toLowerCase();
+  if (sample.startsWith("mlx::")) {
+    return `mlx::${normalizedLocalId}`;
+  }
+  return normalizedLocalId;
+}
+
+function switchDiscoverSubtab(nextSubtab) {
+  const normalized = nextSubtab === "installed" ? "installed" : "catalog";
+  activeDiscoverSubtab = normalized;
+
+  discoverSubtabButtons.forEach((button) => {
+    const isActive = button.dataset.discoverSubtab === normalized;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-selected", isActive ? "true" : "false");
   });
 
-  if (!catalogSource.value && sources[0]) {
-    catalogSource.value = sources[0].id;
+  if (discoverCatalogView) {
+    discoverCatalogView.classList.toggle("active", normalized === "catalog");
+  }
+  if (discoverInstalledView) {
+    discoverInstalledView.classList.toggle("active", normalized === "installed");
+  }
+
+  if (normalized === "installed") {
+    renderInstalledModelsList();
+  }
+}
+
+async function renameInstalledModel(modelId) {
+  const current = localModels.find((entry) => entry.id === modelId);
+  if (!current) {
+    addSystemMessage("Modelo nao encontrado para renomear.");
+    return;
+  }
+  const currentLocalId = normalizeMlxModelSelectionId(current.id);
+
+  const nextName = await showTextPrompt({
+    title: "Renomear modelo instalado",
+    message: "Informe o novo nome da pasta do modelo local.",
+    defaultValue: currentLocalId,
+    confirmLabel: "Renomear",
+  });
+  if (nextName === null) {
+    return;
+  }
+
+  const normalized = normalizeMlxModelSelectionId(nextName);
+  if (!normalized || normalized === currentLocalId) {
+    return;
+  }
+
+  try {
+    await fetchJson("/models/rename", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ current_id: currentLocalId, new_id: normalized }),
+    });
+    const nextSelectionId = buildMlxModelSelectionId(normalized, current.id);
+    chatThreads.forEach((thread) => {
+      const threadLocalId = normalizeMlxModelSelectionId(thread.modelId);
+      if (thread.modelId === current.id || threadLocalId === currentLocalId) {
+        thread.modelId = nextSelectionId;
+        thread.updatedAt = Date.now();
+      }
+    });
+    if (
+      selectedModelId === current.id
+      || normalizeMlxModelSelectionId(selectedModelId) === currentLocalId
+    ) {
+      selectedModelId = nextSelectionId;
+    }
+    persistThreads();
+    await loadModels();
+    setStatus("modelo renomeado");
+  } catch (error) {
+    addSystemMessage(`Falha ao renomear modelo: ${error.message}`);
+    setStatus("erro ao renomear modelo", "error");
+  }
+}
+
+async function deleteInstalledModel(modelId) {
+  const current = localModels.find((entry) => entry.id === modelId);
+  if (!current) {
+    addSystemMessage("Modelo nao encontrado para apagar.");
+    return;
+  }
+  const currentLocalId = normalizeMlxModelSelectionId(current.id);
+
+  const confirmed = await showConfirmDialog({
+    title: "Apagar modelo instalado",
+    message: `Deseja apagar o modelo "${currentLocalId}"? Essa acao remove os arquivos do disco.`,
+    confirmLabel: "Apagar",
+    danger: true,
+  });
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await fetchJson(`/models/${encodeURIComponent(currentLocalId)}`, {
+      method: "DELETE",
+    });
+    chatThreads.forEach((thread) => {
+      const threadLocalId = normalizeMlxModelSelectionId(thread.modelId);
+      if (thread.modelId === current.id || threadLocalId === currentLocalId) {
+        thread.modelId = null;
+        thread.updatedAt = Date.now();
+      }
+    });
+    if (
+      selectedModelId === current.id
+      || normalizeMlxModelSelectionId(selectedModelId) === currentLocalId
+    ) {
+      selectedModelId = null;
+    }
+    persistThreads();
+    await loadModels();
+    setStatus("modelo apagado");
+  } catch (error) {
+    addSystemMessage(`Falha ao apagar modelo: ${error.message}`);
+    setStatus("erro ao apagar modelo", "error");
+  }
+}
+
+async function loadCatalogSources() {
+  try {
+    const sources = await fetchJson("/catalog/sources");
+
+    catalogSource.innerHTML = "";
+    sources.forEach((source) => {
+      const option = document.createElement("option");
+      option.value = source.id;
+      option.textContent = source.name;
+      catalogSource.appendChild(option);
+    });
+
+    if (!catalogSource.value && sources[0]) {
+      catalogSource.value = sources[0].id;
+    }
+  } catch (error) {
+    catalogSource.innerHTML = "";
+    const fallback = document.createElement("option");
+    fallback.value = "huggingface";
+    fallback.textContent = "Hugging Face";
+    catalogSource.appendChild(fallback);
+    catalogSource.value = "huggingface";
+    catalogMeta.textContent = `Catalogo indisponivel: ${error.message}`;
   }
 }
 
@@ -2751,7 +4039,8 @@ async function runOpenClawRuntimeAction(action) {
 function addOpenClawChatMessage(role, content, meta = "") {
   const node = document.createElement("article");
   node.className = "message-card";
-  node.classList.add(`role-${roleClassFromValue(role)}`);
+  const roleClass = roleClassFromValue(role);
+  node.classList.add(`role-${roleClass}`);
 
   const roleNode = document.createElement("header");
   roleNode.className = "message-role";
@@ -2759,7 +4048,12 @@ function addOpenClawChatMessage(role, content, meta = "") {
 
   const contentNode = document.createElement("div");
   contentNode.className = "message-content";
-  contentNode.textContent = content;
+  if (roleClass === "assistant") {
+    contentNode.classList.add("markdown-view");
+    renderMarkdownInto(contentNode, content);
+  } else {
+    contentNode.textContent = content;
+  }
 
   node.appendChild(roleNode);
   node.appendChild(contentNode);
@@ -2790,6 +4084,7 @@ function createOpenClawAssistantStreamCard() {
     metricsSection: node.querySelector(".assistant-metrics"),
     metricsText: node.querySelector(".assistant-metrics-text"),
     finalAnswer: "",
+    answerRaw: "",
     thinkingQueue: "",
     answerQueue: "",
     flushTimer: null,
@@ -2833,8 +4128,9 @@ function flushOpenClawAssistantQueues(ui) {
     const chunk = ui.answerQueue.slice(0, STREAM_CHARS_PER_TICK);
     ui.answerQueue = ui.answerQueue.slice(chunk.length);
     ui.answerSection.classList.remove("hidden");
-    ui.answerText.textContent += chunk;
-    ui.finalAnswer = ui.answerText.textContent;
+    ui.answerRaw += chunk;
+    renderMarkdownInto(ui.answerText, ui.answerRaw);
+    ui.finalAnswer = ui.answerRaw;
     changed = true;
   }
 
@@ -3351,6 +4647,7 @@ function switchTab(nextTab) {
   panelChat.classList.toggle("active", nextTab === "chat");
   panelDiscover.classList.toggle("active", nextTab === "discover");
   panelOpenClaw.classList.toggle("active", nextTab === "openclaw");
+  if (panelAgent) panelAgent.classList.toggle("active", nextTab === "agent");
   panelSettings.classList.toggle("active", nextTab === "settings");
   if (panelAiInteraction) panelAiInteraction.classList.toggle("active", nextTab === "ai-interaction");
 
@@ -3361,6 +4658,7 @@ function switchTab(nextTab) {
   }
 
   if (nextTab === "discover") {
+    switchDiscoverSubtab(activeDiscoverSubtab);
     void searchCatalogModels();
     void loadDownloads();
   }
@@ -3382,16 +4680,17 @@ function switchTab(nextTab) {
 
   if (nextTab === "openclaw") {
     onOpenClawTabSelected();
+  } else if (nextTab === "agent") {
+    void onAgentTabSelected();
+    startAuditPolling();
   } else {
     stopOpenClawLogPolling();
+    stopAuditPolling();
   }
 }
 
 saveUrlBtn.addEventListener("click", () => {
   daemonBaseUrl = daemonInput.value.trim().replace(/\/$/, "");
-  if (braveApiKeyInput) {
-    localStorage.setItem(STORAGE_BRAVE_API_KEY, getBraveApiKey());
-  }
   localStorage.setItem(STORAGE_DAEMON_URL, daemonBaseUrl);
   openclawStatusLoaded = false;
   openclawObservabilityLoaded = false;
@@ -3400,12 +4699,6 @@ saveUrlBtn.addEventListener("click", () => {
   setStatus("url salva");
   void bootstrap();
 });
-
-if (braveApiKeyInput) {
-  braveApiKeyInput.addEventListener("change", () => {
-    localStorage.setItem(STORAGE_BRAVE_API_KEY, getBraveApiKey());
-  });
-}
 
 newChatThreadButtons.forEach((button) => {
   button.addEventListener("click", createNewChatThread);
@@ -3498,6 +4791,14 @@ if (chatWebsearchBtn) {
   });
 }
 
+if (chatAirllmToggleBtn) {
+  chatAirllmToggleBtn.addEventListener("click", () => {
+    const nextState = !chatAirllmEnabled;
+    setChatAirllmToggleState(nextState);
+    void persistChatAirllmToggle(nextState);
+  });
+}
+
 stopGenerationBtn.addEventListener("click", () => {
   if (!activeStreamController || !isGenerating) {
     return;
@@ -3537,6 +4838,24 @@ catalogQuery.addEventListener("keydown", (event) => {
 refreshDownloadsBtn.addEventListener("click", () => {
   void loadDownloads(true);
 });
+
+if (discoverSubtabButtons.length) {
+  discoverSubtabButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextSubtab = button.dataset.discoverSubtab || "catalog";
+      switchDiscoverSubtab(nextSubtab);
+      if (nextSubtab === "installed") {
+        void loadModels();
+      }
+    });
+  });
+}
+
+if (refreshInstalledModelsBtn) {
+  refreshInstalledModelsBtn.addEventListener("click", () => {
+    void loadModels();
+  });
+}
 
 tabButtons.forEach((button) => {
   button.addEventListener("click", () => {
@@ -3746,6 +5065,9 @@ async function loadConfig() {
     if (settingOpenclawCli) settingOpenclawCli.value = cfg.openclaw_cli_path || "";
     if (settingOpenclawState) settingOpenclawState.value = cfg.openclaw_state_dir || "";
     if (settingNanobotCli) settingNanobotCli.value = cfg.nanobot_cli_path || "";
+    if (cfg?.mlx_airllm_enabled != null) {
+      setChatAirllmToggleState(Boolean(cfg.mlx_airllm_enabled));
+    }
 
     const activeFramework = cfg.active_agent_framework === "nanobot" ? "nanobot" : "openclaw";
     applyAgentFramework(activeFramework, { syncRadio: true, refreshPanel: false });
@@ -3991,6 +5313,37 @@ function renderOpenclawEnvironment(payload) {
   });
 }
 
+function isNotFoundError(error) {
+  return Number(error?.status) === 404;
+}
+
+async function fetchEnvironmentWithFallback({ method = "GET", reveal = false, values = null } = {}) {
+  const endpoints = resolvedEnvironmentEndpoint
+    ? [resolvedEnvironmentEndpoint, ...ENVIRONMENT_ENDPOINT_CANDIDATES.filter((item) => item !== resolvedEnvironmentEndpoint)]
+    : [...ENVIRONMENT_ENDPOINT_CANDIDATES];
+  let lastError = null;
+
+  for (const endpoint of endpoints) {
+    const query = method === "GET" ? `?reveal=${reveal ? "true" : "false"}` : "";
+    try {
+      const payload = await fetchJson(`${endpoint}${query}`, {
+        method,
+        headers: method === "POST" ? { "Content-Type": "application/json" } : undefined,
+        body: method === "POST" ? JSON.stringify({ values: values || {} }) : undefined,
+      });
+      resolvedEnvironmentEndpoint = endpoint;
+      return payload;
+    } catch (error) {
+      lastError = error;
+      if (!isNotFoundError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError || new Error("endpoint de environment indisponivel");
+}
+
 async function loadOpenclawEnvironment({ showLoading = true } = {}) {
   if (!openclawEnvList || openclawEnvironmentInFlight) {
     return null;
@@ -4000,15 +5353,18 @@ async function loadOpenclawEnvironment({ showLoading = true } = {}) {
   setOpenclawEnvironmentButtonsDisabled(true);
 
   if (showLoading && openclawEnvFeedback) {
-    openclawEnvFeedback.textContent = "Carregando environment...";
+    openclawEnvFeedback.textContent = "Carregando environment global...";
   }
 
   try {
-    const payload = await fetchJson("/openclaw/environment?reveal=true", { method: "GET" });
+    const payload = await fetchEnvironmentWithFallback({
+      method: "GET",
+      reveal: true,
+    });
     renderOpenclawEnvironment(payload);
     if (openclawEnvFeedback) {
       const count = Array.isArray(payload?.variables) ? payload.variables.length : 0;
-      openclawEnvFeedback.textContent = `Environment carregado (${count} variaveis).`;
+      openclawEnvFeedback.textContent = `Environment global carregado (${count} variaveis).`;
     }
     setOpenclawEnvironmentInputVisibility();
     return payload;
@@ -4055,17 +5411,16 @@ async function saveOpenclawEnvironment() {
   openclawEnvironmentInFlight = true;
   setOpenclawEnvironmentButtonsDisabled(true);
   if (openclawEnvFeedback) {
-    openclawEnvFeedback.textContent = "Salvando environment...";
+    openclawEnvFeedback.textContent = "Salvando environment global...";
   }
 
   try {
-    await fetchJson("/openclaw/environment", {
+    await fetchEnvironmentWithFallback({
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ values }),
+      values,
     });
     if (openclawEnvFeedback) {
-      openclawEnvFeedback.textContent = "Environment salvo e sincronizado com o NanoBot.";
+      openclawEnvFeedback.textContent = "Environment global salvo.";
     }
     await loadOpenclawEnvironment({ showLoading: false });
   } catch (error) {
@@ -4256,10 +5611,1201 @@ if (revealOpenclawEnvToggle) {
   });
 }
 
+function setAgentStatus(text) {
+  if (agentChatStatus) {
+    agentChatStatus.textContent = text;
+  }
+}
+
+function clearElement(el) {
+  if (el) {
+    el.innerHTML = "";
+  }
+}
+
+function appendAgentMessage(role, text) {
+  if (!agentChatLog) {
+    return;
+  }
+  const card = document.createElement("article");
+  card.className = `agent-msg ${role}`;
+  card.textContent = text;
+  agentChatLog.appendChild(card);
+  agentChatLog.scrollTop = agentChatLog.scrollHeight;
+}
+
+async function loadAgentSessions() {
+  try {
+    const sessions = await fetchJson("/agent/sessions");
+    agentSessions = Array.isArray(sessions) ? sessions : [];
+    agentSessions.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+
+    renderAgentSessionSelect();
+  } catch (err) {
+    console.error("Failed to load agent sessions", err);
+  }
+}
+
+function renderAgentSessionSelect() {
+  if (!agentSessionSelect) return;
+  agentSessionSelect.innerHTML = "";
+
+  if (agentSessions.length === 0) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "Sem sessoes salvas";
+    agentSessionSelect.appendChild(opt);
+    agentSessionSelect.disabled = true;
+    if (agentRenameSessionBtn) agentRenameSessionBtn.disabled = true;
+    if (agentExportSessionBtn) agentExportSessionBtn.disabled = true;
+    if (agentDeleteSessionBtn) agentDeleteSessionBtn.disabled = true;
+    if (agentChatTitle) agentChatTitle.textContent = "Nova Sessao";
+    return;
+  }
+
+  agentSessionSelect.disabled = false;
+  agentSessions.forEach(s => {
+    const opt = document.createElement("option");
+    opt.value = s.id;
+    opt.textContent = `${s.name || s.id} (${s.message_count} msgs)`;
+    agentSessionSelect.appendChild(opt);
+  });
+
+  if (activeAgentSessionId && agentSessions.some(s => s.id === activeAgentSessionId)) {
+    agentSessionSelect.value = activeAgentSessionId;
+  } else {
+    activeAgentSessionId = agentSessions[0].id;
+    agentSessionSelect.value = activeAgentSessionId;
+  }
+
+  if (agentRenameSessionBtn) agentRenameSessionBtn.disabled = false;
+  if (agentExportSessionBtn) agentExportSessionBtn.disabled = false;
+  if (agentDeleteSessionBtn) agentDeleteSessionBtn.disabled = false;
+
+  const activeSessionMeta = agentSessions.find(s => s.id === activeAgentSessionId);
+  if (activeSessionMeta && agentChatTitle) {
+    agentChatTitle.textContent = activeSessionMeta.name || activeSessionMeta.id;
+  }
+}
+
+async function fetchAgentSessionMessages(sessionId) {
+  try {
+    if (agentChatLog) clearElement(agentChatLog);
+    if (!sessionId) return;
+    const messages = await fetchJson(`/agent/sessions/${sessionId}`);
+    if (Array.isArray(messages)) {
+      messages.forEach(msg => {
+        const role = msg.role;
+        let content = msg.content || "";
+        if (msg.tool_name) {
+          content = `[Tool: ${msg.tool_name}]\n${content}`;
+        }
+        appendAgentMessage(role, content);
+      });
+    }
+  } catch (err) {
+    console.error("Failed to fetch messages for session", err);
+  }
+}
+
+async function handleAgentSessionSelectChange() {
+  if (!agentSessionSelect || !agentSessionSelect.value) return;
+  const newSessionId = agentSessionSelect.value;
+  if (newSessionId !== activeAgentSessionId) {
+    activeAgentSessionId = newSessionId;
+    renderAgentSessionSelect();
+    await fetchAgentSessionMessages(newSessionId);
+  }
+}
+
+async function handleAgentNewSession() {
+  try {
+    const body = { name: "Nova conversa" };
+    const meta = await fetchJson("/agent/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    activeAgentSessionId = meta.id;
+    await loadAgentSessions();
+    if (agentChatLog) clearElement(agentChatLog);
+  } catch (err) {
+    console.error("Failed to create session", err);
+  }
+}
+
+async function handleAgentRenameSession() {
+  if (!activeAgentSessionId) return;
+  const activeSessionMeta = agentSessions.find(s => s.id === activeAgentSessionId);
+  const currentName = activeSessionMeta ? activeSessionMeta.name : "";
+  const newName = await showTextPrompt({
+    title: "Renomear sessao",
+    message: "Defina um novo nome para essa sessao do agent.",
+    defaultValue: currentName,
+    confirmLabel: "Salvar",
+  });
+
+  if (newName === null || newName.trim() === "") return;
+
+  try {
+    await fetchJson(`/agent/sessions/${activeAgentSessionId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newName.trim() })
+    });
+    await loadAgentSessions();
+  } catch (err) {
+    console.error("Failed to rename session", err);
+  }
+}
+
+async function handleAgentDeleteSession() {
+  if (!activeAgentSessionId) return;
+  const activeSessionMeta = agentSessions.find(s => s.id === activeAgentSessionId);
+  const currentName = activeSessionMeta ? activeSessionMeta.name : "";
+  const confirmed = await showConfirmDialog({
+    title: "Apagar sessao",
+    message: `Tem certeza que deseja apagar a sessao "${currentName}"?`,
+    confirmLabel: "Apagar",
+    danger: true,
+  });
+  if (!confirmed) return;
+
+  try {
+    await fetchJson(`/agent/sessions/${activeAgentSessionId}`, {
+      method: "DELETE"
+    });
+    activeAgentSessionId = null;
+    await loadAgentSessions();
+    if (activeAgentSessionId) {
+      await fetchAgentSessionMessages(activeAgentSessionId);
+    } else {
+      if (agentChatLog) clearElement(agentChatLog);
+    }
+  } catch (err) {
+    console.error("Failed to delete session", err);
+  }
+}
+
+function handleAgentExportSession() {
+  if (!activeAgentSessionId || !daemonBaseUrl) return;
+  window.open(`${daemonBaseUrl}/agent/sessions/${activeAgentSessionId}/export`, "_blank");
+}
+
+function renderAgentToggleList(container, items, checkedSet) {
+  if (!container) {
+    return;
+  }
+  container.innerHTML = "";
+  if (!Array.isArray(items) || !items.length) {
+    const empty = document.createElement("li");
+    empty.className = "meta-note";
+    empty.textContent = "Sem itens.";
+    container.appendChild(empty);
+    return;
+  }
+
+  items.forEach((item) => {
+    const li = document.createElement("li");
+    li.className = "agent-toggle-item";
+
+    const meta = document.createElement("div");
+    meta.className = "agent-toggle-meta";
+
+    const title = document.createElement("p");
+    title.className = "agent-toggle-title";
+    title.textContent = item.name || "-";
+
+    const desc = document.createElement("p");
+    desc.className = "agent-toggle-desc";
+    desc.textContent = item.description || item.policy || "";
+
+    meta.appendChild(title);
+    meta.appendChild(desc);
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = checkedSet.has((item.name || "").toLowerCase());
+    checkbox.dataset.itemName = item.name || "";
+
+    li.appendChild(meta);
+    li.appendChild(checkbox);
+    container.appendChild(li);
+  });
+}
+
+function readCheckedNames(container) {
+  if (!container) {
+    return [];
+  }
+  return Array.from(container.querySelectorAll('input[type="checkbox"]'))
+    .filter((el) => el.checked)
+    .map((el) => (el.dataset.itemName || "").trim())
+    .filter(Boolean);
+}
+
+function syncAgentModelOptions() {
+  if (!agentProviderSelect || !agentModelSelect) {
+    return;
+  }
+  const provider = agentProviderSelect.value;
+  const models = agentModelsByProvider[provider] || [];
+  const previous = agentModelSelect.value;
+
+  agentModelSelect.innerHTML = "";
+  if (!models.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Sem modelos detectados";
+    agentModelSelect.appendChild(option);
+    return;
+  }
+
+  models.forEach((model) => {
+    const option = document.createElement("option");
+    option.value = model;
+    option.textContent = model;
+    agentModelSelect.appendChild(option);
+  });
+
+  if (previous && models.includes(previous)) {
+    agentModelSelect.value = previous;
+  }
+}
+
+async function loadAgentProviders() {
+  const providers = await fetchJson("/agent/providers", { method: "GET" });
+  agentProvidersCatalog = Array.isArray(providers) ? providers : [];
+  agentModelsByProvider = {};
+
+  if (agentProviderSelect) {
+    agentProviderSelect.innerHTML = "";
+  }
+  if (agentFallbackProviderSelect) {
+    agentFallbackProviderSelect.innerHTML = "";
+  }
+
+  agentProvidersCatalog.forEach((provider) => {
+    agentModelsByProvider[provider.id] = Array.isArray(provider.models) ? provider.models : [];
+    if (agentProviderSelect) {
+      const opt = document.createElement("option");
+      opt.value = provider.id;
+      opt.textContent = provider.name;
+      agentProviderSelect.appendChild(opt);
+    }
+    if (agentFallbackProviderSelect) {
+      const opt = document.createElement("option");
+      opt.value = provider.id;
+      opt.textContent = provider.name;
+      agentFallbackProviderSelect.appendChild(opt);
+    }
+  });
+}
+
+function applyAgentConfigToForm(config) {
+  if (!config) {
+    return;
+  }
+  agentConfigCache = config;
+
+  if (agentProviderSelect) {
+    agentProviderSelect.value = config.provider || "ollama";
+  }
+  if (agentFallbackProviderSelect) {
+    agentFallbackProviderSelect.value = config.fallback_provider || "mlx";
+  }
+  syncAgentModelOptions();
+  if (agentModelSelect) {
+    const known = agentModelsByProvider[agentProviderSelect?.value] || [];
+    if (known.includes(config.model_id)) {
+      agentModelSelect.value = config.model_id;
+    } else if (config.model_id) {
+      const option = document.createElement("option");
+      option.value = config.model_id;
+      option.textContent = `${config.model_id} (custom)`;
+      agentModelSelect.appendChild(option);
+      agentModelSelect.value = config.model_id;
+    }
+  }
+
+  if (agentApiKeyInput) agentApiKeyInput.value = config.api_key || "";
+  if (agentBaseUrlInput) agentBaseUrlInput.value = config.base_url || "";
+  if (agentStreamingToggle) agentStreamingToggle.checked = Boolean(config.streaming);
+  if (agentFallbackToggle) agentFallbackToggle.checked = Boolean(config.fallback_enabled);
+  if (agentFallbackModelInput) agentFallbackModelInput.value = config.fallback_model_id || "";
+  if (agentExecutionModeSelect) agentExecutionModeSelect.value = config.execution_mode || "full";
+  if (agentApprovalModeSelect) agentApprovalModeSelect.value = config.approval_mode || "ask";
+  if (agentMaxPromptInput) agentMaxPromptInput.value = config.max_prompt_tokens ?? 2200;
+  if (agentMaxHistoryInput) agentMaxHistoryInput.value = config.max_history_messages ?? 14;
+  if (agentMaxToolsInput) agentMaxToolsInput.value = config.max_tools_in_prompt ?? 6;
+  if (agentAggressiveToolsToggle) {
+    agentAggressiveToolsToggle.checked = Boolean(config.aggressive_tool_filtering);
+  }
+  if (agentToolFallbackToggle) {
+    agentToolFallbackToggle.checked = Boolean(config.enable_tool_call_fallback);
+  }
+  if (agentNodeManagerSelect) {
+    agentNodeManagerSelect.value = config.node_package_manager || "npm";
+  }
+  if (agentEgressInput) {
+    agentEgressInput.value = (config.security?.egress_allow_domains || []).join(",");
+  }
+  if (agentSensitivePathsInput) {
+    agentSensitivePathsInput.value = (config.security?.sensitive_paths || []).join(",");
+  }
+}
+
+function collectAgentConfigFromForm() {
+  const base = agentConfigCache || {};
+  const parseList = (value) =>
+    String(value || "")
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+
+  return {
+    ...base,
+    provider: agentProviderSelect?.value || "ollama",
+    model_id: agentModelSelect?.value || "",
+    api_key: agentApiKeyInput?.value || "",
+    base_url: agentBaseUrlInput?.value || "",
+    custom_headers: base.custom_headers || {},
+    execution_mode: agentExecutionModeSelect?.value || "full",
+    approval_mode: agentApprovalModeSelect?.value || "ask",
+    streaming: Boolean(agentStreamingToggle?.checked),
+    fallback_enabled: Boolean(agentFallbackToggle?.checked),
+    fallback_provider: agentFallbackProviderSelect?.value || "mlx",
+    fallback_model_id: agentFallbackModelInput?.value || "",
+    max_prompt_tokens: agentMaxPromptInput?.value ? Number(agentMaxPromptInput.value) : null,
+    max_history_messages: agentMaxHistoryInput?.value ? Number(agentMaxHistoryInput.value) : null,
+    max_tools_in_prompt: agentMaxToolsInput?.value ? Number(agentMaxToolsInput.value) : null,
+    temperature: base.temperature ?? 0.1,
+    aggressive_tool_filtering: Boolean(agentAggressiveToolsToggle?.checked),
+    enable_tool_call_fallback: Boolean(agentToolFallbackToggle?.checked),
+    enabled_skills: agentSkillsController
+      ? agentSkillsController.getSkills().filter((item) => item.enabled).map((item) => item.name)
+      : [],
+    node_package_manager: agentNodeManagerSelect?.value || base.node_package_manager || "npm",
+    skill_overrides: base.skill_overrides || {},
+    enabled_tools: readCheckedNames(agentToolsList),
+    workspace_root: base.workspace_root || null,
+    security: {
+      ...(base.security || {}),
+      tool_allowlist: base.security?.tool_allowlist || [],
+      tool_denylist: base.security?.tool_denylist || [],
+      exec_safe_bins: base.security?.exec_safe_bins || [],
+      exec_deny_patterns: base.security?.exec_deny_patterns || [],
+      egress_allow_domains: parseList(agentEgressInput?.value),
+      sensitive_paths: parseList(agentSensitivePathsInput?.value),
+    },
+  };
+}
+
+async function loadAgentConfig() {
+  const config = await fetchJson("/agent/config", { method: "GET" });
+  applyAgentConfigToForm(config);
+  if (agentControlPlaneController) {
+    agentControlPlaneController.syncPolicyEditors(config);
+  }
+  return config;
+}
+
+async function saveAgentConfig() {
+  const payload = collectAgentConfigFromForm();
+  const saved = await fetchJson("/agent/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  applyAgentConfigToForm(saved);
+  return saved;
+}
+
+async function loadAgentSkills() {
+  if (!agentSkillsController) {
+    return;
+  }
+  await agentSkillsController.loadSkills();
+}
+
+async function loadAgentTools() {
+  const tools = await fetchJson("/agent/tools", { method: "GET" });
+  agentToolsCache = Array.isArray(tools) ? tools : [];
+  const checked = enabledSetFromConfig(agentConfigCache?.enabled_tools);
+  renderAgentToggleList(agentToolsList, agentToolsCache, checked);
+}
+
+const agentChannelsController = createAgentChannelsController({
+  elements: {
+    agentChannelsRefreshBtn,
+    agentChannelSelect,
+    agentChannelAccountIdInput,
+    agentChannelCredentialsInput,
+    agentChannelMetadataInput,
+    agentChannelRoutingDefaultsInput,
+    agentChannelEnabledToggle,
+    agentChannelSetDefaultToggle,
+    agentChannelSaveBtn,
+    agentChannelClearBtn,
+    agentChannelFormFeedback,
+    agentSendChannelSelect,
+    agentSendAccountSelect,
+    agentSendTargetInput,
+    agentSendMessageInput,
+    agentSendTestBtn,
+    agentProbeChannelBtn,
+    agentResolveTargetBtn,
+    agentChannelActionFeedback,
+    agentChannelList,
+    agentChannelLogsRefreshBtn,
+    agentChannelLogsChannelSelect,
+    agentChannelLogsAccountSelect,
+    agentChannelLogsList,
+  },
+  fetchJson,
+  promptText: showTextPrompt,
+  confirmAction: showConfirmDialog,
+});
+
+agentSkillsController = createAgentSkillsController({
+  elements: {
+    agentSkillsList,
+    agentSkillsSummary,
+    agentNodeManagerSelect,
+  },
+  fetchJson,
+  promptText: showTextPrompt,
+  onStatus: (message) => {
+    if (agentMeta) {
+      agentMeta.textContent = message;
+    }
+  },
+});
+
+agentControlPlaneController = createAgentControlPlaneController({
+  elements: {
+    agentPluginsRefreshBtn,
+    agentPluginsList,
+    agentPluginDetailTitle,
+    agentPluginDetailMeta,
+    agentPluginConfigEnabled,
+    agentPluginConfigForm,
+    agentPluginSaveBtn,
+    agentPluginResetBtn,
+    agentPluginFeedback,
+    agentToolProfileSelect,
+    agentToolProfileApplyBtn,
+    agentPolicyScopeSelect,
+    agentPolicyAllowInput,
+    agentPolicyDenyInput,
+    agentPolicySaveBtn,
+    agentPolicyResetBtn,
+    agentPolicyFeedback,
+    agentToolCatalogSummary,
+    agentEffectivePolicyList,
+    agentMemoryLocalToggle,
+    agentMemoryBackendSelect,
+    agentMemoryCompressionSelect,
+    agentMemorySaveBtn,
+    agentMemoryFeedback,
+    agentBudgetRefreshBtn,
+    agentBudgetTelemetry,
+    agentMaxPromptInput,
+    agentMaxPromptValue,
+    agentMaxHistoryInput,
+    agentMaxHistoryValue,
+    agentMaxToolsInput,
+    agentMaxToolsValue,
+    agentRuntimeRefreshBtn,
+    agentRuntimeSummary,
+    agentRuntimeFrameworkMeta,
+    agentRuntimeDiagnosticsList,
+    agentRuntimeLogMode,
+    agentRuntimeLogSource,
+    agentRuntimeLogAccount,
+    agentRuntimeLogList,
+  },
+  fetchJson,
+  onStatus: (message) => {
+    if (agentMeta) {
+      agentMeta.textContent = message;
+    }
+  },
+  onToolPolicyChanged: async () => {
+    await loadAgentConfig();
+    await loadAgentTools();
+    if (agentControlPlaneController) {
+      await agentControlPlaneController.loadToolPolicies(agentConfigCache);
+    }
+  },
+  loadAgentConfig,
+});
+
+async function loadAgentChannelLogs() {
+  await agentChannelsController.loadLogs();
+}
+
+async function loadAgentChannels() {
+  await agentChannelsController.loadChannels();
+}
+
+function enabledSetFromConfig(values) {
+  return new Set(
+    Array.isArray(values)
+      ? values.map((v) => String(v).toLowerCase())
+      : []
+  );
+}
+
+async function loadAgentAudit() {
+  const payload = await fetchJson("/agent/audit?limit=12", { method: "GET" });
+  const entries = Array.isArray(payload?.entries) ? payload.entries : [];
+  if (!agentAuditList) {
+    return;
+  }
+
+  clearElement(agentAuditList);
+  if (!entries.length) {
+    const li = document.createElement("li");
+    li.className = "meta-note";
+    li.textContent = "Sem eventos.";
+    agentAuditList.appendChild(li);
+    return;
+  }
+
+  entries.forEach((entry) => {
+    const li = document.createElement("li");
+    li.className = "agent-audit-item";
+    const ts = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : "-";
+    li.textContent = `${ts} • ${entry.event_type || "-"} • ${entry.tool_name || "session"}${entry.duration_ms ? ` • ${entry.duration_ms}ms` : ""
+      }`;
+    agentAuditList.appendChild(li);
+  });
+}
+
+// -------------------------------------------------------------
+// Agent Observability Console (Dynamic feed)
+// -------------------------------------------------------------
+
+function getRelativeTimeString(dateString) {
+  if (!dateString) return "-";
+  const date = new Date(dateString);
+  const diffMs = Date.now() - date.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+
+  if (diffSec < 5) return "agora mesmo";
+  if (diffSec < 60) return `há ${diffSec}s`;
+  if (diffSec < 3600) return `há ${Math.floor(diffSec / 60)}m`;
+  if (diffSec < 86400) return `há ${Math.floor(diffSec / 3600)}h`;
+  return `há ${Math.floor(diffSec / 86400)}d`;
+}
+
+async function loadObservabilityFeed() {
+  if (!agentObservabilityList) return;
+
+  const filters = {
+    limit: "100",
+  };
+
+  // Override session filter if follow toggle is on
+  if (auditFollowToggle && auditFollowToggle.checked) {
+    if (activeAgentSessionId) {
+      auditFilterSession.value = activeAgentSessionId;
+      auditActiveSessionFollowCache = activeAgentSessionId;
+    }
+  }
+
+  if (auditFilterSession && auditFilterSession.value) {
+    filters.session_id = auditFilterSession.value;
+  }
+  if (auditFilterEvent && auditFilterEvent.value) {
+    filters.event_type = auditFilterEvent.value;
+  }
+  if (auditFilterStatus && auditFilterStatus.value) {
+    filters.status = auditFilterStatus.value;
+  }
+  if (auditFilterTool && auditFilterTool.value.trim()) {
+    filters.tool_name = auditFilterTool.value.trim();
+  }
+
+  const queryParams = new URLSearchParams(filters).toString();
+
+  if (queryParams === auditConsoleLastParams && auditObservabilityEntriesCache) {
+    // Light poll just to check if new stuff arrived ? 
+    // Usually we would fetch to check, but since we re-fetch everything anyway, 
+    // let's do a fast equality check. Wait, best is to just fetch and compare stringified.
+  }
+
+  let payload;
+  try {
+    payload = await fetchJson(`/agent/audit?${queryParams}`, { method: "GET" });
+  } catch (err) {
+    console.error("Failed to load audit feed:", err);
+    return;
+  }
+
+  auditConsoleLastParams = queryParams;
+
+  const entries = Array.isArray(payload?.entries) ? payload.entries : [];
+
+  const fingerprint = entries.map(e => e.id).join("|");
+  if (fingerprint === auditObservabilityEntriesCache) {
+    return; // No changes to the feed list
+  }
+  auditObservabilityEntriesCache = fingerprint;
+
+  clearElement(agentObservabilityList);
+
+  if (!entries.length) {
+    const li = document.createElement("li");
+    li.style.padding = "16px";
+    li.style.textAlign = "center";
+    li.style.color = "var(--muted)";
+    li.textContent = "Nenhum evento corresponde aos filtros.";
+    agentObservabilityList.appendChild(li);
+    return;
+  }
+
+  entries.forEach((entry) => {
+    const li = document.createElement("li");
+    li.className = "agent-audit-item";
+    li.style.cursor = "pointer";
+    li.style.transition = "background-color 0.2s";
+
+    // Status color
+    let statusColor = "var(--text)";
+    if (entry.status === "error") statusColor = "var(--danger)";
+    if (entry.status === "denied") statusColor = "var(--warning)";
+    if (entry.status === "success" && (entry.event_type === "ToolExecuted" || entry.event_type === "ResponseFinal" || entry.event_type === "ApprovalDecision")) {
+      statusColor = "var(--accent)";
+    }
+
+    const timeRel = getRelativeTimeString(entry.timestamp);
+    const eventType = entry.event_type || "-";
+
+    // Determine main label: tool name, provider, or something representative
+    let mainLabel = entry.tool_name || "";
+    if (entry.event_type === "ProviderCall" && entry.provider) {
+      mainLabel = `${entry.provider} / ${entry.model || "-"}`;
+    }
+    if (!mainLabel && entry.reason) {
+      mainLabel = entry.reason.length > 50 ? entry.reason.substring(0, 50) + "..." : entry.reason;
+    }
+
+    li.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: baseline; width: 100%;">
+        <div>
+          <span style="font-weight: 600; font-size: 0.9rem; color: ${statusColor};">${eventType}</span>
+          ${mainLabel ? `<span style="margin-left: 8px; font-size: 0.85rem; color: var(--muted);">${mainLabel}</span>` : ""}
+        </div>
+        <div style="font-size: 0.8rem; color: var(--muted); text-align: right;">
+          ${entry.duration_ms ? `<span>${entry.duration_ms}ms</span> • ` : ""}
+          <span>${timeRel}</span>
+        </div>
+      </div>
+    `;
+
+    // Hover effect
+    li.onmouseenter = () => li.style.backgroundColor = "rgba(255,255,255,0.05)";
+    li.onmouseleave = () => li.style.backgroundColor = "transparent";
+
+    // Click to view details
+    li.addEventListener("click", () => openAuditDetail(entry.id));
+
+    agentObservabilityList.appendChild(li);
+  });
+}
+
+let auditObservabilityEntriesCache = "";
+
+async function openAuditDetail(eventId) {
+  if (!auditDetailPanel || !auditDetailContent) return;
+
+  auditDetailContent.innerHTML = "Carregando...";
+  auditDetailPanel.style.display = "flex";
+
+  try {
+    const entry = await fetchJson(`/agent/audit/${eventId}`, { method: "GET" });
+    const formattedJson = JSON.stringify(entry, null, 2);
+    auditDetailContent.innerHTML = `<pre style="margin: 0; font-family: monospace; font-size: 0.8rem; overflow-x: auto;">${formattedJson}</pre>`;
+  } catch (err) {
+    auditDetailContent.innerHTML = `<span style="color: var(--danger);">Falha ao carregar os detalhes do evento: ${err.message}</span>`;
+  }
+}
+
+if (auditDetailCloseBtn) {
+  auditDetailCloseBtn.addEventListener("click", () => {
+    if (auditDetailPanel) auditDetailPanel.style.display = "none";
+  });
+}
+
+function startAuditPolling() {
+  if (auditPollTimer !== null) return;
+  auditPollTimer = setInterval(() => {
+    void loadObservabilityFeed();
+  }, 1500);
+}
+
+function stopAuditPolling() {
+  if (auditPollTimer !== null) {
+    clearInterval(auditPollTimer);
+    auditPollTimer = null;
+  }
+}
+
+async function syncAuditSessionFilterDropdown() {
+  if (!auditFilterSession) return;
+
+  const currentVal = auditFilterSession.value;
+  auditFilterSession.innerHTML = `<option value="">Todas Sessoes</option>`;
+
+  agentSessions.forEach(s => {
+    const opt = document.createElement("option");
+    opt.value = s.id;
+    opt.textContent = `${s.name || s.id}`;
+    auditFilterSession.appendChild(opt);
+  });
+
+  if (currentVal && agentSessions.some(s => s.id === currentVal)) {
+    auditFilterSession.value = currentVal;
+  }
+}
+
+if (auditExportBtn) {
+  auditExportBtn.addEventListener("click", () => {
+    if (!daemonBaseUrl) return;
+
+    const filters = new URLSearchParams();
+    if (auditFilterSession && auditFilterSession.value) filters.append("session_id", auditFilterSession.value);
+    if (auditFilterEvent && auditFilterEvent.value) filters.append("event_type", auditFilterEvent.value);
+    if (auditFilterStatus && auditFilterStatus.value) filters.append("status", auditFilterStatus.value);
+    if (auditFilterTool && auditFilterTool.value.trim()) filters.append("tool_name", auditFilterTool.value.trim());
+    filters.append("limit", "5000"); // Request a higher limit for exports
+
+    window.open(`${daemonBaseUrl}/agent/audit/export?${filters.toString()}`, "_blank");
+  });
+}
+
+if (auditFilterSession) auditFilterSession.addEventListener("change", () => {
+  if (auditFollowToggle && auditFollowToggle.checked && auditFilterSession.value !== activeAgentSessionId) {
+    auditFollowToggle.checked = false; // Disable follow mode if user manually changes session via filter
+  }
+  loadObservabilityFeed();
+});
+if (auditFilterEvent) auditFilterEvent.addEventListener("change", () => loadObservabilityFeed());
+if (auditFilterStatus) auditFilterStatus.addEventListener("change", () => loadObservabilityFeed());
+if (auditFilterTool) auditFilterTool.addEventListener("input", () => {
+  // debounce slightly
+  clearTimeout(auditFilterTool.timer);
+  auditFilterTool.timer = setTimeout(() => loadObservabilityFeed(), 300);
+});
+if (auditFollowToggle) auditFollowToggle.addEventListener("change", () => loadObservabilityFeed());
+
+async function onAgentTabSelected() {
+  if (!panelAgent) {
+    return;
+  }
+  setStatus("carregando agent", "running");
+  try {
+    await loadAgentProviders();
+    await loadAgentConfig();
+    await loadAgentSkills();
+    await loadAgentTools();
+    await loadAgentChannels();
+    if (agentControlPlaneController) {
+      await agentControlPlaneController.loadPlugins();
+      await agentControlPlaneController.loadToolPolicies(agentConfigCache);
+      await agentControlPlaneController.loadRuntimeHealth();
+    }
+    await loadAgentAudit();
+    await loadAgentSessions();
+    syncAuditSessionFilterDropdown(); // ensure console gets the latest sessions list
+    if (activeAgentSessionId) {
+      await fetchAgentSessionMessages(activeAgentSessionId);
+    }
+
+    if (auditFollowToggle && auditFollowToggle.checked) {
+      loadObservabilityFeed(); // initial eager fetch inside tab load
+    }
+
+    if (agentMeta) {
+      agentMeta.textContent = "Configuracao carregada.";
+    }
+    setStatus("pronto");
+  } catch (error) {
+    if (agentMeta) {
+      agentMeta.textContent = `Falha ao carregar Agent: ${error.message}`;
+    }
+    setStatus("erro agent", "error");
+  }
+}
+
+async function sendAgentMessage() {
+  const text = String(agentMessageInput?.value || "").trim();
+  if (!text) {
+    return;
+  }
+
+  agentMessageInput.value = "";
+  appendAgentMessage("user", text);
+  setAgentStatus("executando...");
+
+  try {
+    const payload = collectAgentConfigFromForm();
+    const response = await fetchJson("/agent/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: activeAgentSessionId || null,
+        message: text,
+        provider: payload.provider,
+        model_id: payload.model_id,
+        api_key: payload.api_key,
+        base_url: payload.base_url,
+        custom_headers: payload.custom_headers || {},
+        streaming: payload.streaming,
+        fallback_enabled: payload.fallback_enabled,
+        fallback_provider: payload.fallback_provider,
+        fallback_model_id: payload.fallback_model_id,
+        execution_mode: payload.execution_mode,
+        approval_mode: payload.approval_mode,
+        max_prompt_tokens: payload.max_prompt_tokens,
+        max_history_messages: payload.max_history_messages,
+        max_tools_in_prompt: payload.max_tools_in_prompt,
+        aggressive_tool_filtering: payload.aggressive_tool_filtering,
+        enable_tool_call_fallback: payload.enable_tool_call_fallback,
+        enabled_skills: payload.enabled_skills,
+        enabled_tools: payload.enabled_tools,
+      }),
+    });
+
+    appendAgentMessage("assistant", response.final_response || response.content || "(sem resposta)");
+    setAgentStatus(`ok • ${response.provider || "-"} • ${response.model_id || "-"}`);
+    await loadAgentAudit();
+
+    if (response.session_id && response.session_id !== activeAgentSessionId) {
+      activeAgentSessionId = response.session_id;
+      await loadAgentSessions();
+      syncAuditSessionFilterDropdown();
+    } else {
+      await loadAgentSessions();
+      syncAuditSessionFilterDropdown();
+    }
+  } catch (error) {
+    appendAgentMessage("assistant", `Erro: ${error.message}`);
+    setAgentStatus("falha");
+  }
+}
+
+async function saveAgentChannelAccount() {
+  const channel = agentChannelSelect?.value;
+  const accountId = String(agentChannelAccountIdInput?.value || "").trim();
+  if (!channel || !accountId) {
+    throw new Error("Selecione um canal e informe o account_id.");
+  }
+
+  const payload = {
+    channel,
+    account_id: accountId,
+    enabled: Boolean(agentChannelEnabledToggle?.checked),
+    credentials: parseCredentialsInput(agentChannelCredentialsInput?.value),
+    metadata: parseOptionalJsonInput(agentChannelMetadataInput?.value, {}),
+    routing_defaults: parseOptionalJsonInput(agentChannelRoutingDefaultsInput?.value, {}),
+    set_as_default: Boolean(agentChannelSetDefaultToggle?.checked),
+    adapter_config: null,
+  };
+
+  await fetchJson("/agent/channels/upsert-account", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (agentChannelFormFeedback) {
+    agentChannelFormFeedback.textContent = `Conta ${channel}:${accountId} salva.`;
+  }
+  await loadAgentChannels();
+}
+
+async function executeChannelOperation(path, payload) {
+  const response = await fetchJson(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  await loadAgentChannels();
+  return response;
+}
+
+async function renameAgentChannelAccount(channelId, accountId) {
+  const channel = findChannelView(channelId);
+  const account = channel?.accounts?.find((entry) => entry.account_id === accountId);
+  if (!channel || !account) {
+    throw new Error("Conta nao encontrada.");
+  }
+  const nextAccountId = window.prompt("Novo account_id", accountId);
+  if (!nextAccountId || nextAccountId === accountId) {
+    return;
+  }
+
+  await executeChannelOperation("/agent/channels/upsert-account", {
+    channel: channelId,
+    account_id: nextAccountId,
+    enabled: account.enabled,
+    credentials_ref: account.credentials_ref || null,
+    metadata: account.metadata || {},
+    routing_defaults: account.routing_defaults || {},
+    set_as_default: account.is_default,
+    adapter_config: account.adapter_config || null,
+  });
+  await executeChannelOperation("/agent/channels/remove-account", {
+    channel: channelId,
+    account_id: accountId,
+  });
+}
+
+async function handleAgentChannelListAction(action, channelId, accountId) {
+  if (action === "edit") {
+    populateChannelForm(channelId, accountId);
+    return;
+  }
+  if (action === "login") {
+    const response = await executeChannelOperation("/agent/channels/login", {
+      channel: channelId,
+      account_id: accountId,
+    });
+    if (agentChannelActionFeedback) {
+      agentChannelActionFeedback.textContent = `${response.channel}:${response.account_id} • ${response.status}`;
+    }
+    return;
+  }
+  if (action === "logout") {
+    const response = await executeChannelOperation("/agent/channels/logout", {
+      channel: channelId,
+      account_id: accountId,
+    });
+    if (agentChannelActionFeedback) {
+      agentChannelActionFeedback.textContent = `${response.channel}:${response.account_id} • ${response.status}`;
+    }
+    return;
+  }
+  if (action === "default") {
+    const channel = findChannelView(channelId);
+    const account = channel?.accounts?.find((entry) => entry.account_id === accountId);
+    if (!account) {
+      throw new Error("Conta nao encontrada.");
+    }
+    await executeChannelOperation("/agent/channels/upsert-account", {
+      channel: channelId,
+      account_id: accountId,
+      enabled: account.enabled,
+      credentials_ref: account.credentials_ref || null,
+      metadata: account.metadata || {},
+      routing_defaults: account.routing_defaults || {},
+      set_as_default: true,
+      adapter_config: account.adapter_config || null,
+    });
+    return;
+  }
+  if (action === "rename") {
+    await renameAgentChannelAccount(channelId, accountId);
+    return;
+  }
+  if (action === "remove") {
+    if (!window.confirm(`Remover ${channelId}:${accountId}?`)) {
+      return;
+    }
+    await executeChannelOperation("/agent/channels/remove-account", {
+      channel: channelId,
+      account_id: accountId,
+    });
+  }
+}
+
+async function sendAgentChannelTestMessage() {
+  const channel = agentSendChannelSelect?.value;
+  const target = String(agentSendTargetInput?.value || "").trim();
+  const message = String(agentSendMessageInput?.value || "").trim();
+  if (!channel || !target || !message) {
+    throw new Error("Canal, target e mensagem sao obrigatorios.");
+  }
+  const payload = await executeChannelOperation("/agent/message/send", {
+    channel,
+    account_id: agentSendAccountSelect?.value || null,
+    target,
+    message,
+  });
+  if (agentChannelActionFeedback) {
+    agentChannelActionFeedback.textContent = `Mensagem enviada via ${payload.channel}:${payload.account_id} (${payload.message_id})`;
+  }
+}
+
+async function probeAgentChannel() {
+  const channel = agentSendChannelSelect?.value;
+  if (!channel) {
+    throw new Error("Selecione um canal.");
+  }
+  const payload = await executeChannelOperation("/agent/channels/probe", {
+    channel,
+    account_id: agentSendAccountSelect?.value || null,
+    all_accounts: !agentSendAccountSelect?.value,
+  });
+  const summaries = (Array.isArray(payload) ? payload : []).map((entry) => `${entry.account_id}:${entry.status}`);
+  if (agentChannelActionFeedback) {
+    agentChannelActionFeedback.textContent = summaries.join(" • ") || "Probe concluido.";
+  }
+}
+
+async function resolveAgentChannelTarget() {
+  const channel = agentSendChannelSelect?.value;
+  const target = String(agentSendTargetInput?.value || "").trim();
+  if (!channel || !target) {
+    throw new Error("Selecione canal e target.");
+  }
+  const payload = await executeChannelOperation("/agent/channels/resolve", {
+    channel,
+    account_id: agentSendAccountSelect?.value || null,
+    target,
+  });
+  if (agentChannelActionFeedback) {
+    agentChannelActionFeedback.textContent = `Target resolvido por ${payload.account_id}: ${payload.resolved_target}`;
+  }
+}
+
+if (agentProviderSelect) {
+  agentProviderSelect.addEventListener("change", () => {
+    syncAgentModelOptions();
+  });
+}
+
+if (agentRefreshBtn) {
+  agentRefreshBtn.addEventListener("click", () => {
+    void onAgentTabSelected();
+  });
+}
+
+if (agentSaveConfigBtn) {
+  agentSaveConfigBtn.addEventListener("click", async () => {
+    try {
+      const old = agentSaveConfigBtn.textContent;
+      agentSaveConfigBtn.disabled = true;
+      agentSaveConfigBtn.textContent = "Salvando...";
+      await saveAgentConfig();
+      if (agentControlPlaneController) {
+        await agentControlPlaneController.loadToolPolicies(agentConfigCache);
+        await agentControlPlaneController.loadBudgetTelemetry();
+      }
+      agentSaveConfigBtn.textContent = "Salvo!";
+      setTimeout(() => {
+        agentSaveConfigBtn.textContent = old;
+        agentSaveConfigBtn.disabled = false;
+      }, 1200);
+    } catch (error) {
+      if (agentMeta) {
+        agentMeta.textContent = `Falha ao salvar: ${error.message}`;
+      }
+      agentSaveConfigBtn.disabled = false;
+      agentSaveConfigBtn.textContent = "Salvar configuracoes";
+    }
+  });
+}
+
+if (agentReloadSkillsBtn) {
+  agentReloadSkillsBtn.addEventListener("click", async () => {
+    try {
+      await fetchJson("/agent/skills/reload", { method: "POST" });
+      await loadAgentSkills();
+    } catch (error) {
+      if (agentMeta) {
+        agentMeta.textContent = `Falha no reload de skills: ${error.message}`;
+      }
+    }
+  });
+}
+
+if (agentCheckSkillsBtn) {
+  agentCheckSkillsBtn.addEventListener("click", async () => {
+    try {
+      await loadAgentSkills();
+    } catch (error) {
+      if (agentMeta) {
+        agentMeta.textContent = `Falha no check de skills: ${error.message}`;
+      }
+    }
+  });
+}
+
+if (agentInstallSkillsBtn) {
+  agentInstallSkillsBtn.addEventListener("click", async () => {
+    try {
+      if (agentSkillsController) {
+        await agentSkillsController.installMissingSkills();
+      }
+    } catch (error) {
+      if (agentMeta) {
+        agentMeta.textContent = `Falha na instalacao de skills: ${error.message}`;
+      }
+    }
+  });
+}
+
+if (agentConfigureSkillsBtn) {
+  agentConfigureSkillsBtn.addEventListener("click", async () => {
+    try {
+      if (agentSkillsController) {
+        await agentSkillsController.configurePendingSkill();
+      }
+    } catch (error) {
+      if (agentMeta) {
+        agentMeta.textContent = `Falha na configuracao da skill: ${error.message}`;
+      }
+    }
+  });
+}
+
+if (agentChatForm) {
+  agentChatForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await sendAgentMessage();
+  });
+}
+
+if (agentMessageInput) {
+  agentMessageInput.addEventListener("input", () => autoResizeTextarea(agentMessageInput));
+}
+
+if (agentSessionSelect) {
+  agentSessionSelect.addEventListener("change", () => {
+    handleAgentSessionSelectChange();
+    if (auditFollowToggle && auditFollowToggle.checked && auditFilterSession) {
+      auditFilterSession.value = agentSessionSelect.value;
+      loadObservabilityFeed();
+    }
+  });
+}
+if (agentNewSessionBtn) {
+  agentNewSessionBtn.addEventListener("click", handleAgentNewSession);
+}
+if (agentRenameSessionBtn) {
+  agentRenameSessionBtn.addEventListener("click", handleAgentRenameSession);
+}
+if (agentExportSessionBtn) {
+  agentExportSessionBtn.addEventListener("click", handleAgentExportSession);
+}
+if (agentDeleteSessionBtn) {
+  agentDeleteSessionBtn.addEventListener("click", handleAgentDeleteSession);
+}
+
 async function bootstrap() {
+  let daemonReady = false;
   try {
     const storedWebsearch = localStorage.getItem(STORAGE_CHAT_WEBSEARCH_ENABLED);
     setWebsearchToggleState(storedWebsearch === "1", { persist: false });
+    const storedAirllm = localStorage.getItem(STORAGE_CHAT_AIRLLM_ENABLED);
+    if (storedAirllm == null) {
+      setChatAirllmToggleState(true, { persist: false });
+    } else {
+      setChatAirllmToggleState(storedAirllm === "1", { persist: false });
+    }
     setChatModelMenuOpen(false);
 
     loadThreads();
@@ -4275,15 +6821,23 @@ async function bootstrap() {
     rebuildChatFromThread();
     setEditMode(null);
 
-    await loadModels();
-    await loadCatalogSources();
-    await searchCatalogModels();
-    await loadConfig();
+    setStatus("conectando daemon", "running");
+    daemonReady = await waitForDaemonReady();
+    if (daemonReady) {
+      await loadModels();
+      await loadCatalogSources();
+      await searchCatalogModels();
+      await loadConfig();
+      await loadDownloads();
+      setStatus("pronto");
+    } else {
+      setStatus("daemon offline", "error");
+    }
+
     if (!restoreOpenClawObservabilityFromStorage()) {
       clearChipList(openclawSkills, "Nenhuma skill reportada");
       clearChipList(openclawTools, "Nenhuma tool reportada");
     }
-    await loadDownloads();
 
     if (downloadsTimer) {
       window.clearInterval(downloadsTimer);
@@ -4298,20 +6852,18 @@ async function bootstrap() {
     }
 
     downloadsTimer = window.setInterval(() => {
-      void loadDownloads();
+      if (daemonReady) {
+        void loadDownloads();
+      }
     }, 2000);
 
     switchTab(activeTab);
-    setStatus("pronto");
-
-    if (splashScreen) {
-      setTimeout(() => {
-        splashScreen.classList.add("hidden");
-      }, 1000);
-    }
+    switchDiscoverSubtab(activeDiscoverSubtab);
   } catch (error) {
     setStatus("erro inicial", "error");
     addSystemMessage(`Falha na inicializacao: ${error.message}`);
+  } finally {
+    setTimeout(hideSplash, 300);
   }
 }
 
