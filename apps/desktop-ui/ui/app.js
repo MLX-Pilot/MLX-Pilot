@@ -1,6 +1,7 @@
 import { ParticleSystem } from "./particles.js";
 import { createAgentChannelsController } from "./agent-channels.js";
 import { createAgentSkillsController } from "./agent-skills.js";
+import { createAgentControlPlaneController } from "./agent-control-plane.js";
 
 const STORAGE_DAEMON_URL = "mlxPilotDaemonUrl";
 const STORAGE_CHAT_THREADS = "mlxPilotChatThreadsV2";
@@ -170,6 +171,15 @@ const openclawEnvList = document.getElementById("openclaw-env-list");
 const agentMeta = document.getElementById("agent-meta");
 const agentRefreshBtn = document.getElementById("agent-refresh-btn");
 const agentSaveConfigBtn = document.getElementById("agent-save-config-btn");
+const agentPluginsRefreshBtn = document.getElementById("agent-plugins-refresh-btn");
+const agentPluginsList = document.getElementById("agent-plugins-list");
+const agentPluginDetailTitle = document.getElementById("agent-plugin-detail-title");
+const agentPluginDetailMeta = document.getElementById("agent-plugin-detail-meta");
+const agentPluginConfigEnabled = document.getElementById("agent-plugin-config-enabled");
+const agentPluginConfigForm = document.getElementById("agent-plugin-config-form");
+const agentPluginSaveBtn = document.getElementById("agent-plugin-save-btn");
+const agentPluginResetBtn = document.getElementById("agent-plugin-reset-btn");
+const agentPluginFeedback = document.getElementById("agent-plugin-feedback");
 const agentProviderSelect = document.getElementById("agent-provider-select");
 const agentModelSelect = document.getElementById("agent-model-select");
 const agentApiKeyInput = document.getElementById("agent-api-key-input");
@@ -185,6 +195,16 @@ const agentMaxHistoryInput = document.getElementById("agent-max-history-input");
 const agentMaxToolsInput = document.getElementById("agent-max-tools-input");
 const agentAggressiveToolsToggle = document.getElementById("agent-aggressive-tools-toggle");
 const agentToolFallbackToggle = document.getElementById("agent-tool-fallback-toggle");
+const agentToolProfileSelect = document.getElementById("agent-tool-profile-select");
+const agentToolProfileApplyBtn = document.getElementById("agent-tool-profile-apply-btn");
+const agentPolicyScopeSelect = document.getElementById("agent-policy-scope-select");
+const agentPolicyAllowInput = document.getElementById("agent-policy-allow-input");
+const agentPolicyDenyInput = document.getElementById("agent-policy-deny-input");
+const agentPolicySaveBtn = document.getElementById("agent-policy-save-btn");
+const agentPolicyResetBtn = document.getElementById("agent-policy-reset-btn");
+const agentPolicyFeedback = document.getElementById("agent-policy-feedback");
+const agentToolCatalogSummary = document.getElementById("agent-tool-catalog-summary");
+const agentEffectivePolicyList = document.getElementById("agent-effective-policy-list");
 const agentReloadSkillsBtn = document.getElementById("agent-reload-skills-btn");
 const agentCheckSkillsBtn = document.getElementById("agent-check-skills-btn");
 const agentConfigureSkillsBtn = document.getElementById("agent-configure-skills-btn");
@@ -195,6 +215,16 @@ const agentSkillsList = document.getElementById("agent-skills-list");
 const agentToolsList = document.getElementById("agent-tools-list");
 const agentEgressInput = document.getElementById("agent-egress-input");
 const agentSensitivePathsInput = document.getElementById("agent-sensitive-paths-input");
+const agentMaxPromptValue = document.getElementById("agent-max-prompt-value");
+const agentMaxHistoryValue = document.getElementById("agent-max-history-value");
+const agentMaxToolsValue = document.getElementById("agent-max-tools-value");
+const agentMemoryLocalToggle = document.getElementById("agent-memory-local-toggle");
+const agentMemoryBackendSelect = document.getElementById("agent-memory-backend-select");
+const agentMemoryCompressionSelect = document.getElementById("agent-memory-compression-select");
+const agentMemorySaveBtn = document.getElementById("agent-memory-save-btn");
+const agentMemoryFeedback = document.getElementById("agent-memory-feedback");
+const agentBudgetRefreshBtn = document.getElementById("agent-budget-refresh-btn");
+const agentBudgetTelemetry = document.getElementById("agent-budget-telemetry");
 const agentChannelsRefreshBtn = document.getElementById("agent-channels-refresh-btn");
 const agentChannelSelect = document.getElementById("agent-channel-select");
 const agentChannelAccountIdInput = document.getElementById("agent-channel-account-id");
@@ -225,6 +255,14 @@ const agentChatLog = document.getElementById("agent-chat-log");
 const agentChatForm = document.getElementById("agent-chat-form");
 const agentMessageInput = document.getElementById("agent-message-input");
 const agentSendBtn = document.getElementById("agent-send-btn");
+const agentRuntimeRefreshBtn = document.getElementById("agent-runtime-refresh-btn");
+const agentRuntimeSummary = document.getElementById("agent-runtime-summary");
+const agentRuntimeFrameworkMeta = document.getElementById("agent-runtime-framework-meta");
+const agentRuntimeDiagnosticsList = document.getElementById("agent-runtime-diagnostics-list");
+const agentRuntimeLogMode = document.getElementById("agent-runtime-log-mode");
+const agentRuntimeLogSource = document.getElementById("agent-runtime-log-source");
+const agentRuntimeLogAccount = document.getElementById("agent-runtime-log-account");
+const agentRuntimeLogList = document.getElementById("agent-runtime-log-list");
 
 // Agent Observability Console (Audit Feed)
 const auditFilterSession = document.getElementById("audit-filter-session");
@@ -310,6 +348,7 @@ let agentModelsByProvider = {};
 let agentConfigCache = null;
 let agentToolsCache = [];
 let agentSkillsController = null;
+let agentControlPlaneController = null;
 
 daemonInput.value = daemonBaseUrl;
 
@@ -5896,9 +5935,9 @@ function applyAgentConfigToForm(config) {
   if (agentFallbackModelInput) agentFallbackModelInput.value = config.fallback_model_id || "";
   if (agentExecutionModeSelect) agentExecutionModeSelect.value = config.execution_mode || "full";
   if (agentApprovalModeSelect) agentApprovalModeSelect.value = config.approval_mode || "ask";
-  if (agentMaxPromptInput) agentMaxPromptInput.value = config.max_prompt_tokens ?? "";
-  if (agentMaxHistoryInput) agentMaxHistoryInput.value = config.max_history_messages ?? "";
-  if (agentMaxToolsInput) agentMaxToolsInput.value = config.max_tools_in_prompt ?? "";
+  if (agentMaxPromptInput) agentMaxPromptInput.value = config.max_prompt_tokens ?? 2200;
+  if (agentMaxHistoryInput) agentMaxHistoryInput.value = config.max_history_messages ?? 14;
+  if (agentMaxToolsInput) agentMaxToolsInput.value = config.max_tools_in_prompt ?? 6;
   if (agentAggressiveToolsToggle) {
     agentAggressiveToolsToggle.checked = Boolean(config.aggressive_tool_filtering);
   }
@@ -5965,6 +6004,9 @@ function collectAgentConfigFromForm() {
 async function loadAgentConfig() {
   const config = await fetchJson("/agent/config", { method: "GET" });
   applyAgentConfigToForm(config);
+  if (agentControlPlaneController) {
+    agentControlPlaneController.syncPolicyEditors(config);
+  }
   return config;
 }
 
@@ -6038,6 +6080,65 @@ agentSkillsController = createAgentSkillsController({
       agentMeta.textContent = message;
     }
   },
+});
+
+agentControlPlaneController = createAgentControlPlaneController({
+  elements: {
+    agentPluginsRefreshBtn,
+    agentPluginsList,
+    agentPluginDetailTitle,
+    agentPluginDetailMeta,
+    agentPluginConfigEnabled,
+    agentPluginConfigForm,
+    agentPluginSaveBtn,
+    agentPluginResetBtn,
+    agentPluginFeedback,
+    agentToolProfileSelect,
+    agentToolProfileApplyBtn,
+    agentPolicyScopeSelect,
+    agentPolicyAllowInput,
+    agentPolicyDenyInput,
+    agentPolicySaveBtn,
+    agentPolicyResetBtn,
+    agentPolicyFeedback,
+    agentToolCatalogSummary,
+    agentEffectivePolicyList,
+    agentMemoryLocalToggle,
+    agentMemoryBackendSelect,
+    agentMemoryCompressionSelect,
+    agentMemorySaveBtn,
+    agentMemoryFeedback,
+    agentBudgetRefreshBtn,
+    agentBudgetTelemetry,
+    agentMaxPromptInput,
+    agentMaxPromptValue,
+    agentMaxHistoryInput,
+    agentMaxHistoryValue,
+    agentMaxToolsInput,
+    agentMaxToolsValue,
+    agentRuntimeRefreshBtn,
+    agentRuntimeSummary,
+    agentRuntimeFrameworkMeta,
+    agentRuntimeDiagnosticsList,
+    agentRuntimeLogMode,
+    agentRuntimeLogSource,
+    agentRuntimeLogAccount,
+    agentRuntimeLogList,
+  },
+  fetchJson,
+  onStatus: (message) => {
+    if (agentMeta) {
+      agentMeta.textContent = message;
+    }
+  },
+  onToolPolicyChanged: async () => {
+    await loadAgentConfig();
+    await loadAgentTools();
+    if (agentControlPlaneController) {
+      await agentControlPlaneController.loadToolPolicies(agentConfigCache);
+    }
+  },
+  loadAgentConfig,
 });
 
 async function loadAgentChannelLogs() {
@@ -6311,6 +6412,11 @@ async function onAgentTabSelected() {
     await loadAgentSkills();
     await loadAgentTools();
     await loadAgentChannels();
+    if (agentControlPlaneController) {
+      await agentControlPlaneController.loadPlugins();
+      await agentControlPlaneController.loadToolPolicies(agentConfigCache);
+      await agentControlPlaneController.loadRuntimeHealth();
+    }
     await loadAgentAudit();
     await loadAgentSessions();
     syncAuditSessionFilterDropdown(); // ensure console gets the latest sessions list
@@ -6584,6 +6690,10 @@ if (agentSaveConfigBtn) {
       agentSaveConfigBtn.disabled = true;
       agentSaveConfigBtn.textContent = "Salvando...";
       await saveAgentConfig();
+      if (agentControlPlaneController) {
+        await agentControlPlaneController.loadToolPolicies(agentConfigCache);
+        await agentControlPlaneController.loadBudgetTelemetry();
+      }
       agentSaveConfigBtn.textContent = "Salvo!";
       setTimeout(() => {
         agentSaveConfigBtn.textContent = old;

@@ -169,6 +169,11 @@ export function createAgentChannelsController({
       const accounts = (channel.accounts || []).map((account) => {
         const health = account.health_state?.status || "-";
         const session = account.session?.status || "-";
+        const accountCapabilities = Array.isArray(account.capabilities) && account.capabilities.length
+          ? `<div class="agent-skill-badges" style="margin-top: 8px;">${account.capabilities
+              .map((capability) => `<span class="agent-skill-tag">${capability}</span>`)
+              .join("")}</div>`
+          : "";
         return `
           <div class="glass" style="padding: 12px; border-radius: 12px; margin-top: 8px;">
             <div style="display: flex; justify-content: space-between; gap: 8px; align-items: flex-start;">
@@ -177,6 +182,7 @@ export function createAgentChannelsController({
                 <div class="meta-note" style="margin-top: 4px;">health: ${health} • session: ${session}</div>
                 <div class="meta-note">credencial: ${account.credentials_ref || "nao definida"}</div>
                 ${protocol}
+                ${accountCapabilities}
               </div>
               <div style="display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end;">
                 <button class="ghost-btn text-sm" type="button" data-channel-action="edit" data-channel="${channel.id}" data-account="${account.account_id}">Editar</button>
@@ -198,6 +204,9 @@ export function createAgentChannelsController({
               <h4 style="margin: 0;">${channel.name}</h4>
               <p class="meta-note" style="margin-top: 4px;">aliases: ${(channel.aliases || []).join(", ") || "-"}</p>
               <p class="meta-note" style="margin-top: 4px;">family: ${channel.protocol_family} • version: ${channel.protocol_version}</p>
+              <div class="agent-skill-badges" style="margin-top: 8px;">${(channel.capabilities || [])
+                .map((capability) => `<span class="agent-skill-tag">${capability}</span>`)
+                .join("")}</div>
             </div>
             <span class="meta-note">${(channel.accounts || []).length} conta(s)</span>
           </div>
