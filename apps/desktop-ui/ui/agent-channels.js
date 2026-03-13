@@ -25,6 +25,8 @@ export function createAgentChannelsController({
   fetchJson,
   promptText,
   confirmAction,
+  showChannelLoginDialog,
+  renderQrCode,
 }) {
   let channelsCache = [];
 
@@ -37,6 +39,477 @@ export function createAgentChannelsController({
 
   function findChannelView(channelId) {
     return channelsCache.find((channel) => channel.id === channelId) || null;
+  }
+
+  function findAccountView(channelId, accountId) {
+    const channel = findChannelView(channelId);
+    return channel?.accounts?.find((entry) => entry.account_id === accountId) || null;
+  }
+
+  function channelCapabilitySet(channel, account = null) {
+    return new Set([
+      ...(Array.isArray(channel?.capabilities) ? channel.capabilities : []),
+      ...(Array.isArray(account?.capabilities) ? account.capabilities : []),
+    ]);
+  }
+
+  function supportsQrLogin(channel, account) {
+    return channelCapabilitySet(channel, account).has("qr-login");
+  }
+
+  function loginActionLabel(channel, account) {
+    const capabilities = channelCapabilitySet(channel, account);
+    const protocolFamily = String(channel?.protocol_family || "").toLowerCase();
+    if (capabilities.has("qr-login") || channel?.id === "whatsapp") {
+      return "Conectar QR";
+    }
+    if (
+      capabilities.has("bot-token")
+      || capabilities.has("access-token")
+      || protocolFamily.includes("token_bot")
+      || protocolFamily.includes("oauth")
+    ) {
+      return "Autenticar";
+    }
+    if (protocolFamily.includes("bridge")) {
+      return "Ativar";
+    }
+    return "Login";
+  }
+
+  function nonEmptyDetails(details) {
+    return Boolean(
+      details
+      && typeof details === "object"
+      && !Array.isArray(details)
+      && Object.keys(details).length,
+    );
+  }
+
+  async function presentChannelLoginDialog(channelId, accountId, response) {
+    if (typeof showChannelLoginDialog !== "function") {
+      return;
+    }
+    const channel = findChannelView(channelId);
+    const account = channel?.accounts?.find((entry) => entry.account_id === accountId) || null;
+    const details = nonEmptyDetails(response?.details) ? response.details : null;
+    const qrCode = typeof details?.qr_code === "string" && details.qr_code.trim()
+      ? details.qr_code.trim()
+      : (typeof account?.session?.qr_code === "string" ? account.session.qr_code.trim() : "");
+
+    if (!qrCode && !details) {
+      return;
+    }
+
+    await showChannelLoginDialog({
+      title: `${channel?.name || channelId} • ${accountId}`,
+      channelName: channel?.name || channelId,
+      channelId,
+      accountId,
+      status: response?.status || account?.session?.status || "connected",
+      message: response?.message || "",
+      qrCode: qrCode || null,
+      details,
+      sessionState: account?.session || null,
+    });
+  }
+
+  function nonEmptyObject(value) {
+    return Boolean(
+      value
+      && typeof value === "object"
+      && !Array.isArray(value)
+      && Object.keys(value).length,
+    );
+  }
+
+  function onboardingBlueprint(channel, account = null) {
+    if (!channel) {
+      return {
+        title: "Selecione um canal para ver o fluxo recomendado",
+        summary: "A UI adapta as instrucoes conforme QR local, token de bot ou bridge externa.",
+        credentialLabel: "Credencial (token ou JSON)",
+        credentialPlaceholder: '{"token":"..."} ou xoxb-...',
+        credentialHint: "Cole um token simples ou JSON, dependendo do canal.",
+        metadataLabel: "Metadata (JSON)",
+        metadataPlaceholder: '{"workspace":"ops"}',
+        routingLabel: "Routing defaults (JSON)",
+        routingPlaceholder: '{"target":"#alerts"}',
+        adapterLabel: "Adapter config (JSON)",
+        adapterPlaceholder: '{"endpoint":"https://bridge.exemplo","token":"..."}',
+        steps: [
+          "Selecione um canal.",
+          "Salve uma conta.",
+          "Siga o fluxo de login indicado pelo canal.",
+        ],
+      };
+    }
+
+    const capabilities = channelCapabilitySet(channel, account);
+    const protocolFamily = String(channel.protocol_family || "").toLowerCase();
+    const docsSummary = channel.docs?.summary || channel.docs?.help || "Sem resumo disponivel para este canal.";
+    const bridgeMode = protocolFamily.includes("bridge") || protocolFamily.includes("webhook") || capabilities.has("bridge-http");
+    const qrMode = capabilities.has("qr-login") || channel.id === "whatsapp";
+    const botTokenMode = capabilities.has("bot-token") || protocolFamily.includes("token_bot");
+    const accessTokenMode = capabilities.has("access-token") || protocolFamily.includes("oauth");
+
+    if (bridgeMode) {
+      return {
+        title: `${channel.name} • Bridge externa`,
+        summary: `${docsSummary} Este conector depende de bridge/webhook real para ativacao completa.`,
+        credentialLabel: "Credencial do bridge (opcional)",
+        credentialPlaceholder: '{"token":"..."}',
+        credentialHint: "Se o conector exigir endpoint, token, room ou base_url, prefira preencher em Adapter config.",
+        metadataLabel: "Metadata operacional (JSON)",
+        metadataPlaceholder: '{"workspace":"ops","owner":"team-messaging"}',
+        routingLabel: "Routing defaults (JSON)",
+        routingPlaceholder: '{"target":"#alerts"}',
+        adapterLabel: "Adapter config do bridge (JSON)",
+        adapterPlaceholder: '{"endpoint":"https://bridge.exemplo/api","token":"...","room":"#ops"}',
+        steps: [
+          "Provisione o bridge/webhook externo do canal.",
+          "Preencha endpoint, token e dados de room em Adapter config.",
+          "Salve a conta e execute Login ou Probe.",
+          "Envie uma mensagem teste para validar o fluxo real.",
+        ],
+      };
+    }
+
+    if (qrMode) {
+      return {
+        title: `${channel.name} • Sessao local com QR`,
+        summary: `${docsSummary} O onboarding principal acontece por sessao local e QRCode.`,
+        credentialLabel: "Credencial (opcional para QR local)",
+        credentialPlaceholder: "",
+        credentialHint: "Para QR local, normalmente basta salvar a conta e clicar em Conectar QR.",
+        metadataLabel: "Metadata da conta (JSON)",
+        metadataPlaceholder: '{"profile":"pessoal"}',
+        routingLabel: "Routing defaults (JSON)",
+        routingPlaceholder: '{"target":"@cliente"}',
+        adapterLabel: "Adapter config da sessao (JSON)",
+        adapterPlaceholder: '{"session_dir":"/tmp/whatsapp-ui-proof"}',
+        steps: [
+          "Salve a conta mesmo sem token.",
+          "Clique em Conectar QR para abrir a sessao local.",
+          "Escaneie o QR e use Ver QR se precisar reabrir o codigo.",
+          "Rode Probe e depois Enviar teste para validar a conta.",
+        ],
+      };
+    }
+
+    if (botTokenMode || accessTokenMode) {
+      return {
+        title: `${channel.name} • Token de autenticacao`,
+        summary: `${docsSummary} Este canal costuma ser ativado com token simples ou JSON de credencial.`,
+        credentialLabel: botTokenMode ? "Token do bot ou JSON" : "Access token ou JSON",
+        credentialPlaceholder: botTokenMode ? "123456:ABC-DEF..." : '{"access_token":"..."}',
+        credentialHint: "Voce pode colar o token puro ou um JSON com token/access_token conforme o adapter esperar.",
+        metadataLabel: "Metadata (JSON)",
+        metadataPlaceholder: '{"workspace":"ops"}',
+        routingLabel: "Routing defaults (JSON)",
+        routingPlaceholder: '{"target":"#alerts"}',
+        adapterLabel: "Adapter config adicional (JSON)",
+        adapterPlaceholder: '{"base_url":"https://api.exemplo","workspace":"ops"}',
+        steps: [
+          "Cole o token no campo de credencial.",
+          "Salve a conta e rode Login para validar o token.",
+          "Use Probe para checar saude da integracao.",
+          "Envie uma mensagem teste no target final.",
+        ],
+      };
+    }
+
+    return {
+      title: `${channel.name} • Fluxo generico`,
+      summary: docsSummary,
+      credentialLabel: "Credencial (token ou JSON)",
+      credentialPlaceholder: '{"token":"..."}',
+      credentialHint: "Use JSON quando o adapter exigir mais de um campo.",
+      metadataLabel: "Metadata (JSON)",
+      metadataPlaceholder: '{"workspace":"ops"}',
+      routingLabel: "Routing defaults (JSON)",
+      routingPlaceholder: '{"target":"#alerts"}',
+      adapterLabel: "Adapter config (JSON)",
+      adapterPlaceholder: '{"endpoint":"https://..."}',
+      steps: [
+        "Salve a conta com a configuracao necessaria.",
+        "Execute Login ou Probe para validar a conexao.",
+        "Envie uma mensagem teste para fechar o onboarding.",
+      ],
+    };
+  }
+
+  function renderSelectedChannelOnboarding(channel, account = null) {
+    const blueprint = onboardingBlueprint(channel, account);
+
+    if (elements.agentChannelOnboardingTitle) {
+      elements.agentChannelOnboardingTitle.textContent = blueprint.title;
+    }
+    if (elements.agentChannelOnboardingSummary) {
+      elements.agentChannelOnboardingSummary.textContent = blueprint.summary;
+    }
+    if (elements.agentChannelOnboardingSteps) {
+      elements.agentChannelOnboardingSteps.innerHTML = (blueprint.steps || [])
+        .map((step) => `<li>${step}</li>`)
+        .join("");
+    }
+    if (elements.agentChannelCredentialsLabel) {
+      elements.agentChannelCredentialsLabel.textContent = blueprint.credentialLabel;
+    }
+    if (elements.agentChannelCredentialHint) {
+      elements.agentChannelCredentialHint.textContent = blueprint.credentialHint;
+    }
+    if (elements.agentChannelCredentialsInput && !elements.agentChannelCredentialsInput.value) {
+      elements.agentChannelCredentialsInput.placeholder = blueprint.credentialPlaceholder;
+    }
+    if (elements.agentChannelMetadataLabel) {
+      elements.agentChannelMetadataLabel.textContent = blueprint.metadataLabel;
+    }
+    if (elements.agentChannelMetadataInput && !elements.agentChannelMetadataInput.value) {
+      elements.agentChannelMetadataInput.placeholder = blueprint.metadataPlaceholder;
+    }
+    if (elements.agentChannelRoutingDefaultsLabel) {
+      elements.agentChannelRoutingDefaultsLabel.textContent = blueprint.routingLabel;
+    }
+    if (elements.agentChannelRoutingDefaultsInput && !elements.agentChannelRoutingDefaultsInput.value) {
+      elements.agentChannelRoutingDefaultsInput.placeholder = blueprint.routingPlaceholder;
+    }
+    if (elements.agentChannelAdapterConfigLabel) {
+      elements.agentChannelAdapterConfigLabel.textContent = blueprint.adapterLabel;
+    }
+    if (elements.agentChannelAdapterConfigInput && !elements.agentChannelAdapterConfigInput.value) {
+      elements.agentChannelAdapterConfigInput.placeholder = blueprint.adapterPlaceholder;
+    }
+  }
+
+  function setSessionActionButton(button, {
+    label = null,
+    hidden = false,
+    disabled = false,
+  } = {}) {
+    if (!button) {
+      return;
+    }
+    if (label) {
+      button.textContent = label;
+    }
+    button.hidden = Boolean(hidden);
+    button.disabled = Boolean(disabled);
+  }
+
+  function renderSessionCapabilityBadges(capabilities) {
+    if (!elements.agentChannelSessionCapabilities) {
+      return;
+    }
+    const values = Array.from(capabilities || []).sort();
+    elements.agentChannelSessionCapabilities.innerHTML = values.map(
+      (capability) => `<span class="agent-skill-tag">${capability}</span>`,
+    ).join("");
+  }
+
+  function clearSelectedAccountQr() {
+    if (elements.agentChannelQrPanel) {
+      elements.agentChannelQrPanel.hidden = true;
+    }
+    if (elements.agentChannelQrText) {
+      elements.agentChannelQrText.textContent = "-";
+    }
+    const qrFrame = elements.agentChannelQrCanvas?.parentElement;
+    if (qrFrame) {
+      qrFrame.classList.remove("qr-fallback");
+    }
+    if (elements.agentChannelQrCanvas) {
+      elements.agentChannelQrCanvas.hidden = false;
+      const context = elements.agentChannelQrCanvas.getContext?.("2d");
+      if (context) {
+        context.clearRect(
+          0,
+          0,
+          elements.agentChannelQrCanvas.width,
+          elements.agentChannelQrCanvas.height,
+        );
+      }
+    }
+  }
+
+  function renderSelectedAccountQr(qrCode) {
+    if (!qrCode) {
+      clearSelectedAccountQr();
+      return;
+    }
+
+    if (elements.agentChannelQrPanel) {
+      elements.agentChannelQrPanel.hidden = false;
+    }
+    if (elements.agentChannelQrText) {
+      elements.agentChannelQrText.textContent = qrCode;
+    }
+    const qrFrame = elements.agentChannelQrCanvas?.parentElement;
+    qrFrame?.classList.remove("qr-fallback");
+
+    if (typeof renderQrCode === "function" && elements.agentChannelQrCanvas) {
+      renderQrCode(elements.agentChannelQrCanvas, qrCode, { width: 220 })
+        .catch(() => {
+          qrFrame?.classList.add("qr-fallback");
+          if (elements.agentChannelQrCanvas) {
+            elements.agentChannelQrCanvas.hidden = true;
+          }
+        });
+      return;
+    }
+
+    if (qrFrame) {
+      qrFrame.classList.add("qr-fallback");
+    }
+    if (elements.agentChannelQrCanvas) {
+      elements.agentChannelQrCanvas.hidden = true;
+    }
+  }
+
+  function selectedChannelId() {
+    return elements.agentChannelSelect?.value || "";
+  }
+
+  function selectedAccountId() {
+    return String(elements.agentChannelAccountIdInput?.value || "").trim();
+  }
+
+  function updateSelectedAccountUi() {
+    const channelId = selectedChannelId();
+    const accountId = selectedAccountId();
+    const channel = findChannelView(channelId);
+    const account = findAccountView(channelId, accountId);
+    const capabilities = channelCapabilitySet(channel, account);
+    const qrCode = typeof account?.session?.qr_code === "string" && account.session.qr_code.trim()
+      ? account.session.qr_code.trim()
+      : "";
+
+    renderSessionCapabilityBadges(capabilities);
+    renderSelectedChannelOnboarding(channel, account);
+
+    if (elements.agentChannelSessionTitle) {
+      elements.agentChannelSessionTitle.textContent = channel
+        ? `${channel.name}${accountId ? ` • ${accountId}` : ""}`
+        : "Selecione um canal e uma conta";
+    }
+
+    if (!channel) {
+      if (elements.agentChannelSessionStatus) {
+        elements.agentChannelSessionStatus.textContent = "Selecione um canal para configurar a conexao.";
+      }
+      if (elements.agentChannelSessionMeta) {
+        elements.agentChannelSessionMeta.textContent = "-";
+      }
+      setSessionActionButton(elements.agentChannelLoginBtn, { hidden: false, disabled: true, label: "Login" });
+      setSessionActionButton(elements.agentChannelLogoutBtn, { hidden: false, disabled: true });
+      setSessionActionButton(elements.agentChannelShowQrBtn, { hidden: true, disabled: true });
+      clearSelectedAccountQr();
+      return;
+    }
+
+    if (!accountId) {
+      if (elements.agentChannelSessionStatus) {
+        elements.agentChannelSessionStatus.textContent = "Informe um account_id ou escolha uma conta existente para fazer login.";
+      }
+      if (elements.agentChannelSessionMeta) {
+        elements.agentChannelSessionMeta.textContent = `Canal ${channel.name} • protocolo ${channel.protocol_family}`;
+      }
+      setSessionActionButton(elements.agentChannelLoginBtn, {
+        hidden: false,
+        disabled: true,
+        label: loginActionLabel(channel, null),
+      });
+      setSessionActionButton(elements.agentChannelLogoutBtn, { hidden: false, disabled: true });
+      setSessionActionButton(elements.agentChannelShowQrBtn, { hidden: true, disabled: true });
+      clearSelectedAccountQr();
+      return;
+    }
+
+    if (!account) {
+      if (elements.agentChannelSessionStatus) {
+        elements.agentChannelSessionStatus.textContent = "Salve a conta antes de usar login, logout ou QRCode.";
+      }
+      if (elements.agentChannelSessionMeta) {
+        elements.agentChannelSessionMeta.textContent = `Canal ${channel.name} • protocolo ${channel.protocol_family} • conta ainda nao cadastrada`;
+      }
+      setSessionActionButton(elements.agentChannelLoginBtn, {
+        hidden: false,
+        disabled: true,
+        label: loginActionLabel(channel, null),
+      });
+      setSessionActionButton(elements.agentChannelLogoutBtn, { hidden: false, disabled: true });
+      setSessionActionButton(elements.agentChannelShowQrBtn, { hidden: true, disabled: true });
+      clearSelectedAccountQr();
+      return;
+    }
+
+    if (elements.agentChannelSessionStatus) {
+      elements.agentChannelSessionStatus.textContent = `Sessao ${account.session?.status || "idle"} • health ${account.health_state?.status || "-"}`;
+    }
+    if (elements.agentChannelSessionMeta) {
+      const parts = [
+        `Canal ${channel.name}`,
+        `protocolo ${channel.protocol_family}`,
+        `credencial ${account.credentials_ref || "nao definida"}`,
+      ];
+      if (account.is_default) {
+        parts.push("conta default");
+      }
+      if (account.session?.session_dir) {
+        parts.push(`sessao ${account.session.session_dir}`);
+      }
+      if (nonEmptyObject(account.adapter_config)) {
+        parts.push("adapter_config configurado");
+      }
+      elements.agentChannelSessionMeta.textContent = parts.join(" • ");
+    }
+    if (elements.agentChannelCredentialsInput && account.credentials_ref) {
+      elements.agentChannelCredentialsInput.placeholder = `Credencial mantida em ${account.credentials_ref}`;
+    }
+
+    setSessionActionButton(elements.agentChannelLoginBtn, {
+      hidden: false,
+      disabled: false,
+      label: loginActionLabel(channel, account),
+    });
+    setSessionActionButton(elements.agentChannelLogoutBtn, {
+      hidden: false,
+      disabled: !account.session?.status || account.session.status === "idle" || account.session.status === "logged_out",
+    });
+    setSessionActionButton(elements.agentChannelShowQrBtn, {
+      hidden: !supportsQrLogin(channel, account) || !qrCode,
+      disabled: !qrCode,
+    });
+
+    renderSelectedAccountQr(qrCode);
+  }
+
+  function syncSelectedChannelAccount(channelId) {
+    const currentAccountId = selectedAccountId();
+    if (!channelId) {
+      updateSelectedAccountUi();
+      return;
+    }
+
+    if (currentAccountId) {
+      const existingAccount = findAccountView(channelId, currentAccountId);
+      if (existingAccount) {
+        populateChannelForm(channelId, currentAccountId);
+        return;
+      }
+      updateSelectedAccountUi();
+      return;
+    }
+
+    const channel = findChannelView(channelId);
+    const preferredAccountId = channel?.accounts?.find((entry) => entry.is_default)?.account_id
+      || channel?.accounts?.[0]?.account_id
+      || "";
+    if (preferredAccountId) {
+      populateChannelForm(channelId, preferredAccountId);
+      return;
+    }
+    updateSelectedAccountUi();
   }
 
   function syncAgentAccountOptions(channelId) {
@@ -106,12 +579,14 @@ export function createAgentChannelsController({
 
     syncAgentAccountOptions(elements.agentSendChannelSelect?.value || elements.agentChannelSelect?.value || "");
     syncAgentLogsAccountOptions(elements.agentChannelLogsChannelSelect?.value || "");
+    syncSelectedChannelAccount(elements.agentChannelSelect?.value || "");
   }
 
   function populateChannelForm(channelId, accountId) {
     const channel = findChannelView(channelId);
     const account = channel?.accounts?.find((entry) => entry.account_id === accountId);
     if (!channel || !account) {
+      updateSelectedAccountUi();
       return;
     }
     if (elements.agentChannelSelect) elements.agentChannelSelect.value = channel.id;
@@ -121,6 +596,9 @@ export function createAgentChannelsController({
     }
     if (elements.agentChannelRoutingDefaultsInput) {
       elements.agentChannelRoutingDefaultsInput.value = JSON.stringify(account.routing_defaults || {}, null, 2);
+    }
+    if (elements.agentChannelAdapterConfigInput) {
+      elements.agentChannelAdapterConfigInput.value = JSON.stringify(account.adapter_config || {}, null, 2);
     }
     if (elements.agentChannelEnabledToggle) {
       elements.agentChannelEnabledToggle.checked = Boolean(account.enabled);
@@ -134,6 +612,7 @@ export function createAgentChannelsController({
         ? `Credencial mantida em ${account.credentials_ref}`
         : '{"token":"..."}';
     }
+    updateSelectedAccountUi();
   }
 
   function clearChannelForm() {
@@ -144,8 +623,10 @@ export function createAgentChannelsController({
     }
     if (elements.agentChannelMetadataInput) elements.agentChannelMetadataInput.value = "";
     if (elements.agentChannelRoutingDefaultsInput) elements.agentChannelRoutingDefaultsInput.value = "";
+    if (elements.agentChannelAdapterConfigInput) elements.agentChannelAdapterConfigInput.value = "";
     if (elements.agentChannelEnabledToggle) elements.agentChannelEnabledToggle.checked = true;
     if (elements.agentChannelSetDefaultToggle) elements.agentChannelSetDefaultToggle.checked = false;
+    updateSelectedAccountUi();
   }
 
   function renderAgentChannels() {
@@ -161,7 +642,7 @@ export function createAgentChannelsController({
 
     elements.agentChannelList.innerHTML = channelsCache.map((channel) => {
       const warning = channel.ambiguity_warning
-        ? `<p class="meta-note" style="color: var(--danger); margin-top: 8px;">${channel.ambiguity_warning}</p>`
+        ? `<p class="meta-note agent-inline-note-danger">${channel.ambiguity_warning}</p>`
         : "";
       const protocol = channel.protocol_family
         ? `<div class="meta-note">protocolo: ${channel.protocol_family} ${channel.protocol_version || ""}</div>`
@@ -169,24 +650,36 @@ export function createAgentChannelsController({
       const accounts = (channel.accounts || []).map((account) => {
         const health = account.health_state?.status || "-";
         const session = account.session?.status || "-";
+        const loginLabel = loginActionLabel(channel, account);
+        const qrCodeReady = typeof account.session?.qr_code === "string" && account.session.qr_code.trim();
+        const adapterConfigured = nonEmptyObject(account.adapter_config);
         const accountCapabilities = Array.isArray(account.capabilities) && account.capabilities.length
-          ? `<div class="agent-skill-badges" style="margin-top: 8px;">${account.capabilities
+          ? `<div class="agent-skill-badges">${account.capabilities
               .map((capability) => `<span class="agent-skill-tag">${capability}</span>`)
               .join("")}</div>`
           : "";
+        const qrStatusTag = qrCodeReady
+          ? `<div class="agent-skill-badges"><span class="agent-skill-tag">qr pronto</span></div>`
+          : "";
+        const qrAction = qrCodeReady
+          ? `<button class="ghost-btn text-sm" type="button" data-channel-action="show-qr" data-channel="${channel.id}" data-account="${account.account_id}">Ver QR</button>`
+          : "";
         return `
-          <div class="glass" style="padding: 12px; border-radius: 12px; margin-top: 8px;">
-            <div style="display: flex; justify-content: space-between; gap: 8px; align-items: flex-start;">
+          <div class="agent-channel-account-card">
+            <div class="agent-channel-account-head">
               <div>
                 <strong>${account.account_id}</strong>${account.is_default ? ' <span class="meta-note">(default)</span>' : ""}
-                <div class="meta-note" style="margin-top: 4px;">health: ${health} • session: ${session}</div>
+                <div class="meta-note">health: ${health} • session: ${session}</div>
                 <div class="meta-note">credencial: ${account.credentials_ref || "nao definida"}</div>
+                <div class="meta-note">adapter_config: ${adapterConfigured ? "configurado" : "vazio"}</div>
                 ${protocol}
+                ${qrStatusTag}
                 ${accountCapabilities}
               </div>
-              <div style="display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end;">
+              <div class="agent-channel-account-actions">
                 <button class="ghost-btn text-sm" type="button" data-channel-action="edit" data-channel="${channel.id}" data-account="${account.account_id}">Editar</button>
-                <button class="ghost-btn text-sm" type="button" data-channel-action="login" data-channel="${channel.id}" data-account="${account.account_id}">Login</button>
+                <button class="ghost-btn text-sm" type="button" data-channel-action="login" data-channel="${channel.id}" data-account="${account.account_id}">${loginLabel}</button>
+                ${qrAction}
                 <button class="ghost-btn text-sm" type="button" data-channel-action="logout" data-channel="${channel.id}" data-account="${account.account_id}">Logout</button>
                 <button class="ghost-btn text-sm" type="button" data-channel-action="default" data-channel="${channel.id}" data-account="${account.account_id}">Default</button>
                 <button class="ghost-btn text-sm" type="button" data-channel-action="rename" data-channel="${channel.id}" data-account="${account.account_id}">Renomear</button>
@@ -198,20 +691,20 @@ export function createAgentChannelsController({
       }).join("");
 
       return `
-        <section class="glass" style="padding: 16px; border-radius: 16px; margin-top: 12px;">
-          <div style="display: flex; justify-content: space-between; gap: 12px; align-items: baseline;">
-            <div>
-              <h4 style="margin: 0;">${channel.name}</h4>
-              <p class="meta-note" style="margin-top: 4px;">aliases: ${(channel.aliases || []).join(", ") || "-"}</p>
-              <p class="meta-note" style="margin-top: 4px;">family: ${channel.protocol_family} • version: ${channel.protocol_version}</p>
-              <div class="agent-skill-badges" style="margin-top: 8px;">${(channel.capabilities || [])
+        <section class="glass agent-channel-card">
+          <div class="agent-channel-card-head">
+            <div class="agent-channel-card-meta">
+              <h4>${channel.name}</h4>
+              <p class="meta-note">aliases: ${(channel.aliases || []).join(", ") || "-"}</p>
+              <p class="meta-note">family: ${channel.protocol_family} • version: ${channel.protocol_version}</p>
+              <div class="agent-skill-badges">${(channel.capabilities || [])
                 .map((capability) => `<span class="agent-skill-tag">${capability}</span>`)
                 .join("")}</div>
             </div>
             <span class="meta-note">${(channel.accounts || []).length} conta(s)</span>
           </div>
           ${warning}
-          ${accounts || '<p class="meta-note" style="margin-top: 12px;">Sem contas configuradas.</p>'}
+          ${accounts || '<p class="meta-note">Sem contas configuradas.</p>'}
         </section>
       `;
     }).join("");
@@ -279,8 +772,8 @@ export function createAgentChannelsController({
       credentials: parseCredentialsInput(elements.agentChannelCredentialsInput?.value),
       metadata: parseOptionalJsonInput(elements.agentChannelMetadataInput?.value, {}),
       routing_defaults: parseOptionalJsonInput(elements.agentChannelRoutingDefaultsInput?.value, {}),
+      adapter_config: parseOptionalJsonInput(elements.agentChannelAdapterConfigInput?.value, {}),
       set_as_default: Boolean(elements.agentChannelSetDefaultToggle?.checked),
-      adapter_config: null,
     };
 
     await fetchJson("/agent/channels/upsert-account", {
@@ -337,8 +830,22 @@ export function createAgentChannelsController({
         account_id: accountId,
       });
       if (elements.agentChannelActionFeedback) {
-        elements.agentChannelActionFeedback.textContent = `${response.channel}:${response.account_id} • ${response.status}`;
+        elements.agentChannelActionFeedback.textContent = `${response.channel}:${response.account_id} • ${response.status}${response.message ? ` • ${response.message}` : ""}`;
       }
+      await presentChannelLoginDialog(channelId, accountId, response);
+      return;
+    }
+    if (action === "show-qr") {
+      const channel = findChannelView(channelId);
+      const account = channel?.accounts?.find((entry) => entry.account_id === accountId);
+      if (!account?.session?.qr_code) {
+        throw new Error("Nenhum QR code disponivel para esta conta.");
+      }
+      await presentChannelLoginDialog(channelId, accountId, {
+        status: account.session.status,
+        message: "Escaneie o QR code para concluir a conexao.",
+        details: { qr_code: account.session.qr_code },
+      });
       return;
     }
     if (action === "logout") {
@@ -347,7 +854,7 @@ export function createAgentChannelsController({
         account_id: accountId,
       });
       if (elements.agentChannelActionFeedback) {
-        elements.agentChannelActionFeedback.textContent = `${response.channel}:${response.account_id} • ${response.status}`;
+        elements.agentChannelActionFeedback.textContent = `${response.channel}:${response.account_id} • ${response.status}${response.message ? ` • ${response.message}` : ""}`;
       }
       return;
     }
@@ -389,6 +896,18 @@ export function createAgentChannelsController({
         account_id: accountId,
       });
     }
+  }
+
+  async function handleSelectedAccountAction(action) {
+    const channelId = selectedChannelId();
+    const accountId = selectedAccountId();
+    if (!channelId || !accountId) {
+      throw new Error("Selecione um canal e uma conta.");
+    }
+    if (!findAccountView(channelId, accountId)) {
+      throw new Error("Salve a conta antes de executar esta acao.");
+    }
+    await handleAgentChannelListAction(action, channelId, accountId);
   }
 
   async function sendAgentChannelTestMessage() {
@@ -469,6 +988,22 @@ export function createAgentChannelsController({
     if (elements.agentChannelSelect) {
       elements.agentChannelSelect.addEventListener("change", () => {
         syncAgentAccountOptions(elements.agentChannelSelect.value);
+        syncSelectedChannelAccount(elements.agentChannelSelect.value);
+      });
+    }
+
+    if (elements.agentChannelAccountIdInput) {
+      elements.agentChannelAccountIdInput.addEventListener("input", () => {
+        updateSelectedAccountUi();
+      });
+      elements.agentChannelAccountIdInput.addEventListener("change", () => {
+        const channelId = selectedChannelId();
+        const accountId = selectedAccountId();
+        if (findAccountView(channelId, accountId)) {
+          populateChannelForm(channelId, accountId);
+          return;
+        }
+        updateSelectedAccountUi();
       });
     }
 
@@ -503,6 +1038,42 @@ export function createAgentChannelsController({
             target.dataset.channel,
             target.dataset.account,
           );
+        } catch (error) {
+          if (elements.agentChannelActionFeedback) {
+            elements.agentChannelActionFeedback.textContent = `Falha: ${error.message}`;
+          }
+        }
+      });
+    }
+
+    if (elements.agentChannelLoginBtn) {
+      elements.agentChannelLoginBtn.addEventListener("click", async () => {
+        try {
+          await handleSelectedAccountAction("login");
+        } catch (error) {
+          if (elements.agentChannelActionFeedback) {
+            elements.agentChannelActionFeedback.textContent = `Falha: ${error.message}`;
+          }
+        }
+      });
+    }
+
+    if (elements.agentChannelLogoutBtn) {
+      elements.agentChannelLogoutBtn.addEventListener("click", async () => {
+        try {
+          await handleSelectedAccountAction("logout");
+        } catch (error) {
+          if (elements.agentChannelActionFeedback) {
+            elements.agentChannelActionFeedback.textContent = `Falha: ${error.message}`;
+          }
+        }
+      });
+    }
+
+    if (elements.agentChannelShowQrBtn) {
+      elements.agentChannelShowQrBtn.addEventListener("click", async () => {
+        try {
+          await handleSelectedAccountAction("show-qr");
         } catch (error) {
           if (elements.agentChannelActionFeedback) {
             elements.agentChannelActionFeedback.textContent = `Falha: ${error.message}`;

@@ -399,13 +399,13 @@
             </header>
 
             <div class="agent-grid agent-grid-wide">
-              <article class="agent-card">
+              <article class="agent-card agent-card-span-12">
                 <h4 class="agent-card-title">Catalogo e status</h4>
                 <p class="meta-note">Cada card mostra protocolo, capabilities, health, sessao e contas configuradas.</p>
                 <div id="agent-channel-list" class="agent-channel-list"></div>
               </article>
 
-              <article class="agent-card">
+              <article class="agent-card agent-card-span-6">
                 <h4 class="agent-card-title">Add / edit conta</h4>
                 <label class="field-group">
                   <span>Canal</span>
@@ -416,17 +416,36 @@
                   <input id="agent-channel-account-id" class="input" placeholder="work, personal, bot-a" />
                 </label>
                 <label class="field-group">
-                  <span>Credencial (token ou JSON)</span>
+                  <span id="agent-channel-credentials-label">Credencial (token ou JSON)</span>
                   <textarea id="agent-channel-credentials" class="input" rows="4" placeholder='{"token":"..."} ou xoxb-...'></textarea>
                 </label>
+                <p id="agent-channel-credential-hint" class="meta-note">Cole um token simples ou JSON, dependendo do canal.</p>
                 <label class="field-group">
-                  <span>Metadata (JSON)</span>
+                  <span id="agent-channel-metadata-label">Metadata (JSON)</span>
                   <textarea id="agent-channel-metadata" class="input" rows="3" placeholder='{"workspace":"ops"}'></textarea>
                 </label>
                 <label class="field-group">
-                  <span>Routing defaults (JSON)</span>
+                  <span id="agent-channel-routing-defaults-label">Routing defaults (JSON)</span>
                   <textarea id="agent-channel-routing-defaults" class="input" rows="3" placeholder='{"target":"#alerts"}'></textarea>
                 </label>
+                <label class="field-group">
+                  <span id="agent-channel-adapter-config-label">Adapter config (JSON)</span>
+                  <textarea id="agent-channel-adapter-config" class="input" rows="4" placeholder='{"endpoint":"https://bridge.exemplo","token":"..."}'></textarea>
+                </label>
+                <section class="agent-channel-onboarding-panel">
+                  <div class="agent-channel-onboarding-head">
+                    <div>
+                      <p class="meta-note">Onboarding guiado</p>
+                      <h5 id="agent-channel-onboarding-title">Selecione um canal para ver o fluxo recomendado</h5>
+                    </div>
+                  </div>
+                  <p id="agent-channel-onboarding-summary" class="meta-note">A UI adapta as instrucoes conforme QR local, token de bot ou bridge externa.</p>
+                  <ul id="agent-channel-onboarding-steps" class="agent-channel-onboarding-list">
+                    <li>Selecione um canal.</li>
+                    <li>Salve uma conta.</li>
+                    <li>Siga o fluxo de login indicado pelo canal.</li>
+                  </ul>
+                </section>
                 <label class="agent-toggle-row">
                   <input id="agent-channel-enabled" type="checkbox" checked />
                   <span>Conta habilitada</span>
@@ -440,9 +459,34 @@
                   <button id="agent-channel-clear-btn" class="ghost-btn" type="button">Limpar</button>
                 </div>
                 <p id="agent-channel-form-feedback" class="meta-note">-</p>
+                <section class="agent-channel-session-panel">
+                  <div class="agent-channel-session-head">
+                    <div class="agent-channel-session-copy">
+                      <p class="meta-note">Conexao da conta selecionada</p>
+                      <h5 id="agent-channel-session-title">Selecione um canal e uma conta</h5>
+                    </div>
+                    <div class="agent-channel-session-actions">
+                      <button id="agent-channel-login-btn" class="primary-btn" type="button">Login</button>
+                      <button id="agent-channel-logout-btn" class="ghost-btn" type="button">Logout</button>
+                      <button id="agent-channel-show-qr-btn" class="ghost-btn" type="button">Ver QR</button>
+                    </div>
+                  </div>
+                  <p id="agent-channel-session-status" class="meta-note">Salve a conta para habilitar a conexao do canal.</p>
+                  <p id="agent-channel-session-meta" class="meta-note">-</p>
+                  <div id="agent-channel-session-capabilities" class="agent-skill-badges"></div>
+                  <div id="agent-channel-qr-panel" class="agent-channel-qr-panel" hidden>
+                    <div class="agent-channel-qr-frame">
+                      <canvas id="agent-channel-qr-canvas" class="agent-channel-qr-canvas" width="220" height="220"></canvas>
+                    </div>
+                    <div class="agent-channel-qr-copy">
+                      <p class="meta-note">QRCode atual da sessao</p>
+                      <code id="agent-channel-qr-text" class="agent-channel-qr-raw">-</code>
+                    </div>
+                  </div>
+                </section>
               </article>
 
-              <article class="agent-card">
+              <article class="agent-card agent-card-span-6">
                 <h4 class="agent-card-title">Login, probe e teste</h4>
                 <div class="agent-quad-grid">
                   <label class="field-group">
@@ -498,12 +542,12 @@
             </header>
 
             <div class="agent-grid agent-grid-wide">
-              <article class="agent-card">
+              <article class="agent-card agent-card-span-5">
                 <h4 class="agent-card-title">Runtime plugins</h4>
                 <div id="agent-plugins-list" class="agent-plugin-list"></div>
               </article>
 
-              <article class="agent-card">
+              <article class="agent-card agent-card-span-7">
                 <div class="panel-title-row">
                   <h4 id="agent-plugin-detail-title" style="margin: 0;">Selecione um plugin</h4>
                   <label class="agent-toggle-row">
@@ -537,7 +581,7 @@
             </header>
 
             <div class="agent-grid">
-              <article class="agent-card">
+              <article class="agent-card agent-card-span-4">
                 <label class="field-group">
                   <span>Node manager</span>
                   <select id="agent-node-manager-select" class="input">
@@ -549,7 +593,7 @@
                 <p id="agent-skills-summary" class="meta-note">Check das skills pendente.</p>
               </article>
 
-              <article class="agent-card">
+              <article class="agent-card agent-card-span-8">
                 <ul id="agent-skills-list" class="agent-toggle-list"></ul>
               </article>
             </div>
@@ -564,7 +608,7 @@
             </header>
 
             <div class="agent-grid agent-grid-wide">
-              <article class="agent-card">
+              <article class="agent-card agent-card-span-4">
                 <h4 class="agent-card-title">Provider e runtime base</h4>
                 <label class="field-group">
                   <span>Provider</span>
@@ -616,7 +660,7 @@
                 </label>
               </article>
 
-              <article class="agent-card">
+              <article class="agent-card agent-card-span-5">
                 <h4 class="agent-card-title">Policy editor</h4>
                 <label class="field-group">
                   <span>Profile</span>
@@ -664,12 +708,12 @@
                 <p id="agent-policy-feedback" class="meta-note">-</p>
               </article>
 
-              <article class="agent-card">
+              <article class="agent-card agent-card-span-3">
                 <h4 class="agent-card-title">Tools habilitados</h4>
                 <ul id="agent-tools-list" class="agent-toggle-list"></ul>
               </article>
 
-              <article class="agent-card">
+              <article class="agent-card agent-card-span-12">
                 <h4 class="agent-card-title">Politica efetiva</h4>
                 <ul id="agent-effective-policy-list" class="agent-audit-list agent-effective-policy-list"></ul>
               </article>
@@ -685,7 +729,7 @@
             </header>
 
             <div class="agent-grid agent-grid-wide">
-              <article class="agent-card">
+              <article class="agent-card agent-card-span-4">
                 <h4 class="agent-card-title">Prompt budget</h4>
                 <label class="field-group">
                   <span>Max prompt tokens</span>
@@ -706,7 +750,7 @@
                 <p id="agent-max-tools-value" class="meta-note">-</p>
               </article>
 
-              <article class="agent-card">
+              <article class="agent-card agent-card-span-4">
                 <h4 class="agent-card-title">Memoria local</h4>
                 <label class="agent-toggle-row">
                   <input id="agent-memory-local-toggle" type="checkbox" />
@@ -734,7 +778,7 @@
                 <p id="agent-memory-feedback" class="meta-note">-</p>
               </article>
 
-              <article class="agent-card">
+              <article class="agent-card agent-card-span-4">
                 <div class="panel-title-row">
                   <h4 style="margin: 0;">Telemetria de budget</h4>
                   <button id="agent-budget-refresh-btn" class="ghost-btn" type="button">Atualizar</button>
@@ -754,13 +798,13 @@
             </header>
 
             <div class="agent-grid agent-grid-wide">
-              <article class="agent-card">
+              <article class="agent-card agent-card-span-3">
                 <h4 class="agent-card-title">Snapshot</h4>
                 <p id="agent-runtime-summary" class="meta-note">daemon n/d</p>
                 <p id="agent-runtime-framework-meta" class="meta-note">framework n/d</p>
               </article>
 
-              <article class="agent-card">
+              <article class="agent-card agent-card-span-5">
                 <div class="panel-title-row">
                   <h4 style="margin: 0;">Logs filtraveis</h4>
                 </div>
@@ -777,7 +821,7 @@
                 <ul id="agent-runtime-log-list" class="agent-audit-list"></ul>
               </article>
 
-              <article class="agent-card">
+              <article class="agent-card agent-card-span-4">
                 <h4 class="agent-card-title">Diagnostico rapido</h4>
                 <ul id="agent-runtime-diagnostics-list" class="agent-audit-list"></ul>
               </article>
@@ -785,99 +829,92 @@
           </section>
 
           <section class="agent-console-panel glass">
-          <header style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
-            <div>
-              <p class="chat-eyebrow">Observability Console</p>
-              <h3>Agent Audit Feed</h3>
-            </div>
-            <div style="display: flex; gap: 8px; align-items: center;">
-              <select id="audit-filter-session" class="input compact-input" style="min-width: 140px; margin-bottom: 0;">
-                <option value="">Todas Sessoes</option>
-              </select>
-              <select id="audit-filter-event" class="input compact-input" style="min-width: 140px; margin-bottom: 0;">
-                <option value="">Todos Eventos</option>
-                <option value="PromptBuilt">PromptBuilt</option>
-                <option value="ProviderCall">ProviderCall</option>
-                <option value="ToolRequested">ToolRequested</option>
-                <option value="ToolExecuted">ToolExecuted</option>
-                <option value="ToolFailed">ToolFailed</option>
-                <option value="ApprovalPending">ApprovalPending</option>
-                <option value="ApprovalDecision">ApprovalDecision</option>
-                <option value="ResponseFinal">ResponseFinal</option>
-                <option value="Error">Error</option>
-              </select>
-              <select id="audit-filter-status" class="input compact-input" style="min-width: 110px; margin-bottom: 0;">
-                <option value="">Todo Status</option>
-                <option value="success">Success</option>
-                <option value="error">Error</option>
-                <option value="denied">Denied</option>
-              </select>
-              <input id="audit-filter-tool" class="input compact-input" placeholder="Tool name..."
-                style="max-width: 120px; margin-bottom: 0;" />
-
-              <label class="agent-toggle-row" style="margin: 0 0 0 8px; font-size: 0.85rem;">
-                <input id="audit-follow-toggle" type="checkbox" checked />
-                <span>Follow current session</span>
-              </label>
-
-              <button id="audit-export-btn" class="ghost-btn text-sm" style="margin-left: 8px;">Exportar</button>
-            </div>
-          </header>
-
-          <div style="display: flex; gap: 16px; height: 400px;">
-            <div
-              style="flex: 1; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; overflow-y: auto; background: rgba(0,0,0,0.1);">
-              <ul id="agent-observability-list" class="agent-audit-list"
-                style="padding: 0; margin: 0; list-style: none;">
-                <!-- Audit items injected via JS -->
-                <li style="padding: 16px; text-align: center; color: var(--muted); font-size: 0.9rem;">
-                  Carregando feed...
-                </li>
-              </ul>
-            </div>
-
-            <div id="audit-detail-panel"
-              style="width: 350px; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; background: rgba(0,0,0,0.2); padding: 16px; overflow-y: auto; display: none; flex-direction: column;">
-              <div
-                style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px;">
-                <h4 style="margin: 0; font-size: 0.95rem;">Detalhes do Evento</h4>
-                <button id="audit-detail-close" class="ghost-btn text-sm"
-                  style="padding: 2px 8px; min-width: auto;">✕</button>
+            <header class="agent-console-header">
+              <div>
+                <p class="chat-eyebrow">Observability Console</p>
+                <h3>Agent Audit Feed</h3>
               </div>
-              <div id="audit-detail-content"
-                style="flex: 1; font-size: 0.85rem; word-break: break-all; white-space: pre-wrap; color: var(--text);">
-                <!-- Details injected via JS -->
+              <div class="agent-console-toolbar">
+                <select id="audit-filter-session" class="input compact-input agent-toolbar-input">
+                  <option value="">Todas Sessoes</option>
+                </select>
+                <select id="audit-filter-event" class="input compact-input agent-toolbar-input">
+                  <option value="">Todos Eventos</option>
+                  <option value="PromptBuilt">PromptBuilt</option>
+                  <option value="ProviderCall">ProviderCall</option>
+                  <option value="ToolRequested">ToolRequested</option>
+                  <option value="ToolExecuted">ToolExecuted</option>
+                  <option value="ToolFailed">ToolFailed</option>
+                  <option value="ApprovalPending">ApprovalPending</option>
+                  <option value="ApprovalDecision">ApprovalDecision</option>
+                  <option value="ResponseFinal">ResponseFinal</option>
+                  <option value="Error">Error</option>
+                </select>
+                <select id="audit-filter-status" class="input compact-input agent-toolbar-input agent-toolbar-input-xs">
+                  <option value="">Todo Status</option>
+                  <option value="success">Success</option>
+                  <option value="error">Error</option>
+                  <option value="denied">Denied</option>
+                </select>
+                <input id="audit-filter-tool" class="input compact-input agent-toolbar-input agent-toolbar-input-xs"
+                  placeholder="Tool name..." />
+
+                <label class="agent-toggle-row agent-console-toggle">
+                  <input id="audit-follow-toggle" type="checkbox" checked />
+                  <span>Follow current session</span>
+                </label>
+
+                <button id="audit-export-btn" class="ghost-btn text-sm">Exportar</button>
               </div>
+            </header>
+
+            <div class="agent-console-layout">
+              <div class="agent-console-feed">
+                <ul id="agent-observability-list" class="agent-audit-list agent-audit-feed">
+                  <li class="agent-console-empty-state">
+                    Carregando feed...
+                  </li>
+                </ul>
+              </div>
+
+              <aside id="audit-detail-panel" class="agent-detail-panel">
+                <div class="agent-detail-header">
+                  <h4>Detalhes do Evento</h4>
+                  <button id="audit-detail-close" class="ghost-btn text-sm agent-detail-close">✕</button>
+                </div>
+                <div id="audit-detail-content" class="agent-detail-content">
+                  <!-- Details injected via JS -->
+                </div>
+              </aside>
             </div>
-          </div>
           </section>
 
           <section class="agent-chat-panel glass">
-          <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 12px;">
-            <div style="flex: 1;">
-              <p class="chat-eyebrow">Sessoes do Agent</p>
-              <div style="display: flex; gap: 8px; margin-bottom: 12px; margin-top: 8px; align-items: center;">
-                <button id="agent-new-session-btn" type="button" class="ghost-btn text-sm">Nova Sessao</button>
-                <select id="agent-session-select" class="input compact-input"
-                  style="max-width: 300px; margin-bottom: 0;"></select>
-                <button id="agent-rename-session-btn" type="button" class="ghost-btn text-sm" disabled>Renomear</button>
-                <button id="agent-export-session-btn" type="button" class="ghost-btn text-sm" disabled>Exportar</button>
-                <button id="agent-delete-session-btn" type="button" class="ghost-btn danger text-sm" disabled
-                  style="color: var(--danger);">Deletar</button>
+            <div class="agent-session-header">
+              <div class="agent-session-header-main">
+                <p class="chat-eyebrow">Sessoes do Agent</p>
+                <div class="agent-session-controls">
+                  <div class="agent-session-actions">
+                    <button id="agent-new-session-btn" type="button" class="ghost-btn text-sm">Nova Sessao</button>
+                    <button id="agent-rename-session-btn" type="button" class="ghost-btn text-sm" disabled>Renomear</button>
+                    <button id="agent-export-session-btn" type="button" class="ghost-btn text-sm" disabled>Exportar</button>
+                    <button id="agent-delete-session-btn" type="button" class="ghost-btn danger text-sm" disabled>Deletar</button>
+                  </div>
+                  <select id="agent-session-select" class="input compact-input agent-session-select"></select>
+                </div>
               </div>
+              <span id="agent-chat-status" class="meta-note agent-session-status">pronto</span>
             </div>
-            <span id="agent-chat-status" class="meta-note" style="margin-bottom: 8px;">pronto</span>
-          </div>
-          <div class="panel-title-row">
-            <h3 id="agent-chat-title">Chat do agente</h3>
-          </div>
-          <div id="agent-chat-log" class="agent-chat-log"></div>
-          <form id="agent-chat-form" class="chat-form">
-            <textarea id="agent-message-input" rows="1" placeholder="Mensagem para o Agent" required></textarea>
-            <div class="chat-form-actions">
-              <button id="agent-send-btn" type="submit" class="primary-btn">Enviar</button>
+            <div class="panel-title-row">
+              <h3 id="agent-chat-title">Chat do agente</h3>
             </div>
-          </form>
+            <div id="agent-chat-log" class="agent-chat-log"></div>
+            <form id="agent-chat-form" class="chat-form">
+              <textarea id="agent-message-input" rows="1" placeholder="Mensagem para o Agent" required></textarea>
+              <div class="chat-form-actions">
+                <button id="agent-send-btn" type="submit" class="primary-btn">Enviar</button>
+              </div>
+            </form>
           </section>
         </div>
       </section>

@@ -13,6 +13,7 @@ function buildChannel({
   accounts,
   defaultAccountId = null,
   ambiguityWarning = null,
+  capabilities = ["probe", "resolve", "send"],
 }) {
   return {
     id,
@@ -21,7 +22,7 @@ function buildChannel({
     protocol_version: "v1",
     protocol_schema: { family: protocolFamily, protocol_version: "v1" },
     aliases: [id],
-    capabilities: ["probe", "resolve", "send"],
+    capabilities,
     supports_lazy_load: true,
     docs: {
       summary: `${name} docs`,
@@ -60,14 +61,36 @@ function createFixtureDom() {
         <button id="agent-channels-refresh-btn" type="button">refresh</button>
         <select id="agent-channel-select"></select>
         <input id="agent-channel-account-id" />
+        <span id="agent-channel-credentials-label"></span>
         <textarea id="agent-channel-credentials"></textarea>
+        <p id="agent-channel-credential-hint"></p>
+        <span id="agent-channel-metadata-label"></span>
         <textarea id="agent-channel-metadata"></textarea>
+        <span id="agent-channel-routing-defaults-label"></span>
         <textarea id="agent-channel-routing-defaults"></textarea>
+        <span id="agent-channel-adapter-config-label"></span>
+        <textarea id="agent-channel-adapter-config"></textarea>
+        <h5 id="agent-channel-onboarding-title">-</h5>
+        <p id="agent-channel-onboarding-summary">-</p>
+        <ul id="agent-channel-onboarding-steps"></ul>
         <input id="agent-channel-enabled" type="checkbox" checked />
         <input id="agent-channel-set-default" type="checkbox" />
         <button id="agent-channel-save-btn" type="button">save</button>
         <button id="agent-channel-clear-btn" type="button">clear</button>
         <p id="agent-channel-form-feedback">-</p>
+        <h5 id="agent-channel-session-title">-</h5>
+        <p id="agent-channel-session-status">-</p>
+        <p id="agent-channel-session-meta">-</p>
+        <div id="agent-channel-session-capabilities"></div>
+        <button id="agent-channel-login-btn" type="button">login</button>
+        <button id="agent-channel-logout-btn" type="button">logout</button>
+        <button id="agent-channel-show-qr-btn" type="button">show qr</button>
+        <div id="agent-channel-qr-panel" hidden>
+          <div>
+            <canvas id="agent-channel-qr-canvas" width="220" height="220"></canvas>
+          </div>
+          <code id="agent-channel-qr-text">-</code>
+        </div>
 
         <select id="agent-send-channel"></select>
         <select id="agent-send-account"></select>
@@ -93,6 +116,7 @@ function createFixtureDom() {
     window: globalThis.window,
     document: globalThis.document,
     HTMLElement: globalThis.HTMLElement,
+    HTMLCanvasElement: globalThis.HTMLCanvasElement,
     Event: globalThis.Event,
     MouseEvent: globalThis.MouseEvent,
     URLSearchParams: globalThis.URLSearchParams,
@@ -101,14 +125,21 @@ function createFixtureDom() {
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
   globalThis.HTMLElement = dom.window.HTMLElement;
+  globalThis.HTMLCanvasElement = dom.window.HTMLCanvasElement;
   globalThis.Event = dom.window.Event;
   globalThis.MouseEvent = dom.window.MouseEvent;
   globalThis.URLSearchParams = dom.window.URLSearchParams;
+  dom.window.HTMLCanvasElement.prototype.getContext = function getContext() {
+    return {
+      clearRect() {},
+    };
+  };
 
   function restore() {
     globalThis.window = previous.window;
     globalThis.document = previous.document;
     globalThis.HTMLElement = previous.HTMLElement;
+    globalThis.HTMLCanvasElement = previous.HTMLCanvasElement;
     globalThis.Event = previous.Event;
     globalThis.MouseEvent = previous.MouseEvent;
     globalThis.URLSearchParams = previous.URLSearchParams;
@@ -129,16 +160,19 @@ class FakeChannelBackend {
         id: "whatsapp",
         name: "WhatsApp",
         protocolFamily: "native_runtime_v1",
+        capabilities: ["probe", "resolve", "send", "qr-login"],
         defaultAccountId: "work",
         accounts: [
           buildAccount("work", {
             is_default: true,
             session: { status: "linked" },
             metadata: { profile: "work" },
+            capabilities: ["probe", "resolve", "send", "qr-login"],
           }),
           buildAccount("personal", {
             session: { status: "linked" },
             metadata: { profile: "personal" },
+            capabilities: ["probe", "resolve", "send", "qr-login"],
           }),
         ],
       }),
@@ -146,6 +180,7 @@ class FakeChannelBackend {
         id: "signal",
         name: "Signal",
         protocolFamily: "bridge_http_v1",
+        capabilities: ["probe", "resolve", "send", "bridge-http", "multi-account"],
         ambiguityWarning: "Mais de uma conta ativa sem default_account_id.",
         accounts: [
           buildAccount("ops", { session: { status: "linked" } }),
@@ -156,7 +191,11 @@ class FakeChannelBackend {
         id: "telegram",
         name: "Telegram",
         protocolFamily: "token_bot_v1",
-        accounts: [buildAccount("bot-a", { session: { status: "linked" } })],
+        capabilities: ["probe", "resolve", "send", "bot-token"],
+        accounts: [buildAccount("bot-a", {
+          session: { status: "linked" },
+          capabilities: ["probe", "resolve", "send", "bot-token"],
+        })],
       }),
     ];
     this.logs = [
@@ -258,6 +297,7 @@ class FakeChannelBackend {
       account.enabled = payload.enabled ?? true;
       account.metadata = payload.metadata || {};
       account.routing_defaults = payload.routing_defaults || {};
+      account.adapter_config = payload.adapter_config || {};
       if (payload.credentials_ref) {
         account.credentials_ref = payload.credentials_ref;
       } else if (payload.credentials) {
@@ -300,6 +340,9 @@ class FakeChannelBackend {
     if (path === "/agent/channels/login" && options.method === "POST") {
       const { channel, account } = this.findAccount(payload.channel, payload.account_id);
       account.session.status = "linked";
+      if (channel.id === "whatsapp") {
+        account.session.qr_code = `wa://link/${account.account_id}-qr`;
+      }
       this.appendLog({
         channel: channel.id,
         account_id: account.account_id,
@@ -313,13 +356,14 @@ class FakeChannelBackend {
         protocol_version: "v1",
         status: "linked",
         message: "linked",
-        details: {},
+        details: channel.id === "whatsapp" ? { qr_code: account.session.qr_code } : {},
       };
     }
 
     if (path === "/agent/channels/logout" && options.method === "POST") {
       const { channel, account } = this.findAccount(payload.channel, payload.account_id);
       account.session.status = "logged_out";
+      delete account.session.qr_code;
       this.appendLog({
         channel: channel.id,
         account_id: account.account_id,
@@ -411,14 +455,33 @@ function collectElements(document) {
     agentChannelsRefreshBtn: document.getElementById("agent-channels-refresh-btn"),
     agentChannelSelect: document.getElementById("agent-channel-select"),
     agentChannelAccountIdInput: document.getElementById("agent-channel-account-id"),
+    agentChannelCredentialsLabel: document.getElementById("agent-channel-credentials-label"),
     agentChannelCredentialsInput: document.getElementById("agent-channel-credentials"),
+    agentChannelCredentialHint: document.getElementById("agent-channel-credential-hint"),
+    agentChannelMetadataLabel: document.getElementById("agent-channel-metadata-label"),
     agentChannelMetadataInput: document.getElementById("agent-channel-metadata"),
+    agentChannelRoutingDefaultsLabel: document.getElementById("agent-channel-routing-defaults-label"),
     agentChannelRoutingDefaultsInput: document.getElementById("agent-channel-routing-defaults"),
+    agentChannelAdapterConfigLabel: document.getElementById("agent-channel-adapter-config-label"),
+    agentChannelAdapterConfigInput: document.getElementById("agent-channel-adapter-config"),
+    agentChannelOnboardingTitle: document.getElementById("agent-channel-onboarding-title"),
+    agentChannelOnboardingSummary: document.getElementById("agent-channel-onboarding-summary"),
+    agentChannelOnboardingSteps: document.getElementById("agent-channel-onboarding-steps"),
     agentChannelEnabledToggle: document.getElementById("agent-channel-enabled"),
     agentChannelSetDefaultToggle: document.getElementById("agent-channel-set-default"),
     agentChannelSaveBtn: document.getElementById("agent-channel-save-btn"),
     agentChannelClearBtn: document.getElementById("agent-channel-clear-btn"),
     agentChannelFormFeedback: document.getElementById("agent-channel-form-feedback"),
+    agentChannelSessionTitle: document.getElementById("agent-channel-session-title"),
+    agentChannelSessionStatus: document.getElementById("agent-channel-session-status"),
+    agentChannelSessionMeta: document.getElementById("agent-channel-session-meta"),
+    agentChannelSessionCapabilities: document.getElementById("agent-channel-session-capabilities"),
+    agentChannelLoginBtn: document.getElementById("agent-channel-login-btn"),
+    agentChannelLogoutBtn: document.getElementById("agent-channel-logout-btn"),
+    agentChannelShowQrBtn: document.getElementById("agent-channel-show-qr-btn"),
+    agentChannelQrPanel: document.getElementById("agent-channel-qr-panel"),
+    agentChannelQrCanvas: document.getElementById("agent-channel-qr-canvas"),
+    agentChannelQrText: document.getElementById("agent-channel-qr-text"),
     agentSendChannelSelect: document.getElementById("agent-send-channel"),
     agentSendAccountSelect: document.getElementById("agent-send-account"),
     agentSendTargetInput: document.getElementById("agent-send-target"),
@@ -450,6 +513,9 @@ test("channels smoke renders catalog, supports add/default, and shows logs", asy
       fetchJson: backend.fetchJson.bind(backend),
       promptText: async () => null,
       confirmAction: async () => true,
+      renderQrCode: async (canvas, value) => {
+        canvas.dataset.qrCode = value;
+      },
     });
 
     await controller.loadChannels();
@@ -470,6 +536,7 @@ test("channels smoke renders catalog, supports add/default, and shows logs", asy
     dom.window.document.getElementById("agent-channel-credentials").value = '{"token":"123:abc"}';
     dom.window.document.getElementById("agent-channel-metadata").value = '{"workspace":"ops"}';
     dom.window.document.getElementById("agent-channel-routing-defaults").value = '{"target":"@alerts"}';
+    dom.window.document.getElementById("agent-channel-adapter-config").value = '{"base_url":"https://api.telegram.test","workspace":"ops"}';
     dom.window.document.getElementById("agent-channel-set-default").checked = true;
     dom.window.document.getElementById("agent-channel-save-btn").click();
     await flushUi();
@@ -480,6 +547,10 @@ test("channels smoke renders catalog, supports add/default, and shows logs", asy
     const telegramSection = dom.window.document.getElementById("agent-channel-list").textContent;
     assert.match(telegramSection, /bot-b/);
     assert.match(telegramSection, /\(default\)/);
+    assert.match(telegramSection, /adapter_config: configurado/);
+
+    assert.match(dom.window.document.getElementById("agent-channel-onboarding-title").textContent, /Telegram/);
+    assert.match(dom.window.document.getElementById("agent-channel-credential-hint").textContent, /token/i);
   } finally {
     restore();
   }
@@ -489,6 +560,7 @@ test("channels smoke exercises login, probe, resolve, send, logout, and ambiguit
   const { dom, restore } = createFixtureDom();
   const backend = new FakeChannelBackend();
   const promptCalls = [];
+  const loginDialogs = [];
 
   try {
     const controller = createAgentChannelsController({
@@ -499,14 +571,36 @@ test("channels smoke exercises login, probe, resolve, send, logout, and ambiguit
         return "work-renamed";
       },
       confirmAction: async () => true,
+      showChannelLoginDialog: async (payload) => {
+        loginDialogs.push(payload);
+      },
+      renderQrCode: async (canvas, value) => {
+        canvas.dataset.qrCode = value;
+      },
     });
 
     await controller.loadChannels();
 
-    const loginButton = dom.window.document.querySelector('[data-channel-action="login"][data-channel="whatsapp"][data-account="work"]');
-    loginButton.click();
+    dom.window.document.getElementById("agent-channel-select").value = "whatsapp";
+    dom.window.document.getElementById("agent-channel-select").dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    assert.equal(dom.window.document.getElementById("agent-channel-account-id").value, "work");
+    assert.equal(dom.window.document.getElementById("agent-channel-login-btn").textContent, "Conectar QR");
+    assert.match(dom.window.document.getElementById("agent-channel-onboarding-summary").textContent, /QRCode|QR/i);
+
+    dom.window.document.getElementById("agent-channel-login-btn").click();
     await flushUi();
     assert.match(dom.window.document.getElementById("agent-channel-action-feedback").textContent, /whatsapp:work • linked/);
+    assert.equal(loginDialogs.length, 1);
+    assert.equal(loginDialogs[0].channelId, "whatsapp");
+    assert.equal(loginDialogs[0].accountId, "work");
+    assert.match(loginDialogs[0].qrCode, /wa:\/\/link\/work-qr/);
+    assert.equal(dom.window.document.getElementById("agent-channel-qr-panel").hidden, false);
+    assert.match(dom.window.document.getElementById("agent-channel-qr-text").textContent, /wa:\/\/link\/work-qr/);
+    assert.equal(dom.window.document.getElementById("agent-channel-qr-canvas").dataset.qrCode, "wa://link/work-qr");
+
+    dom.window.document.getElementById("agent-channel-show-qr-btn").click();
+    await flushUi();
+    assert.equal(loginDialogs.length, 2);
 
     dom.window.document.getElementById("agent-send-channel").value = "whatsapp";
     dom.window.document.getElementById("agent-send-channel").dispatchEvent(new dom.window.Event("change", { bubbles: true }));
@@ -532,10 +626,17 @@ test("channels smoke exercises login, probe, resolve, send, logout, and ambiguit
     assert.equal(promptCalls.length, 1);
     assert.match(dom.window.document.getElementById("agent-channel-list").textContent, /work-renamed/);
 
-    const logoutButton = dom.window.document.querySelector('[data-channel-action="logout"][data-channel="whatsapp"][data-account="personal"]');
-    logoutButton.click();
+    dom.window.document.getElementById("agent-channel-account-id").value = "personal";
+    dom.window.document.getElementById("agent-channel-account-id").dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    dom.window.document.getElementById("agent-channel-logout-btn").click();
     await flushUi();
     assert.match(dom.window.document.getElementById("agent-channel-action-feedback").textContent, /whatsapp:personal • logged_out/);
+    assert.equal(dom.window.document.getElementById("agent-channel-show-qr-btn").hidden, true);
+
+    dom.window.document.getElementById("agent-channel-select").value = "signal";
+    dom.window.document.getElementById("agent-channel-select").dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    assert.match(dom.window.document.getElementById("agent-channel-onboarding-title").textContent, /Bridge externa/);
+    assert.match(dom.window.document.getElementById("agent-channel-adapter-config-label").textContent, /bridge/i);
 
     dom.window.document.getElementById("agent-send-channel").value = "signal";
     dom.window.document.getElementById("agent-send-channel").dispatchEvent(new dom.window.Event("change", { bubbles: true }));

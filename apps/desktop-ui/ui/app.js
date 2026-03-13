@@ -228,14 +228,33 @@ const agentBudgetTelemetry = document.getElementById("agent-budget-telemetry");
 const agentChannelsRefreshBtn = document.getElementById("agent-channels-refresh-btn");
 const agentChannelSelect = document.getElementById("agent-channel-select");
 const agentChannelAccountIdInput = document.getElementById("agent-channel-account-id");
+const agentChannelCredentialsLabel = document.getElementById("agent-channel-credentials-label");
 const agentChannelCredentialsInput = document.getElementById("agent-channel-credentials");
+const agentChannelCredentialHint = document.getElementById("agent-channel-credential-hint");
+const agentChannelMetadataLabel = document.getElementById("agent-channel-metadata-label");
 const agentChannelMetadataInput = document.getElementById("agent-channel-metadata");
+const agentChannelRoutingDefaultsLabel = document.getElementById("agent-channel-routing-defaults-label");
 const agentChannelRoutingDefaultsInput = document.getElementById("agent-channel-routing-defaults");
+const agentChannelAdapterConfigLabel = document.getElementById("agent-channel-adapter-config-label");
+const agentChannelAdapterConfigInput = document.getElementById("agent-channel-adapter-config");
+const agentChannelOnboardingTitle = document.getElementById("agent-channel-onboarding-title");
+const agentChannelOnboardingSummary = document.getElementById("agent-channel-onboarding-summary");
+const agentChannelOnboardingSteps = document.getElementById("agent-channel-onboarding-steps");
 const agentChannelEnabledToggle = document.getElementById("agent-channel-enabled");
 const agentChannelSetDefaultToggle = document.getElementById("agent-channel-set-default");
 const agentChannelSaveBtn = document.getElementById("agent-channel-save-btn");
 const agentChannelClearBtn = document.getElementById("agent-channel-clear-btn");
 const agentChannelFormFeedback = document.getElementById("agent-channel-form-feedback");
+const agentChannelSessionTitle = document.getElementById("agent-channel-session-title");
+const agentChannelSessionStatus = document.getElementById("agent-channel-session-status");
+const agentChannelSessionMeta = document.getElementById("agent-channel-session-meta");
+const agentChannelSessionCapabilities = document.getElementById("agent-channel-session-capabilities");
+const agentChannelLoginBtn = document.getElementById("agent-channel-login-btn");
+const agentChannelLogoutBtn = document.getElementById("agent-channel-logout-btn");
+const agentChannelShowQrBtn = document.getElementById("agent-channel-show-qr-btn");
+const agentChannelQrPanel = document.getElementById("agent-channel-qr-panel");
+const agentChannelQrCanvas = document.getElementById("agent-channel-qr-canvas");
+const agentChannelQrText = document.getElementById("agent-channel-qr-text");
 const agentSendChannelSelect = document.getElementById("agent-send-channel");
 const agentSendAccountSelect = document.getElementById("agent-send-account");
 const agentSendTargetInput = document.getElementById("agent-send-target");
@@ -552,6 +571,245 @@ function showConfirmDialog({ title, message = "", confirmLabel = "Confirmar", ca
     document.body.appendChild(backdrop);
 
     confirmBtn.focus();
+  });
+}
+
+let qrCodeLibraryPromise = null;
+
+function loadQrCodeLibrary() {
+  if (window.QRCode?.toCanvas) {
+    return Promise.resolve(window.QRCode);
+  }
+  if (qrCodeLibraryPromise) {
+    return qrCodeLibraryPromise;
+  }
+
+  qrCodeLibraryPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js";
+    script.async = true;
+    script.onload = () => {
+      if (window.QRCode?.toCanvas) {
+        resolve(window.QRCode);
+      } else {
+        reject(new Error("Biblioteca de QR code indisponivel."));
+      }
+    };
+    script.onerror = () => {
+      reject(new Error("Falha ao carregar a biblioteca de QR code."));
+    };
+    document.head.appendChild(script);
+  });
+
+  return qrCodeLibraryPromise;
+}
+
+function renderQrCodeToCanvas(canvas, qrCode, options = {}) {
+  if (!canvas || !qrCode) {
+    return Promise.resolve();
+  }
+
+  return loadQrCodeLibrary()
+    .then((QRCode) => QRCode.toCanvas(canvas, qrCode, {
+      width: options.width || 260,
+      margin: 1,
+      color: {
+        dark: "#10131a",
+        light: "#ffffff",
+      },
+    }));
+}
+
+function sanitizeDialogDetails(details = {}, sessionState = null) {
+  const merged = {
+    ...(details && typeof details === "object" && !Array.isArray(details) ? details : {}),
+  };
+
+  if (sessionState?.session_dir && !merged.session_dir) {
+    merged.session_dir = sessionState.session_dir;
+  }
+  if (sessionState?.connected_at_epoch_ms && !merged.connected_at_epoch_ms) {
+    merged.connected_at_epoch_ms = sessionState.connected_at_epoch_ms;
+  }
+  if (sessionState?.status && !merged.session_status) {
+    merged.session_status = sessionState.status;
+  }
+
+  return Object.fromEntries(
+    Object.entries(merged).filter(([, value]) => value != null && value !== ""),
+  );
+}
+
+function showChannelLoginDialog({
+  title,
+  channelName,
+  channelId,
+  accountId,
+  status = "connected",
+  message = "",
+  qrCode = null,
+  details = null,
+  sessionState = null,
+}) {
+  if (!document?.body) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "app-dialog-backdrop";
+
+    const dialog = document.createElement("div");
+    dialog.className = "app-dialog-card channel-auth-dialog";
+
+    const heading = document.createElement("h3");
+    heading.className = "app-dialog-title";
+    heading.textContent = title || `${channelName || channelId || "Canal"} • ${accountId || "-"}`;
+
+    const summary = document.createElement("div");
+    summary.className = "channel-auth-summary";
+
+    const subtitle = document.createElement("p");
+    subtitle.className = "channel-auth-subtitle";
+    subtitle.textContent = `${channelName || channelId || "canal"} • conta ${accountId || "-"}`;
+    summary.appendChild(subtitle);
+
+    const badges = document.createElement("div");
+    badges.className = "channel-auth-badges";
+
+    const statusBadge = document.createElement("span");
+    statusBadge.className = `channel-auth-badge status-${String(status || "connected").toLowerCase()}`;
+    statusBadge.textContent = status || "connected";
+    badges.appendChild(statusBadge);
+
+    if (qrCode) {
+      const qrBadge = document.createElement("span");
+      qrBadge.className = "channel-auth-badge";
+      qrBadge.textContent = "qr-login";
+      badges.appendChild(qrBadge);
+    }
+
+    summary.appendChild(badges);
+
+    if (message) {
+      const body = document.createElement("p");
+      body.className = "app-dialog-message";
+      body.textContent = message;
+      summary.appendChild(body);
+    }
+
+    dialog.appendChild(heading);
+    dialog.appendChild(summary);
+
+    let qrRawText = null;
+    if (qrCode) {
+      const qrSection = document.createElement("section");
+      qrSection.className = "channel-auth-qr-section";
+
+      const qrLabel = document.createElement("p");
+      qrLabel.className = "channel-auth-section-title";
+      qrLabel.textContent = "Escaneie este QR Code";
+      qrSection.appendChild(qrLabel);
+
+      const qrFrame = document.createElement("div");
+      qrFrame.className = "channel-auth-qr-frame";
+
+      const qrCanvas = document.createElement("canvas");
+      qrCanvas.className = "channel-auth-qr-canvas";
+      qrFrame.appendChild(qrCanvas);
+      qrSection.appendChild(qrFrame);
+
+      qrRawText = document.createElement("code");
+      qrRawText.className = "channel-auth-qr-raw";
+      qrRawText.textContent = qrCode;
+      qrSection.appendChild(qrRawText);
+
+      dialog.appendChild(qrSection);
+
+      renderQrCodeToCanvas(qrCanvas, qrCode, { width: 260 })
+        .catch(() => {
+          qrFrame.classList.add("qr-fallback");
+          qrFrame.textContent = "Nao foi possivel renderizar o QR automaticamente. Use o codigo abaixo.";
+        });
+    }
+
+    const normalizedDetails = sanitizeDialogDetails(details, sessionState);
+    if (Object.keys(normalizedDetails).length) {
+      const detailsSection = document.createElement("section");
+      detailsSection.className = "channel-auth-details-section";
+
+      const detailsLabel = document.createElement("p");
+      detailsLabel.className = "channel-auth-section-title";
+      detailsLabel.textContent = "Detalhes da conexao";
+      detailsSection.appendChild(detailsLabel);
+
+      const detailsPre = document.createElement("pre");
+      detailsPre.className = "channel-auth-details";
+      detailsPre.textContent = JSON.stringify(normalizedDetails, null, 2);
+      detailsSection.appendChild(detailsPre);
+
+      dialog.appendChild(detailsSection);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "app-dialog-actions";
+
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "primary-btn";
+    closeBtn.textContent = "Fechar";
+    actions.appendChild(closeBtn);
+
+    if (qrCode) {
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.className = "ghost-btn";
+      copyBtn.textContent = "Copiar codigo";
+      copyBtn.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(qrCode);
+          copyBtn.textContent = "Copiado";
+          window.setTimeout(() => {
+            copyBtn.textContent = "Copiar codigo";
+          }, 1200);
+        } catch {
+          if (qrRawText) {
+            const selection = window.getSelection();
+            const range = document.createRange();
+            range.selectNodeContents(qrRawText);
+            selection.removeAllRanges();
+            selection.addRange(range);
+          }
+        }
+      });
+      actions.appendChild(copyBtn);
+    }
+
+    const cleanup = () => {
+      window.removeEventListener("keydown", onKeydown);
+      backdrop.remove();
+      resolve();
+    };
+
+    const onKeydown = (event) => {
+      if (event.key === "Escape" || event.key === "Enter") {
+        event.preventDefault();
+        cleanup();
+      }
+    };
+
+    closeBtn.addEventListener("click", cleanup);
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) {
+        cleanup();
+      }
+    });
+    window.addEventListener("keydown", onKeydown);
+
+    dialog.appendChild(actions);
+    backdrop.appendChild(dialog);
+    document.body.appendChild(backdrop);
+    closeBtn.focus();
   });
 }
 
@@ -6040,14 +6298,33 @@ const agentChannelsController = createAgentChannelsController({
     agentChannelsRefreshBtn,
     agentChannelSelect,
     agentChannelAccountIdInput,
+    agentChannelCredentialsLabel,
     agentChannelCredentialsInput,
+    agentChannelCredentialHint,
+    agentChannelMetadataLabel,
     agentChannelMetadataInput,
+    agentChannelRoutingDefaultsLabel,
     agentChannelRoutingDefaultsInput,
+    agentChannelAdapterConfigLabel,
+    agentChannelAdapterConfigInput,
+    agentChannelOnboardingTitle,
+    agentChannelOnboardingSummary,
+    agentChannelOnboardingSteps,
     agentChannelEnabledToggle,
     agentChannelSetDefaultToggle,
     agentChannelSaveBtn,
     agentChannelClearBtn,
     agentChannelFormFeedback,
+    agentChannelSessionTitle,
+    agentChannelSessionStatus,
+    agentChannelSessionMeta,
+    agentChannelSessionCapabilities,
+    agentChannelLoginBtn,
+    agentChannelLogoutBtn,
+    agentChannelShowQrBtn,
+    agentChannelQrPanel,
+    agentChannelQrCanvas,
+    agentChannelQrText,
     agentSendChannelSelect,
     agentSendAccountSelect,
     agentSendTargetInput,
@@ -6065,6 +6342,8 @@ const agentChannelsController = createAgentChannelsController({
   fetchJson,
   promptText: showTextPrompt,
   confirmAction: showConfirmDialog,
+  showChannelLoginDialog,
+  renderQrCode: renderQrCodeToCanvas,
 });
 
 agentSkillsController = createAgentSkillsController({
@@ -6275,7 +6554,7 @@ async function loadObservabilityFeed() {
     // Status color
     let statusColor = "var(--text)";
     if (entry.status === "error") statusColor = "var(--danger)";
-    if (entry.status === "denied") statusColor = "var(--warning)";
+    if (entry.status === "denied") statusColor = "var(--warn)";
     if (entry.status === "success" && (entry.event_type === "ToolExecuted" || entry.event_type === "ResponseFinal" || entry.event_type === "ApprovalDecision")) {
       statusColor = "var(--accent)";
     }
