@@ -1,0 +1,11 @@
+[package]
+name = "mlx-provider"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+mlx-ollama-core = { path = "../../core" }
