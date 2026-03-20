@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "MLX Ollama Pilot",
+  "productName": "MLX-Pilot",
   "version": "0.1.0",
   "identifier": "com.kaike.mlxollamapilot",
   "build": {
@@ -10,7 +10,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "MLX Ollama Pilot",
+        "title": "MLX-Pilot",
         "width": 1240,
         "height": 860,
         "resizable": true

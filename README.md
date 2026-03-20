@@ -1,4 +1,4 @@
-# MLX Ollama Pilot (Fase 1)
+# MLX-Pilot (Fase 1)
 
 Projeto em Rust para macOS Apple Silicon que oferece **chat com modelos de linguagem locais (MLX)** e **descoberta/download de modelos** via uma API HTTP e uma interface desktop.
 
@@ -49,7 +49,7 @@ O projeto é um **workspace Cargo**: várias “crates” (bibliotecas/executáv
 ## Arquitetura do repositório: o que é cada pasta
 
 ```
-mlx-ollama-pilot/
+mlx-pilot/
 ├── Cargo.toml              # Workspace: define crates do projeto (core, providers/mlx, daemon)
 ├── crates/
 │   ├── core/               # Contratos de domínio (tipos, erros, trait do provider)
@@ -99,7 +99,7 @@ O projeto **não** é distribuído como um único executável; você compila e r
 No diretório do projeto:
 
 ```bash
-cd /Users/kaike/mlx-ollama-pilot
+cd /Users/kaike/mlx-pilot
 cargo run -p mlx-ollama-daemon
 ```
 
@@ -112,7 +112,7 @@ cargo run -p mlx-ollama-daemon
 Use o script que sobe o daemon e abre a interface:
 
 ```bash
-cd /Users/kaike/mlx-ollama-pilot
+cd /Users/kaike/mlx-pilot
 ./scripts/run-desktop.sh
 ```
 
@@ -125,7 +125,7 @@ O script:
 Para parar o daemon depois:
 
 ```bash
-cd /Users/kaike/mlx-ollama-pilot
+cd /Users/kaike/mlx-pilot
 ./scripts/stop-daemon.sh
 ```
 

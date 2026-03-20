@@ -68,7 +68,7 @@ pub struct CatalogService {
 impl CatalogService {
     pub fn new(cfg: CatalogConfig) -> Result<Self, CatalogError> {
         let http = reqwest::Client::builder()
-            .user_agent("mlx-ollama-pilot/0.1")
+            .user_agent("mlx-pilot/0.1")
             .timeout(Duration::from_secs(40))
             .build()
             .map_err(|error| CatalogError::Unavailable(format!("http client: {error}")))?;

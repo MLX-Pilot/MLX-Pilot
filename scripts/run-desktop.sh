@@ -1,7 +1,7 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
-ROOT_DIR="/Users/kaike/mlx-ollama-pilot"
+ROOT_DIR="/Users/kaike/mlx-pilot"
 DAEMON_LOG="/tmp/mlx-ollama-daemon.log"
 
 source "$HOME/.cargo/env"
