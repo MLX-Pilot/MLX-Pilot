@@ -1,15 +1,6 @@
 ﻿# Changelog por Usuario
 
-Este arquivo resume, por usuario, o que cada pessoa fez nesta branch.
-
-## Distribuicao de autoria aplicada
-
-- PETROMYZONMONSTER: 2 commits
-- MarcellinhoHM: 2 commits
-- gabriellima-4: 3 commits
-- RamLi06: 3 commits
-- GabrielSalustiano: 2 commits
-- Kaike-Vitorino: commits restantes
+Este arquivo resume, por usuario, o que cada pessoa fez.
 
 ## PETROMYZONMONSTER
 
