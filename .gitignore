@@ -1,0 +1,6 @@
+/target
+**/target
+.DS_Store
+.env
+node_modules
+apps/desktop-ui/src-tauri/target
