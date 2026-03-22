@@ -131,8 +131,16 @@
               <p class="chat-eyebrow">OpenClaw Integration</p>
               <h2>Chat, observabilidade e configuracao</h2>
               <p id="openclaw-status-text" class="meta-note">status: verificando...</p>
+              <p id="openclaw-runtime-meta" class="meta-note">runtime: verificando...</p>
             </div>
-            <button id="refresh-openclaw-status" class="ghost-btn">Atualizar status</button>
+            <div class="openclaw-header-actions">
+              <div class="openclaw-runtime-actions">
+                <button id="openclaw-start-btn" type="button" class="ghost-btn">Play</button>
+                <button id="openclaw-stop-btn" type="button" class="ghost-btn">Stop</button>
+                <button id="openclaw-restart-btn" type="button" class="ghost-btn">Restart</button>
+              </div>
+              <button id="refresh-openclaw-status" class="ghost-btn">Atualizar status</button>
+            </div>
           </header>
 
           <section class="openclaw-controls glass">

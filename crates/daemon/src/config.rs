@@ -6,11 +6,14 @@ use std::time::Duration;
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub bind_addr: SocketAddr,
+    pub local_provider: String,
     pub models_dir: PathBuf,
     pub mlx_command: String,
     pub mlx_prefix_args: Vec<String>,
     pub mlx_suffix_args: Vec<String>,
     pub mlx_timeout: Duration,
+    pub ollama_base_url: String,
+    pub ollama_timeout: Duration,
     pub remote_downloads_dir: PathBuf,
     pub hf_api_base: String,
     pub hf_token: Option<String>,
@@ -31,11 +34,14 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 11435),
+            local_provider: "mlx".to_string(),
             models_dir: PathBuf::from("/Users/kaike/models"),
             mlx_command: default_mlx_command(),
             mlx_prefix_args: Vec::new(),
             mlx_suffix_args: Vec::new(),
             mlx_timeout: Duration::from_secs(900),
+            ollama_base_url: "http://127.0.0.1:11434".to_string(),
+            ollama_timeout: Duration::from_secs(900),
             remote_downloads_dir: PathBuf::from("/Users/kaike/models"),
             hf_api_base: "https://huggingface.co".to_string(),
             hf_token: None,
@@ -65,6 +71,13 @@ impl AppConfig {
         if let Ok(value) = env::var("APP_BIND_ADDR") {
             if let Ok(addr) = value.parse() {
                 cfg.bind_addr = addr;
+            }
+        }
+
+        if let Ok(value) = env::var("APP_LOCAL_PROVIDER") {
+            let normalized = value.trim().to_lowercase();
+            if matches!(normalized.as_str(), "mlx" | "ollama") {
+                cfg.local_provider = normalized;
             }
         }
 
@@ -105,6 +118,19 @@ impl AppConfig {
         if let Ok(value) = env::var("APP_MLX_TIMEOUT_SECS") {
             if let Ok(seconds) = value.parse::<u64>() {
                 cfg.mlx_timeout = Duration::from_secs(seconds.max(1));
+            }
+        }
+
+        if let Ok(value) = env::var("APP_OLLAMA_BASE_URL") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                cfg.ollama_base_url = trimmed.to_string();
+            }
+        }
+
+        if let Ok(value) = env::var("APP_OLLAMA_TIMEOUT_SECS") {
+            if let Ok(seconds) = value.parse::<u64>() {
+                cfg.ollama_timeout = Duration::from_secs(seconds.max(1));
             }
         }
 
