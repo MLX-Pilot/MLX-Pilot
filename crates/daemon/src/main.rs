@@ -20,6 +20,7 @@ use catalog::{
 };
 use chat_stream::{spawn_chat_stream, ChatRuntimeConfig, ChatStreamEvent};
 use config::AppConfig;
+use llamacpp_provider::{LlamaCppProvider, LlamaCppProviderConfig};
 use mlx_ollama_core::{ChatRequest, ChatResponse, ModelDescriptor, ModelProvider, ProviderError};
 use mlx_provider::{MlxProvider, MlxProviderConfig};
 use ollama_provider::{OllamaProvider, OllamaProviderConfig};
@@ -38,13 +39,14 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Clone)]
 struct AppState {
     provider_mode: LocalProviderMode,
     mlx_provider: Arc<MlxProvider>,
+    llamacpp_provider: Arc<LlamaCppProvider>,
     ollama_provider: Arc<OllamaProvider>,
     openclaw_local_provider: Arc<MlxProvider>,
     catalog: Arc<CatalogService>,
@@ -56,6 +58,7 @@ struct AppState {
 enum LocalProviderMode {
     Auto,
     Mlx,
+    Llamacpp,
     Ollama,
 }
 
@@ -63,6 +66,7 @@ impl LocalProviderMode {
     fn from_env(value: &str) -> Self {
         match value.trim().to_lowercase().as_str() {
             "mlx" => Self::Mlx,
+            "llamacpp" | "llama" | "llama.cpp" => Self::Llamacpp,
             "ollama" => Self::Ollama,
             _ => Self::Auto,
         }
@@ -72,6 +76,7 @@ impl LocalProviderMode {
         match self {
             Self::Auto => "auto",
             Self::Mlx => "mlx",
+            Self::Llamacpp => "llamacpp",
             Self::Ollama => "ollama",
         }
     }
@@ -80,6 +85,7 @@ impl LocalProviderMode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RoutedProvider {
     Mlx,
+    Llamacpp,
     Ollama,
 }
 
@@ -254,6 +260,19 @@ async fn main() -> anyhow::Result<()> {
         timeout: cfg.mlx_timeout,
     }));
 
+    let llamacpp_provider = Arc::new(LlamaCppProvider::new(LlamaCppProviderConfig {
+        models_dir: cfg.models_dir.clone(),
+        server_binary: cfg.llamacpp_server_binary.clone(),
+        base_url: cfg.llamacpp_base_url.clone(),
+        timeout: cfg.llamacpp_timeout,
+        startup_timeout: cfg.llamacpp_startup_timeout,
+        auto_start: cfg.llamacpp_auto_start,
+        auto_install: cfg.llamacpp_auto_install,
+        context_size: cfg.llamacpp_context_size,
+        gpu_layers: cfg.llamacpp_gpu_layers,
+        extra_args: cfg.llamacpp_extra_args.clone(),
+    }));
+
     let ollama_provider = Arc::new(OllamaProvider::new(OllamaProviderConfig {
         base_url: cfg.ollama_base_url.clone(),
         timeout: cfg.ollama_timeout,
@@ -275,6 +294,7 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         provider_mode,
         mlx_provider: mlx_provider.clone(),
+        llamacpp_provider,
         ollama_provider,
         openclaw_local_provider: mlx_provider,
         catalog,
@@ -393,6 +413,9 @@ async fn chat_stream(
 
     let receiver = match routed.provider {
         RoutedProvider::Mlx => spawn_chat_stream(state.chat_runtime.clone(), normalized_request),
+        RoutedProvider::Llamacpp => {
+            spawn_provider_compat_stream(state.llamacpp_provider.clone(), normalized_request)
+        }
         RoutedProvider::Ollama => {
             spawn_provider_compat_stream(state.ollama_provider.clone(), normalized_request)
         }
@@ -576,13 +599,22 @@ fn spawn_provider_compat_stream(
 async fn list_chat_models(state: &AppState) -> Result<Vec<ModelDescriptor>, ProviderError> {
     match state.provider_mode {
         LocalProviderMode::Mlx => state.mlx_provider.list_models().await,
+        LocalProviderMode::Llamacpp => state.llamacpp_provider.list_models().await,
         LocalProviderMode::Ollama => state.ollama_provider.list_models().await,
         LocalProviderMode::Auto => {
             let mlx_models = state.mlx_provider.list_models().await?;
+            let llamacpp_models = match state.llamacpp_provider.list_models().await {
+                Ok(models) => models,
+                Err(error) => {
+                    warn!("llamacpp unavailable while listing models in auto mode: {error}");
+                    Vec::new()
+                }
+            };
+
             let ollama_models = match state.ollama_provider.list_models().await {
                 Ok(models) => models,
                 Err(error) => {
-                    warn!("ollama unavailable while listing models in auto mode: {error}");
+                    debug!("ollama unavailable while listing models in auto mode: {error}");
                     Vec::new()
                 }
             };
@@ -592,6 +624,16 @@ async fn list_chat_models(state: &AppState) -> Result<Vec<ModelDescriptor>, Prov
                 combined.push(ModelDescriptor {
                     id: format!("mlx::{}", model.id),
                     name: format!("{} [MLX]", model.name),
+                    provider: model.provider,
+                    path: model.path,
+                    is_available: model.is_available,
+                });
+            }
+
+            for model in llamacpp_models {
+                combined.push(ModelDescriptor {
+                    id: format!("llama::{}", model.id),
+                    name: format!("{} [llama.cpp]", model.name),
                     provider: model.provider,
                     path: model.path,
                     is_available: model.is_available,
@@ -634,6 +676,7 @@ async fn chat_with_routing(
 
     match routed.provider {
         RoutedProvider::Mlx => state.mlx_provider.chat(request).await,
+        RoutedProvider::Llamacpp => state.llamacpp_provider.chat(request).await,
         RoutedProvider::Ollama => state.ollama_provider.chat(request).await,
     }
 }
@@ -663,10 +706,23 @@ async fn route_model_request(
         });
     }
 
+    if let Some(normalized) = trimmed.strip_prefix("llama::") {
+        return Ok(RoutedModel {
+            provider: RoutedProvider::Llamacpp,
+            normalized_model_id: normalized.trim().to_string(),
+        });
+    }
+
     match state.provider_mode {
         LocalProviderMode::Mlx => {
             return Ok(RoutedModel {
                 provider: RoutedProvider::Mlx,
+                normalized_model_id: trimmed.to_string(),
+            });
+        }
+        LocalProviderMode::Llamacpp => {
+            return Ok(RoutedModel {
+                provider: RoutedProvider::Llamacpp,
                 normalized_model_id: trimmed.to_string(),
             });
         }
@@ -677,6 +733,13 @@ async fn route_model_request(
             });
         }
         LocalProviderMode::Auto => {}
+    }
+
+    if looks_like_llamacpp_model_id(trimmed) {
+        return Ok(RoutedModel {
+            provider: RoutedProvider::Llamacpp,
+            normalized_model_id: trimmed.to_string(),
+        });
     }
 
     if looks_like_mlx_model_id(trimmed) {
@@ -702,6 +765,23 @@ async fn route_model_request(
             provider: RoutedProvider::Mlx,
             normalized_model_id: trimmed.to_string(),
         });
+    }
+
+    match state.llamacpp_provider.list_models().await {
+        Ok(llamacpp_models) => {
+            if llamacpp_models
+                .iter()
+                .any(|entry| entry.id == trimmed || entry.path == trimmed)
+            {
+                return Ok(RoutedModel {
+                    provider: RoutedProvider::Llamacpp,
+                    normalized_model_id: trimmed.to_string(),
+                });
+            }
+        }
+        Err(error) => {
+            debug!("llamacpp unavailable while routing model '{trimmed}': {error}");
+        }
     }
 
     match state.ollama_provider.list_models().await {
@@ -739,6 +819,14 @@ fn looks_like_ollama_model_id(model_id: &str) -> bool {
     let value = model_id.trim();
     value.starts_with("ollama/")
         || (value.contains(':') && !value.contains('/') && !value.contains('\\'))
+}
+
+fn looks_like_llamacpp_model_id(model_id: &str) -> bool {
+    let value = model_id.trim().to_lowercase();
+    value.ends_with(".gguf")
+        || value.contains(".gguf/")
+        || value.contains("/gguf/")
+        || value.contains("\\gguf\\")
 }
 
 async fn catalog_sources(

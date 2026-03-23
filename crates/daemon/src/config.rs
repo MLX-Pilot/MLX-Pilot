@@ -12,6 +12,15 @@ pub struct AppConfig {
     pub mlx_prefix_args: Vec<String>,
     pub mlx_suffix_args: Vec<String>,
     pub mlx_timeout: Duration,
+    pub llamacpp_server_binary: String,
+    pub llamacpp_base_url: String,
+    pub llamacpp_timeout: Duration,
+    pub llamacpp_startup_timeout: Duration,
+    pub llamacpp_auto_start: bool,
+    pub llamacpp_auto_install: bool,
+    pub llamacpp_context_size: u32,
+    pub llamacpp_gpu_layers: i32,
+    pub llamacpp_extra_args: Vec<String>,
     pub ollama_base_url: String,
     pub ollama_timeout: Duration,
     pub ollama_startup_timeout: Duration,
@@ -43,6 +52,15 @@ impl Default for AppConfig {
             mlx_prefix_args: Vec::new(),
             mlx_suffix_args: Vec::new(),
             mlx_timeout: Duration::from_secs(900),
+            llamacpp_server_binary: default_llamacpp_server_binary(),
+            llamacpp_base_url: "http://127.0.0.1:11439".to_string(),
+            llamacpp_timeout: Duration::from_secs(900),
+            llamacpp_startup_timeout: Duration::from_secs(45),
+            llamacpp_auto_start: true,
+            llamacpp_auto_install: true,
+            llamacpp_context_size: 16384,
+            llamacpp_gpu_layers: 999,
+            llamacpp_extra_args: Vec::new(),
             ollama_base_url: "http://127.0.0.1:11434".to_string(),
             ollama_timeout: Duration::from_secs(900),
             ollama_startup_timeout: Duration::from_secs(30),
@@ -82,7 +100,11 @@ impl AppConfig {
 
         if let Ok(value) = env::var("APP_LOCAL_PROVIDER") {
             let normalized = value.trim().to_lowercase();
-            if matches!(normalized.as_str(), "auto" | "mlx" | "ollama") {
+            let normalized = match normalized.as_str() {
+                "llama" | "llama.cpp" => "llamacpp".to_string(),
+                _ => normalized,
+            };
+            if matches!(normalized.as_str(), "auto" | "mlx" | "llamacpp" | "ollama") {
                 cfg.local_provider = normalized;
             }
         }
@@ -124,6 +146,63 @@ impl AppConfig {
         if let Ok(value) = env::var("APP_MLX_TIMEOUT_SECS") {
             if let Ok(seconds) = value.parse::<u64>() {
                 cfg.mlx_timeout = Duration::from_secs(seconds.max(1));
+            }
+        }
+
+        if let Ok(value) = env::var("APP_LLAMACPP_SERVER_BINARY") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                cfg.llamacpp_server_binary = trimmed.to_string();
+            }
+        }
+
+        if let Ok(value) = env::var("APP_LLAMACPP_BASE_URL") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                cfg.llamacpp_base_url = trimmed.to_string();
+            }
+        }
+
+        if let Ok(value) = env::var("APP_LLAMACPP_TIMEOUT_SECS") {
+            if let Ok(seconds) = value.parse::<u64>() {
+                cfg.llamacpp_timeout = Duration::from_secs(seconds.max(1));
+            }
+        }
+
+        if let Ok(value) = env::var("APP_LLAMACPP_STARTUP_TIMEOUT_SECS") {
+            if let Ok(seconds) = value.parse::<u64>() {
+                cfg.llamacpp_startup_timeout = Duration::from_secs(seconds.max(2));
+            }
+        }
+
+        if let Ok(value) = env::var("APP_LLAMACPP_AUTO_START") {
+            cfg.llamacpp_auto_start = parse_bool(&value, cfg.llamacpp_auto_start);
+        }
+
+        if let Ok(value) = env::var("APP_LLAMACPP_AUTO_INSTALL") {
+            cfg.llamacpp_auto_install = parse_bool(&value, cfg.llamacpp_auto_install);
+        }
+
+        if let Ok(value) = env::var("APP_LLAMACPP_CONTEXT_SIZE") {
+            if let Ok(parsed) = value.parse::<u32>() {
+                cfg.llamacpp_context_size = parsed.max(1024);
+            }
+        }
+
+        if let Ok(value) = env::var("APP_LLAMACPP_GPU_LAYERS") {
+            if let Ok(parsed) = value.parse::<i32>() {
+                cfg.llamacpp_gpu_layers = parsed.max(-1);
+            }
+        }
+
+        if let Ok(value) = env::var("APP_LLAMACPP_EXTRA_ARGS") {
+            if !value.trim().is_empty() {
+                cfg.llamacpp_extra_args = parse_shell_args(&value).unwrap_or_else(|| {
+                    value
+                        .split_whitespace()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                });
             }
         }
 
@@ -263,6 +342,15 @@ fn default_mlx_command() -> String {
         preferred.display().to_string()
     } else {
         "mlx_lm.generate".to_string()
+    }
+}
+
+fn default_llamacpp_server_binary() -> String {
+    let bundled = PathBuf::from("/Users/kaike/mlx-ollama-pilot/bin/llama-server");
+    if bundled.exists() {
+        bundled.display().to_string()
+    } else {
+        "llama-server".to_string()
     }
 }
 
