@@ -6,19 +6,24 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 export class ParticleSystem {
     constructor(containerId) {
         this.container = document.getElementById(containerId);
+        if (!this.container) {
+            throw new Error(`Container '${containerId}' nao encontrado para o sistema de particulas.`);
+        }
+
+        const { width, height } = this.getViewportSize();
         this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        this.camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
         this.camera.position.z = 55;
 
         this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.setSize(width, height);
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         this.container.appendChild(this.renderer.domElement);
 
         this.composer = new EffectComposer(this.renderer);
         this.composer.addPass(new RenderPass(this.scene, this.camera));
 
-        this.bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.0, 0.4, 0.85);
+        this.bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 1.0, 0.4, 0.85);
         this.composer.addPass(this.bloomPass);
 
         this.COUNT = 20000;
@@ -56,11 +61,18 @@ export class ParticleSystem {
         this.animate();
     }
 
+    getViewportSize() {
+        const width = Math.max(this.container.clientWidth || 0, window.innerWidth || 1);
+        const height = Math.max(this.container.clientHeight || 0, window.innerHeight || 1);
+        return { width, height };
+    }
+
     onWindowResize() {
-        this.camera.aspect = window.innerWidth / window.innerHeight;
+        const { width, height } = this.getViewportSize();
+        this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
-        this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.composer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.setSize(width, height);
+        this.composer.setSize(width, height);
     }
 
     formText(text) {
@@ -139,13 +151,24 @@ export class ParticleSystem {
     }
 
     setParticleState(state) {
-        if (this.currentState === state) return;
+        if (this.currentState === state && state !== 'neutral') return;
         this.currentState = state;
 
         this.shakeIntensity = 0;
         this.bloomPass.strength = 1.0;
 
         for (let i = 0; i < this.COUNT; i++) {
+            if (state === 'none') {
+                this.targetPositions[i * 3] = 0;
+                this.targetPositions[i * 3 + 1] = 0;
+                this.targetPositions[i * 3 + 2] = 0;
+                this.targetColors[i * 3] = 0;
+                this.targetColors[i * 3 + 1] = 0;
+                this.targetColors[i * 3 + 2] = 0;
+                this.targetSizes[i] = 0;
+                continue;
+            }
+
             if (state === 'neutral') {
                 if (i < this.COUNT * 0.05) {
                     const r = 15 + Math.random() * 20;
@@ -195,8 +218,11 @@ export class ParticleSystem {
             // Gentle floating for text
             this.particles.rotation.y = Math.sin(Date.now() * 0.001) * 0.1;
             this.particles.rotation.x = Math.cos(Date.now() * 0.001) * 0.05;
-        } else {
+        } else if (this.currentState === 'neutral') {
             this.particles.rotation.y += 0.002;
+        } else {
+            this.particles.rotation.y *= 0.95;
+            this.particles.rotation.x *= 0.95;
         }
 
         this.composer.render();

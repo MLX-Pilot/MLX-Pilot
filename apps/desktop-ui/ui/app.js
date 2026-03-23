@@ -265,6 +265,35 @@ function formatEpoch(epochMs) {
   }).format(date);
 }
 
+function normalizeParticleText(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.replace(/\s+/g, " ").trim().toUpperCase().slice(0, 10);
+}
+
+function applyParticleTextFromInput() {
+  if (!window.particleSystem) {
+    setStatus("playground de particulas indisponivel", "error");
+    return;
+  }
+
+  const raw = aiParticleInput ? aiParticleInput.value : "";
+  const text = normalizeParticleText(raw);
+  if (aiParticleInput) {
+    aiParticleInput.value = text;
+  }
+
+  if (!text) {
+    window.particleSystem.setParticleState("neutral");
+    setStatus("particulas em modo neutro");
+    return;
+  }
+
+  window.particleSystem.formText(text);
+  setStatus(`particulas: ${text}`);
+}
+
 function isMeaningfulCatalogSummary(value) {
   if (typeof value !== "string") {
     return false;
@@ -2295,9 +2324,18 @@ function switchTab(nextTab) {
 
   if (window.particleSystem) {
     if (nextTab === "ai-interaction") {
-      window.particleSystem.setParticleState('neutral');
+      window.particleSystem.onWindowResize();
+      const text = normalizeParticleText(aiParticleInput ? aiParticleInput.value : "");
+      if (text) {
+        if (aiParticleInput) {
+          aiParticleInput.value = text;
+        }
+        window.particleSystem.formText(text);
+      } else {
+        window.particleSystem.setParticleState("neutral");
+      }
     } else {
-      window.particleSystem.setParticleState('none');
+      window.particleSystem.setParticleState("none");
     }
   }
 
@@ -2481,6 +2519,28 @@ if (messageInput) {
 }
 if (openclawMessageInput) {
   openclawMessageInput.addEventListener("input", () => autoResizeTextarea(openclawMessageInput));
+}
+if (aiParticleInput) {
+  aiParticleInput.addEventListener("input", () => {
+    aiParticleInput.value = aiParticleInput.value.toUpperCase().slice(0, 10);
+  });
+  aiParticleInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      applyParticleTextFromInput();
+    }
+  });
+  aiParticleInput.addEventListener("blur", () => {
+    aiParticleInput.value = normalizeParticleText(aiParticleInput.value);
+  });
+}
+if (aiParticleBtn) {
+  aiParticleBtn.addEventListener("click", () => {
+    applyParticleTextFromInput();
+    if (aiParticleInput) {
+      aiParticleInput.focus();
+    }
+  });
 }
 
 document.addEventListener("click", (event) => {
