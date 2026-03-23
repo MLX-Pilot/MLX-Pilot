@@ -504,6 +504,19 @@ textarea:focus {
   flex-wrap: wrap;
 }
 
+.chat-option-toggle {
+  margin-right: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #c4d9ef;
+  font-size: 0.82rem;
+}
+
+.chat-option-toggle input {
+  accent-color: #3ad8d7;
+}
+
 .primary-btn,
 .ghost-btn {
   border-radius: 10px;

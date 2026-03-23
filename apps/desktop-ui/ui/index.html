@@ -24,6 +24,14 @@
           </div>
           <label class="field-label" for="daemon-url">Daemon URL</label>
           <input id="daemon-url" class="input" value="http://127.0.0.1:11435" />
+          <label class="field-label" for="brave-api-key">Brave API Key</label>
+          <input
+            id="brave-api-key"
+            class="input"
+            type="password"
+            placeholder="BSA..."
+            autocomplete="off"
+          />
           <button id="save-url" class="ghost-btn">Salvar</button>
         </section>
 
@@ -80,6 +88,10 @@
               required
             ></textarea>
             <div class="chat-form-actions">
+              <label class="chat-option-toggle" for="chat-websearch-toggle">
+                <input id="chat-websearch-toggle" type="checkbox" />
+                WebSearch Brave (OpenClaw skeleton)
+              </label>
               <button id="cancel-edit" type="button" class="ghost-btn hidden">Cancelar edicao</button>
               <button id="stop-generation" type="button" class="ghost-btn" disabled>Parar</button>
               <button type="submit" class="primary-btn">Enviar</button>

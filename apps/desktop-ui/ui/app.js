@@ -1,6 +1,7 @@
 const STORAGE_DAEMON_URL = "mlxPilotDaemonUrl";
 const STORAGE_CHAT_THREADS = "mlxPilotChatThreadsV2";
 const STORAGE_OPENCLAW_OBSERVABILITY = "mlxPilotOpenClawObservabilityV1";
+const STORAGE_BRAVE_API_KEY = "mlxPilotBraveApiKey";
 
 const STREAM_CHARS_PER_TICK = 22;
 const STREAM_TICK_MS = 20;
@@ -12,6 +13,7 @@ const appShell = document.getElementById("app-shell");
 const statusPill = document.getElementById("status-pill");
 
 const daemonInput = document.getElementById("daemon-url");
+const braveApiKeyInput = document.getElementById("brave-api-key");
 const saveUrlBtn = document.getElementById("save-url");
 
 const tabButtons = Array.from(document.querySelectorAll(".tab-btn[data-tab]"));
@@ -32,6 +34,7 @@ const selectedModelLabel = document.getElementById("selected-model-label");
 const chatForm = document.getElementById("chat-form");
 const chatLog = document.getElementById("chat-log");
 const messageInput = document.getElementById("message-input");
+const chatWebsearchToggle = document.getElementById("chat-websearch-toggle");
 const sendMessageBtn = chatForm.querySelector('button[type="submit"]');
 const stopGenerationBtn = document.getElementById("stop-generation");
 const cancelEditBtn = document.getElementById("cancel-edit");
@@ -121,6 +124,7 @@ let openclawModelsCatalog = {
 };
 
 daemonInput.value = daemonBaseUrl;
+braveApiKeyInput.value = localStorage.getItem(STORAGE_BRAVE_API_KEY) || "";
 
 function setStatus(text, tone = "normal") {
   statusPill.textContent = text;
@@ -796,10 +800,92 @@ function isAbortError(error) {
   );
 }
 
-function buildChatPayload(messages) {
+function getBraveApiKey() {
+  return (braveApiKeyInput.value || "").trim();
+}
+
+function buildWebsearchSkeletonPrompt({ apiKeyConfigured, searchSummary }) {
+  const keyStatus = apiKeyConfigured ? "configured" : "missing";
+  const parts = [
+    "OpenClaw WebSearch skeleton (Brave API) enabled for this turn.",
+    `Brave API key status: ${keyStatus}.`,
+    "When relevant, use web evidence to improve factuality and cite source URLs.",
+    "Reference skeleton:",
+    "1) GET https://api.search.brave.com/res/v1/web/search?q=<query>&count=5",
+    "2) Header: X-Subscription-Token: <BRAVE_API_KEY>",
+    "3) Read web.results[] and synthesize a concise answer with links.",
+  ];
+
+  if (searchSummary) {
+    parts.push("");
+    parts.push("Pre-fetched Brave web results for this user query:");
+    parts.push(searchSummary);
+  } else if (!apiKeyConfigured) {
+    parts.push("");
+    parts.push("No Brave key configured; answer without live web retrieval.");
+  }
+
+  return parts.join("\n");
+}
+
+function formatBraveSearchSummary(results) {
+  if (!Array.isArray(results) || !results.length) {
+    return "No Brave results returned.";
+  }
+
+  return results
+    .slice(0, 5)
+    .map((entry, index) => {
+      const title = String(entry.title || "sem titulo").trim();
+      const url = String(entry.url || "").trim();
+      const description = String(entry.description || "").trim();
+      return `${index + 1}. ${title}\nURL: ${url}\nResumo: ${description}`;
+    })
+    .join("\n\n");
+}
+
+async function maybeInjectWebsearchContext(messages) {
+  if (!chatWebsearchToggle.checked) {
+    return messages;
+  }
+
+  const apiKey = getBraveApiKey();
+  const latestUserMessage = [...messages]
+    .reverse()
+    .find((entry) => entry.role === "user")
+    ?.content?.trim();
+
+  let searchSummary = "";
+  if (apiKey && latestUserMessage) {
+    try {
+      const response = await fetchJson("/web/brave/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: latestUserMessage,
+          api_key: apiKey,
+          max_results: 5,
+        }),
+      });
+      searchSummary = formatBraveSearchSummary(response.results);
+    } catch (error) {
+      addSystemMessage(`WebSearch Brave indisponivel: ${error.message}`);
+    }
+  }
+
+  const systemPrompt = buildWebsearchSkeletonPrompt({
+    apiKeyConfigured: Boolean(apiKey),
+    searchSummary,
+  });
+
+  return [{ role: "system", content: systemPrompt }, ...messages];
+}
+
+async function buildChatPayload(messages) {
+  const payloadMessages = await maybeInjectWebsearchContext(messages);
   return {
     model_id: selectedModelId,
-    messages,
+    messages: payloadMessages,
     options: {
       temperature: 0.2,
       max_tokens: 512,
@@ -973,7 +1059,8 @@ async function runAssistantGeneration() {
   setGeneratingState(true);
 
   try {
-    await consumeChatStream(buildChatPayload(thread.messages), assistantUi, activeStreamController.signal);
+    const payload = await buildChatPayload(thread.messages);
+    await consumeChatStream(payload, assistantUi, activeStreamController.signal);
 
     const finalAnswer = assistantUi.finalAnswer.trim();
     if (finalAnswer) {
@@ -1851,6 +1938,7 @@ function switchTab(nextTab) {
 
 saveUrlBtn.addEventListener("click", () => {
   daemonBaseUrl = daemonInput.value.trim().replace(/\/$/, "");
+  localStorage.setItem(STORAGE_BRAVE_API_KEY, getBraveApiKey());
   localStorage.setItem(STORAGE_DAEMON_URL, daemonBaseUrl);
   openclawStatusLoaded = false;
   openclawObservabilityLoaded = false;
@@ -1858,6 +1946,10 @@ saveUrlBtn.addEventListener("click", () => {
   openclawRuntimeMeta.textContent = "runtime: verificando...";
   setStatus("url salva");
   void bootstrap();
+});
+
+braveApiKeyInput.addEventListener("change", () => {
+  localStorage.setItem(STORAGE_BRAVE_API_KEY, getBraveApiKey());
 });
 
 newChatThreadBtn.addEventListener("click", () => {
