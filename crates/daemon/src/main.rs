@@ -24,7 +24,10 @@ use catalog::{
 use chat_stream::{spawn_chat_stream, ChatRuntimeConfig, ChatStreamEvent};
 use config::AppConfig;
 use llamacpp_provider::{LlamaCppProvider, LlamaCppProviderConfig};
-use mlx_ollama_core::{ChatRequest, ChatResponse, ModelDescriptor, ModelProvider, ProviderError};
+use mlx_ollama_core::{
+    ChatMessage, ChatRequest, ChatResponse, GenerationOptions, MessageRole, ModelDescriptor,
+    ModelProvider, ProviderError,
+};
 use mlx_provider::{MlxProvider, MlxProviderConfig};
 use ollama_provider::{OllamaProvider, OllamaProviderConfig};
 use openclaw::{
@@ -355,6 +358,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/nanobot/chat", post(nanobot_chat))
         .route("/nanobot/logs", get(nanobot_logs))
         .route("/nanobot/observability", get(nanobot_observability))
+        .route("/nanobot/models", get(nanobot_models))
         .route("/nanobot/model", get(nanobot_get_model).post(nanobot_set_model))
         .route("/catalog/sources", get(catalog_sources))
         .route("/catalog/models", get(catalog_models))
@@ -1168,17 +1172,12 @@ struct NanoBotObservabilityResponse {
     updated_at: Option<u64>,
 }
 
-#[derive(Debug, Serialize)]
-struct NanoBotModelResponse {
-    source: String,
-    model: String,
-    provider: String,
-    label: String,
-}
-
 #[derive(Debug, Deserialize)]
 struct NanoBotSetModelRequest {
-    model: String,
+    source: Option<String>,
+    model_reference: Option<String>,
+    local_model_id: Option<String>,
+    model: Option<String>,
 }
 
 #[derive(Debug)]
@@ -1515,6 +1514,7 @@ async fn nanobot_runtime_action(
 }
 
 async fn nanobot_chat(
+    State(state): State<AppState>,
     Json(request): Json<NanoBotChatRequest>,
 ) -> Result<Json<NanoBotChatResponse>, AppError> {
     let message = request.message.trim();
@@ -1534,6 +1534,89 @@ async fn nanobot_chat(
         .filter(|value| !value.is_empty())
         .unwrap_or("mlx-pilot")
         .to_string();
+
+    let nanobot_config = read_nanobot_config_json_optional()?;
+    let current_model = build_nanobot_model_response(nanobot_config.as_ref());
+
+    if current_model.source == "local" {
+        let local_model_path = nanobot_config
+            .as_ref()
+            .and_then(extract_nanobot_model_local_path_value)
+            .or_else(|| {
+                current_model
+                    .reference
+                    .strip_prefix("openai/")
+                    .map(ToString::to_string)
+            })
+            .or_else(|| {
+                current_model
+                    .model
+                    .strip_prefix("openai/")
+                    .map(ToString::to_string)
+            })
+            .or_else(|| {
+                let candidate = current_model.model.trim();
+                if candidate.is_empty() {
+                    None
+                } else {
+                    Some(candidate.to_string())
+                }
+            })
+            .ok_or_else(|| AppError::Provider(ProviderError::InvalidRequest {
+                details: "modelo local NanoBot nao configurado corretamente".to_string(),
+            }))?;
+
+        let started = Instant::now();
+        let chat_result = state
+            .openclaw_local_provider
+            .chat(ChatRequest {
+                model_id: local_model_path,
+                messages: vec![ChatMessage {
+                    role: MessageRole::User,
+                    content: message.to_string(),
+                }],
+                options: GenerationOptions {
+                    temperature: Some(0.15),
+                    max_tokens: Some(120),
+                    top_p: None,
+                },
+            })
+            .await
+            .map_err(AppError::Provider)?;
+
+        let observability = build_nanobot_observability_snapshot()?;
+        let reply = chat_result.message.content.trim().to_string();
+        let mut payloads = Vec::new();
+        if let Some(raw) = chat_result.raw_output {
+            if !raw.trim().is_empty() {
+                payloads.push(raw);
+            }
+        }
+
+        return Ok(Json(NanoBotChatResponse {
+            run_id: None,
+            status: Some("completed".to_string()),
+            summary: Some(format!("session {} • local shared model", session_key)),
+            reply: if reply.is_empty() {
+                "(sem resposta textual)".to_string()
+            } else {
+                reply
+            },
+            payloads,
+            duration_ms: Some(started.elapsed().as_millis() as u64),
+            provider: Some(chat_result.provider),
+            model: Some(current_model.reference),
+            usage: Some(NanoBotUsage {
+                input: Some(chat_result.usage.prompt_tokens as u64),
+                output: Some(chat_result.usage.completion_tokens as u64),
+                cache_read: None,
+                cache_write: None,
+                total: Some(chat_result.usage.total_tokens as u64),
+            }),
+            skills: observability.skills,
+            tools: observability.tools,
+        }));
+    }
 
     let mut args = vec![
         "agent".to_string(),
@@ -1613,23 +1696,180 @@ async fn nanobot_observability() -> Result<Json<NanoBotObservabilityResponse>, A
     Ok(Json(snapshot))
 }
 
-async fn nanobot_get_model() -> Result<Json<NanoBotModelResponse>, AppError> {
+async fn nanobot_models(
+    State(state): State<AppState>,
+) -> Result<Json<OpenClawModelsResponse>, AppError> {
+    let default_cloud_models = shared_agent_default_cloud_models();
+    let mut cloud_models = default_cloud_models.clone();
+
+    if let Ok(model_state) = state.openclaw_runtime.models_state().await {
+        let mut merged = model_state.cloud_models;
+        for entry in default_cloud_models {
+            if !merged
+                .iter()
+                .any(|candidate| candidate.reference == entry.reference)
+            {
+                merged.push(entry);
+            }
+        }
+        cloud_models = merged;
+    }
+
+    let local_models = state.openclaw_local_provider.list_models().await?;
+    let mapped_local = local_models
+        .into_iter()
+        .map(|entry| OpenClawLocalModel {
+            id: entry.id,
+            name: entry.name,
+            path: entry.path,
+        })
+        .collect::<Vec<_>>();
+
+    let config = read_nanobot_config_json_optional()?;
+    let current = build_nanobot_model_response(config.as_ref());
+
+    if current.source == "cloud"
+        && !current.reference.trim().is_empty()
+        && !cloud_models
+            .iter()
+            .any(|entry| entry.reference == current.reference)
+    {
+        cloud_models.insert(
+            0,
+            OpenClawCloudModel {
+                reference: current.reference.clone(),
+                provider: current.provider.clone(),
+                model: current.model.clone(),
+                label: current.label.clone(),
+                alias: None,
+            },
+        );
+    }
+
+    Ok(Json(OpenClawModelsResponse {
+        session_key: "nanobot:main".to_string(),
+        current,
+        cloud_models,
+        local_models: mapped_local,
+    }))
+}
+
+async fn nanobot_get_model() -> Result<Json<OpenClawCurrentModel>, AppError> {
     let config = read_nanobot_config_json_optional()?;
     Ok(Json(build_nanobot_model_response(config.as_ref())))
 }
 
 async fn nanobot_set_model(
+    State(state): State<AppState>,
     Json(request): Json<NanoBotSetModelRequest>,
-) -> Result<Json<NanoBotModelResponse>, AppError> {
-    let model = request.model.trim();
-    if model.is_empty() {
+) -> Result<Json<OpenClawCurrentModel>, AppError> {
+    let mut config = read_nanobot_config_json_optional()?.unwrap_or_else(default_nanobot_config);
+
+    let source = request
+        .source
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_lowercase)
+        .unwrap_or_else(|| {
+            if request.local_model_id.is_some() {
+                "local".to_string()
+            } else {
+                "cloud".to_string()
+            }
+        });
+
+    if !matches!(source.as_str(), "cloud" | "local") {
         return Err(AppError::Provider(ProviderError::InvalidRequest {
-            details: "model nao pode ser vazio".to_string(),
+            details: "source invalido: use cloud ou local".to_string(),
         }));
     }
 
-    let mut config = read_nanobot_config_json_optional()?.unwrap_or_else(default_nanobot_config);
-    set_json_string_at_path(&mut config, &["agents", "defaults", "model"], model.to_string());
+    if source == "local" {
+        let model_id = request
+            .local_model_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| AppError::Provider(ProviderError::InvalidRequest {
+                details: "local_model_id e obrigatorio para source=local".to_string(),
+            }))?;
+
+        let local_models = state.openclaw_local_provider.list_models().await?;
+        let selected = local_models
+            .into_iter()
+            .find(|entry| entry.id == model_id)
+            .ok_or_else(|| AppError::NotFound(format!("modelo local '{model_id}' nao encontrado")))?;
+
+        let model_reference = format!("openai/{}", selected.path);
+        set_json_string_at_path(
+            &mut config,
+            &["agents", "defaults", "model"],
+            model_reference.clone(),
+        );
+        set_json_string_at_path(
+            &mut config,
+            &["agents", "defaults", "model_source"],
+            "local".to_string(),
+        );
+        set_json_string_at_path(
+            &mut config,
+            &["agents", "defaults", "model_reference"],
+            model_reference,
+        );
+        set_json_string_at_path(
+            &mut config,
+            &["agents", "defaults", "model_local_id"],
+            selected.id,
+        );
+        set_json_string_at_path(
+            &mut config,
+            &["agents", "defaults", "model_local_name"],
+            selected.name,
+        );
+        set_json_string_at_path(
+            &mut config,
+            &["agents", "defaults", "model_local_path"],
+            selected.path,
+        );
+    } else {
+        let model_reference = request
+            .model_reference
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .or_else(|| {
+                request
+                    .model
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToString::to_string)
+            })
+            .ok_or_else(|| AppError::Provider(ProviderError::InvalidRequest {
+                details: "model_reference e obrigatorio para source=cloud".to_string(),
+            }))?;
+
+        set_json_string_at_path(
+            &mut config,
+            &["agents", "defaults", "model"],
+            model_reference.clone(),
+        );
+        set_json_string_at_path(
+            &mut config,
+            &["agents", "defaults", "model_source"],
+            "cloud".to_string(),
+        );
+        set_json_string_at_path(
+            &mut config,
+            &["agents", "defaults", "model_reference"],
+            model_reference,
+        );
+        remove_json_key_at_path(&mut config, &["agents", "defaults", "model_local_id"]);
+        remove_json_key_at_path(&mut config, &["agents", "defaults", "model_local_name"]);
+        remove_json_key_at_path(&mut config, &["agents", "defaults", "model_local_path"]);
+    }
 
     if extract_nanobot_workspace_value(&config).is_none() {
         set_json_string_at_path(
@@ -2163,9 +2403,63 @@ fn set_json_string_at_path(root: &mut Value, path: &[&str], value: String) {
     }
 }
 
+fn remove_json_key_at_path(root: &mut Value, path: &[&str]) {
+    if path.is_empty() {
+        return;
+    }
+
+    let mut cursor = root;
+    for key in &path[..path.len().saturating_sub(1)] {
+        let Some(next) = cursor.get_mut(*key) else {
+            return;
+        };
+        cursor = next;
+    }
+
+    if let Some(object) = cursor.as_object_mut() {
+        object.remove(path[path.len() - 1]);
+    }
+}
+
 fn extract_nanobot_model_value(config: &Value) -> Option<String> {
     config
         .pointer("/agents/defaults/model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn extract_nanobot_model_source_value(config: &Value) -> Option<String> {
+    config
+        .pointer("/agents/defaults/model_source")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_lowercase)
+}
+
+fn extract_nanobot_model_reference_value(config: &Value) -> Option<String> {
+    config
+        .pointer("/agents/defaults/model_reference")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn extract_nanobot_model_local_name_value(config: &Value) -> Option<String> {
+    config
+        .pointer("/agents/defaults/model_local_name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn extract_nanobot_model_local_path_value(config: &Value) -> Option<String> {
+    config
+        .pointer("/agents/defaults/model_local_path")
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -2193,29 +2487,71 @@ fn resolve_nanobot_workspace_from_config() -> Option<FsPathBuf> {
         .and_then(|config| extract_nanobot_workspace_value(&config))
 }
 
-fn build_nanobot_model_response(config: Option<&Value>) -> NanoBotModelResponse {
+fn build_nanobot_model_response(config: Option<&Value>) -> OpenClawCurrentModel {
     let model = config
         .and_then(extract_nanobot_model_value)
         .unwrap_or_default();
-    let provider = model
+    let source = config
+        .and_then(extract_nanobot_model_source_value)
+        .filter(|value| matches!(value.as_str(), "cloud" | "local"))
+        .unwrap_or_else(|| "cloud".to_string());
+    let reference = config
+        .and_then(extract_nanobot_model_reference_value)
+        .unwrap_or_else(|| model.clone());
+    let provider = reference
         .split('/')
         .next()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("-")
         .to_string();
-    let label = if model.is_empty() {
+    let label = if source == "local" {
+        config
+            .and_then(extract_nanobot_model_local_name_value)
+            .map(|name| format!("{name} (local)"))
+            .unwrap_or_else(|| {
+                if reference.is_empty() {
+                    "-".to_string()
+                } else {
+                    format!("{reference} (local)")
+                }
+            })
+    } else if reference.is_empty() && model.is_empty() {
         "-".to_string()
     } else {
-        model.clone()
+        if reference.is_empty() {
+            model.clone()
+        } else {
+            reference.clone()
+        }
     };
 
-    NanoBotModelResponse {
-        source: "config".to_string(),
+    OpenClawCurrentModel {
+        source,
+        reference,
         model,
         provider,
         label,
     }
+}
+
+fn shared_agent_default_cloud_models() -> Vec<OpenClawCloudModel> {
+    vec![
+        OpenClawCloudModel {
+            reference: "deepseek/deepseek-chat".to_string(),
+            provider: "deepseek".to_string(),
+            model: "deepseek-chat".to_string(),
+            label: "DeepSeek Chat".to_string(),
+            alias: None,
+        },
+        OpenClawCloudModel {
+            reference: "deepseek/deepseek-reasoner".to_string(),
+            provider: "deepseek".to_string(),
+            model: "deepseek-reasoner".to_string(),
+            label: "DeepSeek Reasoner".to_string(),
+            alias: None,
+        },
+    ]
 }
 
 fn build_nanobot_observability_snapshot() -> Result<NanoBotObservabilityResponse, AppError> {
