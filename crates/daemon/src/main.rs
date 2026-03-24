@@ -48,6 +48,7 @@ struct AppState {
     mlx_provider: Arc<MlxProvider>,
     llamacpp_provider: Arc<LlamaCppProvider>,
     ollama_provider: Arc<OllamaProvider>,
+    brave_api_key: Option<String>,
     openclaw_local_provider: Arc<MlxProvider>,
     catalog: Arc<CatalogService>,
     chat_runtime: ChatRuntimeConfig,
@@ -227,7 +228,7 @@ struct OpenClawModelRequest {
 #[derive(Debug, Deserialize)]
 struct BraveSearchRequest {
     query: String,
-    api_key: String,
+    api_key: Option<String>,
     max_results: Option<usize>,
 }
 
@@ -241,6 +242,7 @@ struct BraveSearchResultItem {
 #[derive(Debug, Serialize)]
 struct BraveSearchResponse {
     query: String,
+    key_source: String,
     results: Vec<BraveSearchResultItem>,
 }
 
@@ -296,6 +298,7 @@ async fn main() -> anyhow::Result<()> {
         mlx_provider: mlx_provider.clone(),
         llamacpp_provider,
         ollama_provider,
+        brave_api_key: cfg.brave_api_key.clone(),
         openclaw_local_provider: mlx_provider,
         catalog,
         chat_runtime: ChatRuntimeConfig {
@@ -441,10 +444,26 @@ async fn chat_stream(
 }
 
 async fn brave_web_search(
+    State(state): State<AppState>,
     Json(request): Json<BraveSearchRequest>,
 ) -> Result<Json<BraveSearchResponse>, AppError> {
     let query = request.query.trim();
-    let api_key = request.api_key.trim();
+    let request_api_key = request
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string();
+    let api_key = if !request_api_key.is_empty() {
+        request_api_key.clone()
+    } else {
+        state
+            .brave_api_key
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or_default()
+            .to_string()
+    };
     let max_results = request.max_results.unwrap_or(5).clamp(1, 10);
 
     if query.is_empty() {
@@ -455,9 +474,15 @@ async fn brave_web_search(
 
     if api_key.is_empty() {
         return Err(AppError::Provider(ProviderError::InvalidRequest {
-            details: "api_key nao pode ser vazio".to_string(),
+            details: "api_key Brave nao configurada (UI ou APP_BRAVE_API_KEY)".to_string(),
         }));
     }
+
+    let key_source = if !request_api_key.is_empty() {
+        "request".to_string()
+    } else {
+        "server".to_string()
+    };
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(18))
@@ -544,6 +569,7 @@ async fn brave_web_search(
 
     Ok(Json(BraveSearchResponse {
         query: query.to_string(),
+        key_source,
         results,
     }))
 }
