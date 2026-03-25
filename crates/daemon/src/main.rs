@@ -3,6 +3,7 @@ mod chat_stream;
 mod config;
 mod openclaw;
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path as FsPath, PathBuf as FsPathBuf};
@@ -254,6 +255,36 @@ struct BraveSearchResponse {
     results: Vec<BraveSearchResultItem>,
 }
 
+#[derive(Debug, Deserialize)]
+struct OpenClawEnvironmentQuery {
+    reveal: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenClawEnvironmentUpdateRequest {
+    values: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Serialize)]
+struct OpenClawEnvironmentVariable {
+    key: String,
+    label: String,
+    value: String,
+    masked: String,
+    source: String,
+    present: bool,
+    is_secret: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct OpenClawEnvironmentResponse {
+    env_path: String,
+    env_exists: bool,
+    env_example_path: String,
+    env_example_exists: bool,
+    variables: Vec<OpenClawEnvironmentVariable>,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     init_tracing();
@@ -348,6 +379,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/openclaw/model", post(openclaw_set_model))
         .route("/openclaw/chat", post(openclaw_chat))
         .route("/openclaw/install", post(openclaw_install))
+        .route(
+            "/openclaw/environment",
+            get(openclaw_environment).post(openclaw_update_environment),
+        )
         .route("/nanobot/status", get(nanobot_status))
         .route("/nanobot/onboard", post(nanobot_onboard))
         .route("/nanobot/install", post(nanobot_install))
@@ -1224,6 +1259,23 @@ async fn openclaw_install(
     Ok(Json(InstallResponse { message }))
 }
 
+async fn openclaw_environment(
+    Query(query): Query<OpenClawEnvironmentQuery>,
+) -> Result<Json<OpenClawEnvironmentResponse>, AppError> {
+    let reveal = query.reveal.unwrap_or(false);
+    let response = build_openclaw_environment_response(reveal)?;
+    Ok(Json(response))
+}
+
+async fn openclaw_update_environment(
+    Json(request): Json<OpenClawEnvironmentUpdateRequest>,
+) -> Result<Json<OpenClawEnvironmentResponse>, AppError> {
+    update_openclaw_environment_file(request.values)?;
+    sync_nanobot_model_provider_from_environment()?;
+    let response = build_openclaw_environment_response(false)?;
+    Ok(Json(response))
+}
+
 async fn nanobot_status() -> Result<Json<NanoBotStatusResponse>, AppError> {
     let cfg = AppConfig::load_settings().apply_env();
     let spec = resolve_nanobot_command(&cfg);
@@ -1535,8 +1587,20 @@ async fn nanobot_chat(
         .unwrap_or("mlx-pilot")
         .to_string();
 
-    let nanobot_config = read_nanobot_config_json_optional()?;
+    let mut nanobot_config = read_nanobot_config_json_optional()?;
     let current_model = build_nanobot_model_response(nanobot_config.as_ref());
+
+    if current_model.source == "cloud" {
+        if let Some(config) = nanobot_config.as_mut() {
+            let changed = sync_nanobot_cloud_provider_from_environment(
+                config,
+                current_model.reference.as_str(),
+            )?;
+            if changed {
+                write_nanobot_config_json(config)?;
+            }
+        }
+    }
 
     if current_model.source == "local" {
         let local_model_path = nanobot_config
@@ -1577,7 +1641,7 @@ async fn nanobot_chat(
                 }],
                 options: GenerationOptions {
                     temperature: Some(0.15),
-                    max_tokens: Some(120),
+                    max_tokens: Some(512),
                     top_p: None,
                 },
             })
@@ -1864,8 +1928,9 @@ async fn nanobot_set_model(
         set_json_string_at_path(
             &mut config,
             &["agents", "defaults", "model_reference"],
-            model_reference,
+            model_reference.clone(),
         );
+        let _ = sync_nanobot_cloud_provider_from_environment(&mut config, &model_reference)?;
         remove_json_key_at_path(&mut config, &["agents", "defaults", "model_local_id"]);
         remove_json_key_at_path(&mut config, &["agents", "defaults", "model_local_name"]);
         remove_json_key_at_path(&mut config, &["agents", "defaults", "model_local_path"]);
@@ -2336,6 +2401,520 @@ fn default_nanobot_config() -> Value {
     })
 }
 
+const OPENCLAW_ENV_CATALOG: &[(&str, &str)] = &[
+    ("OPENROUTER_API_KEY", "OpenRouter API key"),
+    ("DEEPSEEK_API_KEY", "DeepSeek API key"),
+    ("DEEPSEEK_BASE_URL", "DeepSeek base URL"),
+    ("OPENAI_API_KEY", "OpenAI API key"),
+    ("OPENAI_BASE_URL", "OpenAI-compatible base URL"),
+    ("ANTHROPIC_API_KEY", "Anthropic API key"),
+    ("GEMINI_API_KEY", "Gemini API key"),
+    ("GROQ_API_KEY", "Groq API key"),
+    ("ZAI_API_KEY", "Zhipu/ZAI API key"),
+    ("ZHIPUAI_API_KEY", "Zhipu compatibility key"),
+    ("DASHSCOPE_API_KEY", "DashScope API key"),
+    ("MOONSHOT_API_KEY", "Moonshot API key"),
+    ("MOONSHOT_API_BASE", "Moonshot base URL"),
+    ("MINIMAX_API_KEY", "MiniMax API key"),
+    ("MINIMAX_BASE_URL", "MiniMax base URL"),
+    ("HOSTED_VLLM_API_KEY", "vLLM/OpenAI-compatible local key"),
+    ("PERPLEXITY_API_KEY", "Perplexity API key"),
+    ("QIANFAN_API_KEY", "Qianfan API key"),
+    ("BRAVE_API_KEY", "Brave Search API key"),
+    ("FIRECRAWL_API_KEY", "Firecrawl API key"),
+    ("DEEPGRAM_API_KEY", "Deepgram API key"),
+    ("ELEVENLABS_API_KEY", "ElevenLabs API key"),
+    ("VOYAGE_API_KEY", "Voyage API key"),
+    ("TELEGRAM_BOT_TOKEN", "Telegram bot token"),
+    ("TELEGRAM_CHAT_ID", "Telegram chat id"),
+    ("DISCORD_BOT_TOKEN", "Discord bot token"),
+    ("OPENCLAW_GATEWAY_TOKEN", "OpenClaw gateway token"),
+];
+
+fn build_openclaw_environment_response(
+    reveal: bool,
+) -> Result<OpenClawEnvironmentResponse, AppError> {
+    let cfg = AppConfig::load_settings().apply_env();
+    let env_path = resolve_openclaw_env_path(&cfg);
+    let env_example_path = resolve_openclaw_env_example_path(&env_path);
+
+    let env_values = read_env_file_assignments_optional(&env_path)?;
+    let env_example_values = read_env_file_assignments_optional(&env_example_path)?;
+
+    let mut labels = BTreeMap::new();
+    let mut keys = BTreeSet::new();
+    for (key, label) in OPENCLAW_ENV_CATALOG {
+        labels.insert((*key).to_string(), (*label).to_string());
+        keys.insert((*key).to_string());
+    }
+
+    for key in env_values.keys().chain(env_example_values.keys()) {
+        if should_expose_environment_key(key) {
+            keys.insert(key.clone());
+        }
+    }
+
+    let mut variables = Vec::with_capacity(keys.len());
+    for key in keys {
+        let file_value = env_values.get(&key).cloned().unwrap_or_default();
+        let process_value = std::env::var(&key)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_default();
+        let resolved_value = if !file_value.is_empty() {
+            file_value.clone()
+        } else {
+            process_value.clone()
+        };
+        let source = if !file_value.is_empty() {
+            "env_file"
+        } else if !process_value.is_empty() {
+            "process_env"
+        } else if env_example_values.contains_key(&key) {
+            "env_example"
+        } else {
+            "catalog"
+        };
+
+        variables.push(OpenClawEnvironmentVariable {
+            label: labels
+                .get(&key)
+                .cloned()
+                .unwrap_or_else(|| key.replace('_', " ")),
+            key: key.clone(),
+            value: if reveal {
+                resolved_value.clone()
+            } else {
+                String::new()
+            },
+            masked: mask_environment_value(&resolved_value),
+            source: source.to_string(),
+            present: !resolved_value.is_empty(),
+            is_secret: is_secret_environment_key(&key),
+        });
+    }
+
+    Ok(OpenClawEnvironmentResponse {
+        env_path: env_path.display().to_string(),
+        env_exists: env_path.exists(),
+        env_example_path: env_example_path.display().to_string(),
+        env_example_exists: env_example_path.exists(),
+        variables,
+    })
+}
+
+fn update_openclaw_environment_file(updates: BTreeMap<String, String>) -> Result<(), AppError> {
+    let mut normalized_updates = BTreeMap::new();
+    for (raw_key, raw_value) in updates {
+        let Some(key) = normalize_env_key(&raw_key) else {
+            continue;
+        };
+        normalized_updates.insert(key, raw_value.trim().to_string());
+    }
+
+    if normalized_updates.is_empty() {
+        return Err(AppError::Provider(ProviderError::InvalidRequest {
+            details: "nenhuma variavel valida recebida para atualizar environment".to_string(),
+        }));
+    }
+
+    let cfg = AppConfig::load_settings().apply_env();
+    let env_path = resolve_openclaw_env_path(&cfg);
+
+    let mut lines = if env_path.exists() {
+        fs::read_to_string(&env_path)
+            .map_err(|source| AppError::Provider(ProviderError::Io {
+                context: format!(
+                    "Falha ao ler environment OpenClaw ({})",
+                    env_path.display()
+                ),
+                source,
+            }))?
+            .lines()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+
+    let mut touched = BTreeSet::new();
+    for line in &mut lines {
+        if let Some((key, _)) = parse_env_assignment_line(line) {
+            if let Some(value) = normalized_updates.get(&key) {
+                *line = format!("{key}={}", encode_env_value(value));
+                touched.insert(key);
+            }
+        }
+    }
+
+    for (key, value) in normalized_updates {
+        if !touched.contains(&key) {
+            lines.push(format!("{key}={}", encode_env_value(&value)));
+        }
+    }
+
+    if let Some(parent) = env_path.parent() {
+        fs::create_dir_all(parent).map_err(|source| AppError::Provider(ProviderError::Io {
+            context: format!(
+                "Falha ao criar diretorio do environment OpenClaw ({})",
+                parent.display()
+            ),
+            source,
+        }))?;
+    }
+
+    let mut next_content = lines.join("\n");
+    if !next_content.ends_with('\n') {
+        next_content.push('\n');
+    }
+    fs::write(&env_path, next_content).map_err(|source| AppError::Provider(ProviderError::Io {
+        context: format!(
+            "Falha ao salvar environment OpenClaw ({})",
+            env_path.display()
+        ),
+        source,
+    }))?;
+
+    Ok(())
+}
+
+fn sync_nanobot_cloud_provider_from_environment(
+    config: &mut Value,
+    model_reference: &str,
+) -> Result<bool, AppError> {
+    let Some(provider) = infer_model_provider_name(model_reference) else {
+        return Ok(false);
+    };
+
+    let (provider_key, api_key_candidates, base_url_candidates) =
+        nanobot_provider_env_binding(&provider);
+    if api_key_candidates.is_empty() {
+        return Ok(false);
+    }
+
+    let openclaw_env_values = read_openclaw_environment_values()?;
+    let Some(api_key) = api_key_candidates
+        .iter()
+        .find_map(|key| resolve_environment_value(&openclaw_env_values, key))
+    else {
+        return Ok(false);
+    };
+
+    let mut changed = false;
+    let api_key_pointer = format!("/providers/{provider_key}/apiKey");
+    let current_api_key = config
+        .pointer(&api_key_pointer)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if current_api_key != api_key {
+        set_json_string_at_path(
+            config,
+            &["providers", provider_key.as_str(), "apiKey"],
+            api_key.clone(),
+        );
+        changed = true;
+    }
+
+    if let Some(base_url) = base_url_candidates
+        .iter()
+        .find_map(|key| resolve_environment_value(&openclaw_env_values, key))
+    {
+        let base_url_pointer = format!("/providers/{provider_key}/apiBase");
+        let current_base_url = config
+            .pointer(&base_url_pointer)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default();
+        if current_base_url != base_url {
+            set_json_string_at_path(
+                config,
+                &["providers", provider_key.as_str(), "apiBase"],
+                base_url,
+            );
+            changed = true;
+        }
+    }
+
+    Ok(changed)
+}
+
+fn sync_nanobot_model_provider_from_environment() -> Result<(), AppError> {
+    let Some(mut config) = read_nanobot_config_json_optional()? else {
+        return Ok(());
+    };
+
+    let current = build_nanobot_model_response(Some(&config));
+    if current.source != "cloud" {
+        return Ok(());
+    }
+
+    if sync_nanobot_cloud_provider_from_environment(&mut config, &current.reference)? {
+        write_nanobot_config_json(&config)?;
+    }
+
+    Ok(())
+}
+
+fn infer_model_provider_name(model_reference: &str) -> Option<String> {
+    let provider = model_reference
+        .split('/')
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?
+        .to_lowercase();
+
+    let normalized = match provider.as_str() {
+        "zai" | "zhipuai" => "zhipu".to_string(),
+        "kimi" => "moonshot".to_string(),
+        other => other.to_string(),
+    };
+    Some(normalized)
+}
+
+fn nanobot_provider_env_binding(provider: &str) -> (String, Vec<String>, Vec<String>) {
+    match provider {
+        "openrouter" => (
+            "openrouter".to_string(),
+            vec!["OPENROUTER_API_KEY".to_string()],
+            vec!["OPENROUTER_BASE_URL".to_string()],
+        ),
+        "deepseek" => (
+            "deepseek".to_string(),
+            vec!["DEEPSEEK_API_KEY".to_string()],
+            vec!["DEEPSEEK_BASE_URL".to_string()],
+        ),
+        "openai" | "aihubmix" | "siliconflow" | "volcengine" => (
+            "openai".to_string(),
+            vec!["OPENAI_API_KEY".to_string()],
+            vec!["OPENAI_BASE_URL".to_string()],
+        ),
+        "anthropic" => (
+            "anthropic".to_string(),
+            vec!["ANTHROPIC_API_KEY".to_string()],
+            Vec::new(),
+        ),
+        "gemini" => (
+            "gemini".to_string(),
+            vec!["GEMINI_API_KEY".to_string(), "GOOGLE_API_KEY".to_string()],
+            vec!["GEMINI_BASE_URL".to_string()],
+        ),
+        "groq" => (
+            "groq".to_string(),
+            vec!["GROQ_API_KEY".to_string()],
+            vec!["GROQ_BASE_URL".to_string()],
+        ),
+        "dashscope" => (
+            "dashscope".to_string(),
+            vec!["DASHSCOPE_API_KEY".to_string()],
+            Vec::new(),
+        ),
+        "moonshot" => (
+            "moonshot".to_string(),
+            vec!["MOONSHOT_API_KEY".to_string(), "KIMI_API_KEY".to_string()],
+            vec!["MOONSHOT_API_BASE".to_string()],
+        ),
+        "minimax" => (
+            "minimax".to_string(),
+            vec!["MINIMAX_API_KEY".to_string()],
+            vec!["MINIMAX_BASE_URL".to_string()],
+        ),
+        "zhipu" => (
+            "zhipu".to_string(),
+            vec!["ZAI_API_KEY".to_string(), "ZHIPUAI_API_KEY".to_string()],
+            Vec::new(),
+        ),
+        "vllm" | "hosted_vllm" => (
+            "vllm".to_string(),
+            vec!["HOSTED_VLLM_API_KEY".to_string(), "OPENAI_API_KEY".to_string()],
+            vec!["OPENAI_BASE_URL".to_string()],
+        ),
+        other => (
+            other.to_string(),
+            vec![format!("{}_API_KEY", other.to_ascii_uppercase().replace('-', "_"))],
+            vec![format!("{}_BASE_URL", other.to_ascii_uppercase().replace('-', "_"))],
+        ),
+    }
+}
+
+fn resolve_openclaw_env_path(cfg: &AppConfig) -> FsPathBuf {
+    let mut candidates = Vec::new();
+    if let Some(parent) = cfg.openclaw_state_dir.parent() {
+        candidates.push(parent.join(".env"));
+    }
+    candidates.push(cfg.openclaw_state_dir.join(".env"));
+    if let Some(parent) = cfg.openclaw_cli_path.parent() {
+        candidates.push(parent.join("deploy").join(".env"));
+        candidates.push(parent.join(".env"));
+    }
+
+    let mut seen = BTreeSet::new();
+    for candidate in candidates {
+        if seen.insert(candidate.clone()) && candidate.exists() {
+            return candidate;
+        }
+    }
+
+    if let Some(first) = seen.into_iter().next() {
+        first
+    } else {
+        FsPathBuf::from(".env")
+    }
+}
+
+fn resolve_openclaw_env_example_path(env_path: &FsPath) -> FsPathBuf {
+    env_path
+        .parent()
+        .map(|parent| parent.join(".env.example"))
+        .unwrap_or_else(|| FsPathBuf::from(".env.example"))
+}
+
+fn read_openclaw_environment_values() -> Result<BTreeMap<String, String>, AppError> {
+    let cfg = AppConfig::load_settings().apply_env();
+    let env_path = resolve_openclaw_env_path(&cfg);
+    read_env_file_assignments_optional(&env_path)
+}
+
+fn read_env_file_assignments_optional(path: &FsPath) -> Result<BTreeMap<String, String>, AppError> {
+    if !path.exists() {
+        return Ok(BTreeMap::new());
+    }
+    read_env_file_assignments(path)
+}
+
+fn read_env_file_assignments(path: &FsPath) -> Result<BTreeMap<String, String>, AppError> {
+    let content = fs::read_to_string(path).map_err(|source| AppError::Provider(ProviderError::Io {
+        context: format!("Falha ao ler arquivo de environment ({})", path.display()),
+        source,
+    }))?;
+    let mut values = BTreeMap::new();
+    for line in content.lines() {
+        if let Some((key, value)) = parse_env_assignment_line(line) {
+            values.insert(key, value);
+        }
+    }
+    Ok(values)
+}
+
+fn parse_env_assignment_line(line: &str) -> Option<(String, String)> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return None;
+    }
+
+    let without_export = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+    let (raw_key, raw_value) = without_export.split_once('=')?;
+    let key = normalize_env_key(raw_key)?;
+    let value = decode_env_value(raw_value.trim());
+    Some((key, value))
+}
+
+fn normalize_env_key(raw: &str) -> Option<String> {
+    let key = raw.trim().to_uppercase();
+    if key.is_empty() || !is_valid_env_key(&key) {
+        return None;
+    }
+    Some(key)
+}
+
+fn is_valid_env_key(key: &str) -> bool {
+    key.chars()
+        .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_')
+}
+
+fn decode_env_value(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.len() >= 2
+        && ((trimmed.starts_with('"') && trimmed.ends_with('"'))
+            || (trimmed.starts_with('\'') && trimmed.ends_with('\'')))
+    {
+        let inner = &trimmed[1..trimmed.len() - 1];
+        if trimmed.starts_with('"') {
+            return inner.replace("\\\"", "\"").replace("\\\\", "\\");
+        }
+        return inner.to_string();
+    }
+
+    trimmed.to_string()
+}
+
+fn encode_env_value(value: &str) -> String {
+    if value.is_empty() {
+        return String::new();
+    }
+
+    let requires_quotes = value
+        .chars()
+        .any(|ch| ch.is_whitespace() || matches!(ch, '#' | '"' | '\''));
+    if !requires_quotes {
+        return value.to_string();
+    }
+
+    format!(
+        "\"{}\"",
+        value.replace('\\', "\\\\").replace('"', "\\\"")
+    )
+}
+
+fn should_expose_environment_key(key: &str) -> bool {
+    let normalized = key.trim().to_uppercase();
+    if normalized.is_empty() {
+        return false;
+    }
+    normalized.ends_with("_API_KEY")
+        || normalized.ends_with("_TOKEN")
+        || normalized.ends_with("_SECRET")
+        || normalized.ends_with("_BASE_URL")
+        || normalized == "TELEGRAM_CHAT_ID"
+}
+
+fn is_secret_environment_key(key: &str) -> bool {
+    let normalized = key.trim().to_uppercase();
+    normalized.contains("KEY")
+        || normalized.contains("TOKEN")
+        || normalized.contains("SECRET")
+        || normalized.contains("PASSWORD")
+}
+
+fn mask_environment_value(value: &str) -> String {
+    if value.trim().is_empty() {
+        return "-".to_string();
+    }
+
+    let visible_prefix = value.chars().take(4).collect::<String>();
+    let visible_suffix = value
+        .chars()
+        .rev()
+        .take(3)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    let hidden_count = value.chars().count().saturating_sub(visible_prefix.len() + visible_suffix.len());
+    if hidden_count == 0 {
+        return value.to_string();
+    }
+    format!("{visible_prefix}{}{}", "*".repeat(hidden_count), visible_suffix)
+}
+
+fn resolve_environment_value(values: &BTreeMap<String, String>, key: &str) -> Option<String> {
+    let normalized = normalize_env_key(key)?;
+    if let Some(value) = values
+        .get(&normalized)
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Some(value.to_string());
+    }
+
+    std::env::var(&normalized)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 fn read_nanobot_config_json_optional() -> Result<Option<Value>, AppError> {
     let path = nanobot_config_path();
     if !path.exists() {
@@ -2661,7 +3240,16 @@ fn list_nanobot_tools(config: Option<&Value>) -> Vec<String> {
 }
 
 fn extract_nanobot_reply(stdout: &str, stderr: &str) -> String {
-    let mut lines = stdout
+    let stdout_reply = sanitize_nanobot_cli_text(stdout);
+    if !stdout_reply.is_empty() {
+        return stdout_reply;
+    }
+
+    sanitize_nanobot_cli_text(stderr)
+}
+
+fn sanitize_nanobot_cli_text(raw: &str) -> String {
+    let lines = raw
         .replace('\r', "")
         .lines()
         .map(str::trim)
@@ -2671,20 +3259,23 @@ fn extract_nanobot_reply(stdout: &str, stderr: &str) -> String {
         .filter(|line| !line.starts_with("Goodbye"))
         .filter(|line| !line.contains("nanobot is thinking"))
         .filter(|line| !line.contains("Interactive mode"))
+        .filter(|line| !line.chars().all(|ch| ch == '='))
+        .filter(|line| !is_nanobot_telemetry_line(line))
         .map(ToString::to_string)
         .collect::<Vec<_>>();
 
-    if lines.is_empty() {
-        lines = stderr
-            .replace('\r', "")
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .map(ToString::to_string)
-            .collect::<Vec<_>>();
-    }
-
     lines.join("\n").trim().to_string()
+}
+
+fn is_nanobot_telemetry_line(line: &str) -> bool {
+    let normalized = line.trim().to_lowercase();
+    normalized.starts_with("prompt:")
+        || normalized.starts_with("generation:")
+        || normalized.starts_with("peak memory:")
+        || normalized.starts_with("completed •")
+        || normalized.ends_with("ms")
+            && (normalized.contains("session ") || normalized.contains("local shared model"))
+        || normalized.contains("tokens-per-sec")
 }
 
 fn dedup_vec(values: &mut Vec<String>) {
