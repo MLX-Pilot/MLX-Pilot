@@ -2756,4 +2756,18 @@ async function bootstrap() {
   }
 }
 
+// ---------- Native-app feel: block browser context menu ----------
+document.addEventListener("contextmenu", (e) => {
+  // Allow context menu only on input, textarea, and contenteditable elements
+  const target = e.target;
+  if (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  ) {
+    return;
+  }
+  e.preventDefault();
+});
+
 void bootstrap();

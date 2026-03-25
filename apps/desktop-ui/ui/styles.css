@@ -39,6 +39,31 @@ body {
   color: var(--text);
   overflow: hidden;
   position: relative;
+  /* Native-app feel: no text selection by default */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Re-enable selection in content areas */
+.message-content,
+.assistant-thinking-text,
+.assistant-answer-text,
+.assistant-metrics-text,
+.openclaw-log-viewer,
+.openclaw-chat-log,
+pre,
+code,
+input,
+textarea,
+select {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Prevent image dragging for native feel */
+img {
+  -webkit-user-drag: none;
+  user-drag: none;
 }
 
 .bg-layer {
