@@ -1635,13 +1635,19 @@ async fn nanobot_chat(
             .openclaw_local_provider
             .chat(ChatRequest {
                 model_id: local_model_path,
-                messages: vec![ChatMessage {
-                    role: MessageRole::User,
-                    content: message.to_string(),
-                }],
+                messages: vec![
+                    ChatMessage {
+                        role: MessageRole::System,
+                        content: "Responda somente com a resposta final para o usuario, sem tags <think>, sem logs e sem metricas.".to_string(),
+                    },
+                    ChatMessage {
+                        role: MessageRole::User,
+                        content: message.to_string(),
+                    },
+                ],
                 options: GenerationOptions {
                     temperature: Some(0.15),
-                    max_tokens: Some(512),
+                    max_tokens: Some(1024),
                     top_p: None,
                 },
             })
@@ -1649,7 +1655,15 @@ async fn nanobot_chat(
             .map_err(AppError::Provider)?;
 
         let observability = build_nanobot_observability_snapshot()?;
-        let reply = chat_result.message.content.trim().to_string();
+        let raw_reply = chat_result.message.content.trim().to_string();
+        let reply = {
+            let cleaned = sanitize_nanobot_cli_text(&raw_reply);
+            if cleaned.is_empty() {
+                raw_reply
+            } else {
+                cleaned
+            }
+        };
         let mut payloads = Vec::new();
         if let Some(raw) = chat_result.raw_output {
             if !raw.trim().is_empty() {
