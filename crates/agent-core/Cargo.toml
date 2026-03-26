@@ -1,0 +1,22 @@
+[package]
+name = "mlx-agent-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mlx-ollama-core = { path = "../core" }
+mlx-agent-tools = { path = "../agent-tools" }
+mlx-agent-skills = { path = "../agent-skills" }
+
+async-trait.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+chrono = { version = "0.4", features = ["serde"] }
+glob-match = "0.2"
+uuid = { version = "1", features = ["v4"] }
