@@ -941,10 +941,14 @@ name = "mlx-ollama-daemon"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "bytes",
  "futures-util",
  "llamacpp-provider",
+ "mlx-agent-core",
+ "mlx-agent-skills",
+ "mlx-agent-tools",
  "mlx-ollama-core",
  "mlx-provider",
  "ollama-provider",
