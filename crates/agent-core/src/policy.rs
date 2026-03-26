@@ -221,7 +221,7 @@ impl PolicyEngine for DefaultPolicyEngine {
         PolicyDecision::Allow
     }
 
-    fn check_file_access(&self, path: &std::path::Path, write: bool) -> PolicyDecision {
+    fn check_file_access(&self, path: &std::path::Path, _write: bool) -> PolicyDecision {
         let path_str = path.to_string_lossy();
 
         // Very basic deny paths checking

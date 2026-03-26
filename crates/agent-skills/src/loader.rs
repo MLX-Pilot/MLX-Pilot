@@ -222,20 +222,38 @@ pub struct SkillPrompt {
 
 /// Format a single skill as a prompt section.
 fn format_skill_summary(skill: &SkillPackage) -> String {
-    let emoji = skill.emoji.as_deref().unwrap_or("🔧");
-    let mut lines = vec![format!("## {emoji} {}", skill.name)];
+    let summary = if !skill.description.trim().is_empty() {
+        skill.description.trim().to_string()
+    } else {
+        skill
+            .body
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty() && !line.starts_with('#'))
+            .unwrap_or("No summary")
+            .to_string()
+    };
 
-    if !skill.description.is_empty() {
-        lines.push(String::new());
-        lines.push(skill.description.clone());
+    format!(
+        "{}: {}",
+        skill.name,
+        truncate_chars(&normalize_whitespace(&summary), 160)
+    )
+}
+
+fn normalize_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    let chars = text.chars().collect::<Vec<_>>();
+    if chars.len() <= max_chars {
+        return text.to_string();
     }
-
-    if !skill.body.is_empty() {
-        lines.push(String::new());
-        lines.push(skill.body.clone());
-    }
-
-    lines.join("\n")
+    let keep = max_chars.saturating_sub(3);
+    let mut out = chars.into_iter().take(keep).collect::<String>();
+    out.push_str("...");
+    out
 }
 
 #[cfg(test)]
