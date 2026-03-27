@@ -525,11 +525,13 @@ struct ModelMutationResponse {
 async fn rename_model(
     Json(request): Json<RenameModelRequest>,
 ) -> Result<Json<ModelMutationResponse>, AppError> {
-    let current_id = request.current_id.trim();
-    let new_id = request.new_id.trim();
+    let current_id_raw = request.current_id.trim();
+    let new_id_raw = request.new_id.trim();
+    let current_id = normalize_mlx_model_id(current_id_raw);
+    let new_id = normalize_mlx_model_id(new_id_raw);
 
-    validate_local_model_id(current_id)?;
-    validate_local_model_id(new_id)?;
+    validate_local_model_id(&current_id)?;
+    validate_local_model_id(&new_id)?;
     if current_id == new_id {
         return Err(AppError::Provider(ProviderError::InvalidRequest {
             details: "novo nome deve ser diferente do atual".to_string(),
@@ -537,8 +539,8 @@ async fn rename_model(
     }
 
     let models_dir = AppConfig::load_settings().apply_env().models_dir;
-    let source = models_dir.join(current_id);
-    let destination = models_dir.join(new_id);
+    let source = models_dir.join(&current_id);
+    let destination = models_dir.join(&new_id);
 
     if !source.exists() || !source.is_dir() {
         return Err(AppError::NotFound(format!(
@@ -564,18 +566,19 @@ async fn rename_model(
 
     Ok(Json(ModelMutationResponse {
         message: format!("modelo '{}' renomeado para '{}'", current_id, new_id),
-        model_id: new_id.to_string(),
+        model_id: new_id,
     }))
 }
 
 async fn delete_model(
     AxumPath(model_id): AxumPath<String>,
 ) -> Result<Json<ModelMutationResponse>, AppError> {
-    let model_id = model_id.trim();
-    validate_local_model_id(model_id)?;
+    let model_id_raw = model_id.trim();
+    let model_id = normalize_mlx_model_id(model_id_raw);
+    validate_local_model_id(&model_id)?;
 
     let models_dir = AppConfig::load_settings().apply_env().models_dir;
-    let target = models_dir.join(model_id);
+    let target = models_dir.join(&model_id);
     if !target.exists() || !target.is_dir() {
         return Err(AppError::NotFound(format!(
             "modelo local '{}' nao encontrado",
@@ -592,7 +595,7 @@ async fn delete_model(
 
     Ok(Json(ModelMutationResponse {
         message: format!("modelo '{}' removido", model_id),
-        model_id: model_id.to_string(),
+        model_id,
     }))
 }
 
@@ -622,6 +625,17 @@ fn validate_local_model_id(model_id: &str) -> Result<(), AppError> {
         }));
     }
     Ok(())
+}
+
+fn normalize_mlx_model_id(model_id: &str) -> String {
+    let trimmed = model_id.trim();
+    if let Some(stripped) = trimmed.strip_prefix("mlx::") {
+        return stripped.trim().to_string();
+    }
+    if let Some(stripped) = trimmed.strip_prefix("MLX::") {
+        return stripped.trim().to_string();
+    }
+    trimmed.to_string()
 }
 
 async fn chat(

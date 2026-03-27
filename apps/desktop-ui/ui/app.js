@@ -3097,6 +3097,26 @@ function renderInstalledModelsList() {
   });
 }
 
+function normalizeMlxModelSelectionId(modelId) {
+  const raw = String(modelId || "").trim();
+  if (!raw) {
+    return "";
+  }
+  if (raw.toLowerCase().startsWith("mlx::")) {
+    return raw.slice(5).trim();
+  }
+  return raw;
+}
+
+function buildMlxModelSelectionId(rawLocalId, sampleSelectionId) {
+  const normalizedLocalId = normalizeMlxModelSelectionId(rawLocalId);
+  const sample = String(sampleSelectionId || "").trim().toLowerCase();
+  if (sample.startsWith("mlx::")) {
+    return `mlx::${normalizedLocalId}`;
+  }
+  return normalizedLocalId;
+}
+
 function switchDiscoverSubtab(nextSubtab) {
   const normalized = nextSubtab === "installed" ? "installed" : "catalog";
   activeDiscoverSubtab = normalized;
@@ -3125,19 +3145,20 @@ async function renameInstalledModel(modelId) {
     addSystemMessage("Modelo nao encontrado para renomear.");
     return;
   }
+  const currentLocalId = normalizeMlxModelSelectionId(current.id);
 
   const nextName = await showTextPrompt({
     title: "Renomear modelo instalado",
     message: "Informe o novo nome da pasta do modelo local.",
-    defaultValue: current.id,
+    defaultValue: currentLocalId,
     confirmLabel: "Renomear",
   });
   if (nextName === null) {
     return;
   }
 
-  const normalized = String(nextName).trim();
-  if (!normalized || normalized === current.id) {
+  const normalized = normalizeMlxModelSelectionId(nextName);
+  if (!normalized || normalized === currentLocalId) {
     return;
   }
 
@@ -3145,14 +3166,22 @@ async function renameInstalledModel(modelId) {
     await fetchJson("/models/rename", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ current_id: current.id, new_id: normalized }),
+      body: JSON.stringify({ current_id: currentLocalId, new_id: normalized }),
     });
+    const nextSelectionId = buildMlxModelSelectionId(normalized, current.id);
     chatThreads.forEach((thread) => {
-      if (thread.modelId === current.id) {
-        thread.modelId = normalized;
+      const threadLocalId = normalizeMlxModelSelectionId(thread.modelId);
+      if (thread.modelId === current.id || threadLocalId === currentLocalId) {
+        thread.modelId = nextSelectionId;
         thread.updatedAt = Date.now();
       }
     });
+    if (
+      selectedModelId === current.id
+      || normalizeMlxModelSelectionId(selectedModelId) === currentLocalId
+    ) {
+      selectedModelId = nextSelectionId;
+    }
     persistThreads();
     await loadModels();
     setStatus("modelo renomeado");
@@ -3168,10 +3197,11 @@ async function deleteInstalledModel(modelId) {
     addSystemMessage("Modelo nao encontrado para apagar.");
     return;
   }
+  const currentLocalId = normalizeMlxModelSelectionId(current.id);
 
   const confirmed = await showConfirmDialog({
     title: "Apagar modelo instalado",
-    message: `Deseja apagar o modelo "${current.id}"? Essa acao remove os arquivos do disco.`,
+    message: `Deseja apagar o modelo "${currentLocalId}"? Essa acao remove os arquivos do disco.`,
     confirmLabel: "Apagar",
     danger: true,
   });
@@ -3180,16 +3210,20 @@ async function deleteInstalledModel(modelId) {
   }
 
   try {
-    await fetchJson(`/models/${encodeURIComponent(current.id)}`, {
+    await fetchJson(`/models/${encodeURIComponent(currentLocalId)}`, {
       method: "DELETE",
     });
     chatThreads.forEach((thread) => {
-      if (thread.modelId === current.id) {
+      const threadLocalId = normalizeMlxModelSelectionId(thread.modelId);
+      if (thread.modelId === current.id || threadLocalId === currentLocalId) {
         thread.modelId = null;
         thread.updatedAt = Date.now();
       }
     });
-    if (selectedModelId === current.id) {
+    if (
+      selectedModelId === current.id
+      || normalizeMlxModelSelectionId(selectedModelId) === currentLocalId
+    ) {
       selectedModelId = null;
     }
     persistThreads();
