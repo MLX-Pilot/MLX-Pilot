@@ -4,6 +4,8 @@ mod config;
 mod openclaw;
 
 use std::io;
+use std::path::{PathBuf as FsPathBuf};
+use std::process::{Command, Output};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -339,6 +341,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/openclaw/model", post(openclaw_set_model))
         .route("/openclaw/chat", post(openclaw_chat))
         .route("/openclaw/install", post(openclaw_install))
+        .route("/nanobot/status", get(nanobot_status))
+        .route("/nanobot/onboard", post(nanobot_onboard))
         .route("/nanobot/install", post(nanobot_install))
         .route("/catalog/sources", get(catalog_sources))
         .route("/catalog/models", get(catalog_models))
@@ -1045,6 +1049,34 @@ struct InstallResponse {
     message: String,
 }
 
+#[derive(Serialize)]
+struct NanoBotStatusResponse {
+    installed: bool,
+    command: String,
+    version: Option<String>,
+    config_path: String,
+    config_exists: bool,
+    workspace_path: String,
+    workspace_exists: bool,
+    message: String,
+    raw_status: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct NanoBotCommandSpec {
+    program: String,
+    args: Vec<String>,
+}
+
+impl NanoBotCommandSpec {
+    fn display(&self) -> String {
+        if self.args.is_empty() {
+            return self.program.clone();
+        }
+        format!("{} {}", self.program, self.args.join(" "))
+    }
+}
+
 async fn openclaw_install(
     State(state): State<AppState>,
 ) -> Result<Json<InstallResponse>, AppError> {
@@ -1052,40 +1084,332 @@ async fn openclaw_install(
     Ok(Json(InstallResponse { message }))
 }
 
+async fn nanobot_status() -> Result<Json<NanoBotStatusResponse>, AppError> {
+    let cfg = AppConfig::load_settings().apply_env();
+    let spec = resolve_nanobot_command(&cfg);
+    let config_path = nanobot_config_path();
+    let workspace_path = nanobot_workspace_path();
+
+    let version = run_nanobot_command(&spec, &["--version"], None)
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| {
+            let text = decode_command_output(&output);
+            text.lines()
+                .next()
+                .map(str::trim)
+                .unwrap_or("")
+                .to_string()
+        })
+        .filter(|value| !value.is_empty());
+
+    let status_output = run_nanobot_command(&spec, &["status"], None)
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| decode_command_output(&output))
+        .filter(|value| !value.is_empty());
+
+    let installed = version.is_some();
+    let message = if installed {
+        "NanoBot detectado. Se o config ainda nao existe, inicialize com o botao onboard.".to_string()
+    } else {
+        "NanoBot nao encontrado no ambiente atual. Verifique o caminho/comando e rode a instalacao."
+            .to_string()
+    };
+
+    Ok(Json(NanoBotStatusResponse {
+        installed,
+        command: spec.display(),
+        version,
+        config_path: config_path.display().to_string(),
+        config_exists: config_path.exists(),
+        workspace_path: workspace_path.display().to_string(),
+        workspace_exists: workspace_path.exists(),
+        message,
+        raw_status: status_output,
+    }))
+}
+
+async fn nanobot_onboard() -> Result<Json<InstallResponse>, AppError> {
+    let cfg = AppConfig::load_settings().apply_env();
+    let spec = resolve_nanobot_command(&cfg);
+    let config_path = nanobot_config_path();
+
+    if config_path.exists() {
+        return Ok(Json(InstallResponse {
+            message: format!(
+                "Configuracao ja existe em {}. Para evitar prompt interativo, o onboard automatico foi ignorado.",
+                config_path.display()
+            ),
+        }));
+    }
+
+    let output = run_nanobot_command(&spec, &["onboard"], None).map_err(|error| {
+        AppError::Provider(ProviderError::Io {
+            context: "Falha ao executar nanobot onboard".to_string(),
+            source: error,
+        })
+    })?;
+
+    if output.status.success() {
+        return Ok(Json(InstallResponse {
+            message: format!(
+                "NanoBot inicializado com sucesso em {}.",
+                config_path.display()
+            ),
+        }));
+    }
+
+    Err(AppError::Provider(ProviderError::CommandFailed {
+        command: format!("{} onboard", spec.display()),
+        stderr: decode_command_output(&output),
+    }))
+}
+
 async fn nanobot_install(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
 ) -> Result<Json<InstallResponse>, AppError> {
     let cfg = AppConfig::load_settings().apply_env();
-    
-    // Simulate git clone and setup since we don't have a dedicated nanobot runtime yet
-    let parent_dir = cfg.nanobot_cli_path
+    let repo_dir = resolve_nanobot_repo_dir(&cfg)?;
+    let repo_parent = repo_dir
         .parent()
         .ok_or_else(|| AppError::Provider(ProviderError::Unavailable {
-            details: "Caminho CLI do NanoBot invalido.".to_string()
-        }))?;
-        
-    std::fs::create_dir_all(parent_dir).map_err(|e| AppError::Provider(ProviderError::Io {
-        context: "Falha ao criar diretorio para o NanoBot".to_string(),
-        source: e,
+            details: "Nao foi possivel determinar diretorio pai do NanoBot.".to_string(),
+        }))?
+        .to_path_buf();
+
+    std::fs::create_dir_all(&repo_parent).map_err(|error| AppError::Provider(ProviderError::Io {
+        context: "Falha ao criar diretorio pai do NanoBot".to_string(),
+        source: error,
     }))?;
-    
-    // Attempt git clone (simplified mock for the requested setup)
-    match std::process::Command::new("git")
-        .arg("clone")
-        .arg("https://github.com/HKUDS/nanobot.git")
-        .arg(parent_dir)
-        .status()
-    {
-        Ok(status) if status.success() => {
-            Ok(Json(InstallResponse {
-                message: "Repository NanoBot clonado com sucesso!".to_string(),
-            }))
+
+    if repo_dir.join(".git").exists() {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&repo_dir)
+            .arg("pull")
+            .arg("--ff-only")
+            .output()
+            .map_err(|error| AppError::Provider(ProviderError::Io {
+                context: "Falha ao atualizar repositorio NanoBot".to_string(),
+                source: error,
+            }))?;
+
+        if !output.status.success() {
+            return Err(AppError::Provider(ProviderError::CommandFailed {
+                command: format!("git -C {} pull --ff-only", repo_dir.display()),
+                stderr: decode_command_output(&output),
+            }));
         }
-        Ok(_) | Err(_) => {
-            // Give a soft fallback message
-            Ok(Json(InstallResponse {
-                message: "O repositorio seria clonado aqui, mas ocorreu um erro no git local ou o diretorio ja existe.".to_string(),
-            }))
+    } else {
+        if repo_dir.exists() {
+            let has_files = std::fs::read_dir(&repo_dir)
+                .map_err(|error| AppError::Provider(ProviderError::Io {
+                    context: "Falha ao ler diretorio de destino do NanoBot".to_string(),
+                    source: error,
+                }))?
+                .next()
+                .is_some();
+            if has_files {
+                return Err(AppError::Provider(ProviderError::Unavailable {
+                    details: format!(
+                        "O diretorio {} ja existe e nao esta vazio. Escolha outro caminho NanoBot CLI ou limpe o diretorio.",
+                        repo_dir.display()
+                    ),
+                }));
+            }
+        }
+
+        let output = Command::new("git")
+            .arg("clone")
+            .arg("https://github.com/HKUDS/nanobot.git")
+            .arg(&repo_dir)
+            .output()
+            .map_err(|error| AppError::Provider(ProviderError::Io {
+                context: "Falha ao clonar repositorio NanoBot".to_string(),
+                source: error,
+            }))?;
+
+        if !output.status.success() {
+            return Err(AppError::Provider(ProviderError::CommandFailed {
+                command: format!("git clone https://github.com/HKUDS/nanobot.git {}", repo_dir.display()),
+                stderr: decode_command_output(&output),
+            }));
         }
     }
+
+    let install_output = Command::new("python3")
+        .arg("-m")
+        .arg("pip")
+        .arg("install")
+        .arg("-e")
+        .arg(&repo_dir)
+        .output()
+        .map_err(|error| AppError::Provider(ProviderError::Io {
+            context: "Falha ao executar instalacao pip do NanoBot".to_string(),
+            source: error,
+        }))?;
+
+    if !install_output.status.success() {
+        return Err(AppError::Provider(ProviderError::CommandFailed {
+            command: format!("python3 -m pip install -e {}", repo_dir.display()),
+            stderr: decode_command_output(&install_output),
+        }));
+    }
+
+    Ok(Json(InstallResponse {
+        message: format!(
+            "NanoBot pronto. Repo: {}. Proximo passo: execute o onboard para criar ~/.nanobot/config.json.",
+            repo_dir.display()
+        ),
+    }))
+}
+
+fn resolve_nanobot_repo_dir(cfg: &AppConfig) -> Result<FsPathBuf, AppError> {
+    let raw = cfg.nanobot_cli_path.to_string_lossy().trim().to_string();
+    if raw.is_empty() {
+        return Err(AppError::Provider(ProviderError::Unavailable {
+            details: "Caminho do NanoBot nao definido.".to_string(),
+        }));
+    }
+
+    let candidate = FsPathBuf::from(&raw);
+    if candidate
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("py"))
+    {
+        return candidate
+            .parent()
+            .map(|parent| parent.to_path_buf())
+            .ok_or_else(|| AppError::Provider(ProviderError::Unavailable {
+                details: "Caminho NanoBot .py invalido (sem diretorio pai).".to_string(),
+            }));
+    }
+
+    if candidate.exists() {
+        if candidate.is_dir() {
+            return Ok(candidate);
+        }
+
+        return candidate
+            .parent()
+            .map(|parent| parent.to_path_buf())
+            .ok_or_else(|| AppError::Provider(ProviderError::Unavailable {
+                details: "Caminho NanoBot invalido (sem diretorio pai).".to_string(),
+            }));
+    }
+
+    if raw.contains('/') || raw.contains('\\') {
+        if candidate.extension().is_none() {
+            return Ok(candidate);
+        }
+
+        return candidate
+            .parent()
+            .map(|parent| parent.to_path_buf())
+            .ok_or_else(|| AppError::Provider(ProviderError::Unavailable {
+                details: "Caminho NanoBot invalido (sem diretorio pai).".to_string(),
+            }));
+    }
+
+    Err(AppError::Provider(ProviderError::Unavailable {
+        details: "Para instalar via clone, informe um caminho de pasta no campo NanoBot CLI (ex.: /Users/kaike/prod/nanobot).".to_string(),
+    }))
+}
+
+fn resolve_nanobot_command(cfg: &AppConfig) -> NanoBotCommandSpec {
+    let raw = cfg.nanobot_cli_path.to_string_lossy().trim().to_string();
+    if raw.is_empty() {
+        return NanoBotCommandSpec {
+            program: "nanobot".to_string(),
+            args: Vec::new(),
+        };
+    }
+
+    let candidate = FsPathBuf::from(&raw);
+    if candidate.is_dir() {
+        let local_venv = candidate.join(".venv").join("bin").join("nanobot");
+        if local_venv.exists() {
+            return NanoBotCommandSpec {
+                program: local_venv.display().to_string(),
+                args: Vec::new(),
+            };
+        }
+
+        return NanoBotCommandSpec {
+            program: "nanobot".to_string(),
+            args: Vec::new(),
+        };
+    }
+
+    if candidate
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("py"))
+    {
+        if !candidate.exists() {
+            if let Some(parent) = candidate.parent() {
+                let local_venv = parent.join(".venv").join("bin").join("nanobot");
+                if local_venv.exists() {
+                    return NanoBotCommandSpec {
+                        program: local_venv.display().to_string(),
+                        args: Vec::new(),
+                    };
+                }
+            }
+
+            return NanoBotCommandSpec {
+                program: "nanobot".to_string(),
+                args: Vec::new(),
+            };
+        }
+
+        return NanoBotCommandSpec {
+            program: "python3".to_string(),
+            args: vec![candidate.display().to_string()],
+        };
+    }
+
+    NanoBotCommandSpec {
+        program: raw,
+        args: Vec::new(),
+    }
+}
+
+fn run_nanobot_command(
+    spec: &NanoBotCommandSpec,
+    extra_args: &[&str],
+    cwd: Option<&std::path::Path>,
+) -> io::Result<Output> {
+    let mut command = Command::new(&spec.program);
+    command.args(&spec.args);
+    command.args(extra_args);
+    if let Some(dir) = cwd {
+        command.current_dir(dir);
+    }
+    command.output()
+}
+
+fn decode_command_output(output: &Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !stderr.is_empty() {
+        return stderr;
+    }
+
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+fn nanobot_config_path() -> FsPathBuf {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string());
+    FsPathBuf::from(home).join(".nanobot").join("config.json")
+}
+
+fn nanobot_workspace_path() -> FsPathBuf {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string());
+    FsPathBuf::from(home).join(".nanobot").join("workspace")
 }

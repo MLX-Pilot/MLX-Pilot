@@ -91,7 +91,7 @@ impl Default for AppConfig {
                 "/Users/kaike/prod/openclaw/deploy/data/logs/gateway.err.log",
             ),
             openclaw_sync_log: PathBuf::from("/Users/kaike/openclaw-mlx-sync.log"),
-            nanobot_cli_path: PathBuf::from("/Users/kaike/prod/nanobot/run.py"),
+            nanobot_cli_path: PathBuf::from("/Users/kaike/prod/nanobot"),
             active_agent_framework: "openclaw".to_string(),
         }
     }
@@ -377,6 +377,20 @@ impl AppConfig {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
                 self.openclaw_sync_log = PathBuf::from(trimmed);
+            }
+        }
+
+        if let Ok(value) = env::var("APP_NANOBOT_CLI_PATH") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                self.nanobot_cli_path = PathBuf::from(trimmed);
+            }
+        }
+
+        if let Ok(value) = env::var("APP_ACTIVE_AGENT_FRAMEWORK") {
+            let normalized = value.trim().to_ascii_lowercase();
+            if matches!(normalized.as_str(), "openclaw" | "nanobot") {
+                self.active_agent_framework = normalized;
             }
         }
 
