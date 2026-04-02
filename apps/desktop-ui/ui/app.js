@@ -165,6 +165,15 @@ let downloadsTimer = null;
 
 const aiParticleInput = document.getElementById("ai-particle-input");
 const aiParticleBtn = document.getElementById("ai-particle-btn");
+const aiParticleStopBtn = document.getElementById("ai-particle-stop-btn");
+const aiSceneStatus = document.getElementById("ai-scene-status");
+const aiSceneSteps = document.getElementById("ai-scene-steps");
+const aiSceneExampleButtons = Array.from(document.querySelectorAll(".ai-scene-example-btn"));
+
+let aiSceneInFlight = false;
+let aiSceneLastScript = null;
+let aiSceneAnimating = false;
+let aiSceneRequestToken = 0;
 
 let openclawStatusLoaded = false;
 let openclawObservabilityLoaded = false;
@@ -355,6 +364,73 @@ function applyAgentFramework(nextFramework, { syncRadio = false, refreshPanel = 
   }
 }
 
+function createParticleSystemFallback() {
+  let frameTimer = null;
+  let frameIndex = -1;
+  let frames = [];
+  let shouldLoop = false;
+
+  const clearTimer = () => {
+    if (frameTimer) {
+      window.clearTimeout(frameTimer);
+      frameTimer = null;
+    }
+  };
+
+  const playNext = (callbacks) => {
+    if (!frames.length) {
+      callbacks.onComplete?.();
+      return;
+    }
+
+    frameIndex += 1;
+    if (frameIndex >= frames.length) {
+      if (!shouldLoop) {
+        callbacks.onComplete?.();
+        return;
+      }
+      frameIndex = 0;
+    }
+
+    callbacks.onFrame?.(frameIndex, frames[frameIndex]);
+    const durationMs = clampSceneNumber(frames[frameIndex]?.duration_ms, 900, 9000, 2200);
+    frameTimer = window.setTimeout(() => playNext(callbacks), durationMs);
+  };
+
+  return {
+    onWindowResize() {
+      // no-op fallback
+    },
+    setParticleState() {
+      // no-op fallback
+    },
+    formText() {
+      // no-op fallback
+    },
+    stopScene() {
+      clearTimer();
+      frames = [];
+      frameIndex = -1;
+      shouldLoop = false;
+    },
+    playScript(script, options = {}) {
+      clearTimer();
+      frames = Array.isArray(script?.frames) ? script.frames : [];
+      frameIndex = -1;
+      shouldLoop = Boolean(options.loop);
+
+      if (!frames.length) {
+        options.onComplete?.();
+        return;
+      }
+      playNext({
+        onFrame: options.onFrame,
+        onComplete: options.onComplete,
+      });
+    },
+  };
+}
+
 function formatNumber(value) {
   return new Intl.NumberFormat("pt-BR", { notation: "compact" }).format(value || 0);
 }
@@ -411,33 +487,603 @@ function formatEpoch(epochMs) {
   }).format(date);
 }
 
-function normalizeParticleText(value) {
+function normalizeScenePrompt(value) {
   if (typeof value !== "string") {
     return "";
   }
-  return value.replace(/\s+/g, " ").trim().toUpperCase().slice(0, 10);
+  return value
+    .replace(/\s+/g, " ")
+    .replace(/\u00a0/g, " ")
+    .trim()
+    .slice(0, 320);
 }
 
-function applyParticleTextFromInput() {
+function truncateSceneText(value, max = 78) {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.length <= max) {
+    return normalized;
+  }
+  return `${normalized.slice(0, max - 3)}...`;
+}
+
+function clampSceneNumber(value, min, max, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.max(min, Math.min(max, parsed));
+}
+
+function normalizeSceneColor(value, fallback) {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 32) {
+    return fallback;
+  }
+  return normalized;
+}
+
+function setAiSceneStatus(text) {
+  if (!aiSceneStatus) {
+    return;
+  }
+  aiSceneStatus.textContent = text;
+}
+
+function setAiSceneBusyState() {
+  if (aiParticleBtn) {
+    aiParticleBtn.disabled = aiSceneInFlight;
+    aiParticleBtn.textContent = aiSceneInFlight ? "Montando cena..." : "Animar resposta";
+  }
+  if (aiParticleStopBtn) {
+    aiParticleStopBtn.disabled = !aiSceneAnimating && !aiSceneInFlight;
+  }
+}
+
+function renderAiSceneSteps(script, activeIndex = -1) {
+  if (!aiSceneSteps) {
+    return;
+  }
+
+  aiSceneSteps.innerHTML = "";
+  const frames = Array.isArray(script?.frames) ? script.frames : [];
+  if (!frames.length) {
+    return;
+  }
+
+  frames.forEach((frame, index) => {
+    const item = document.createElement("li");
+    item.className = "ai-scene-step";
+    if (index === activeIndex) {
+      item.classList.add("active");
+    }
+
+    const caption = truncateSceneText(frame.caption || `Etapa ${index + 1}`, 42);
+    const duration = clampSceneNumber(frame.duration_ms, 500, 9000, 2200);
+    const seconds = (duration / 1000).toFixed(1).replace(".0", "");
+    item.textContent = `${index + 1}. ${caption} (${seconds}s)`;
+    aiSceneSteps.appendChild(item);
+  });
+}
+
+function sanitizeSceneShape(shape) {
+  if (!shape || typeof shape !== "object") {
+    return null;
+  }
+
+  const type = String(shape.type || "").trim().toLowerCase();
+  const allowed = new Set(["text", "line", "arrow", "circle", "ring", "rect", "box", "spiral", "wave", "dot", "point"]);
+  if (!allowed.has(type)) {
+    return null;
+  }
+
+  const normalized = { type };
+
+  if (type === "text") {
+    normalized.text = truncateSceneText(shape.text || "", 96);
+    if (!normalized.text) {
+      return null;
+    }
+    normalized.x = clampSceneNumber(shape.x, 0, 100, 50);
+    normalized.y = clampSceneNumber(shape.y, 0, 100, 50);
+    normalized.size = clampSceneNumber(shape.size, 10, 110, 32);
+    normalized.weight = clampSceneNumber(shape.weight, 300, 900, 700);
+    normalized.align = ["left", "center", "right"].includes(String(shape.align || "").toLowerCase())
+      ? String(shape.align).toLowerCase()
+      : "center";
+    normalized.color = normalizeSceneColor(shape.color, "#bfe8ff");
+    return normalized;
+  }
+
+  normalized.color = normalizeSceneColor(shape.color, "#72d5ff");
+  normalized.width = clampSceneNumber(shape.width, 1, 18, 4);
+
+  if (["line", "arrow"].includes(type)) {
+    normalized.x1 = clampSceneNumber(shape.x1, 0, 100, 30);
+    normalized.y1 = clampSceneNumber(shape.y1, 0, 100, 30);
+    normalized.x2 = clampSceneNumber(shape.x2, 0, 100, 70);
+    normalized.y2 = clampSceneNumber(shape.y2, 0, 100, 70);
+    if (type === "arrow") {
+      normalized.head = clampSceneNumber(shape.head, 6, 34, 16);
+    }
+    return normalized;
+  }
+
+  if (["circle", "ring", "dot", "point"].includes(type)) {
+    normalized.x = clampSceneNumber(shape.x, 0, 100, 50);
+    normalized.y = clampSceneNumber(shape.y, 0, 100, 50);
+    normalized.r = clampSceneNumber(shape.r, 2, 320, type === "dot" || type === "point" ? 8 : 70);
+    if (type === "circle") {
+      normalized.fill = normalizeSceneColor(shape.fill, `${normalized.color}22`);
+    }
+    return normalized;
+  }
+
+  if (["rect", "box"].includes(type)) {
+    normalized.x = clampSceneNumber(shape.x, 0, 100, 50);
+    normalized.y = clampSceneNumber(shape.y, 0, 100, 50);
+    normalized.w = clampSceneNumber(shape.w, 6, 660, 180);
+    normalized.h = clampSceneNumber(shape.h, 6, 420, 100);
+    normalized.fill = normalizeSceneColor(shape.fill, "transparent");
+    return normalized;
+  }
+
+  if (type === "spiral") {
+    normalized.x = clampSceneNumber(shape.x, 0, 100, 50);
+    normalized.y = clampSceneNumber(shape.y, 0, 100, 50);
+    normalized.r = clampSceneNumber(shape.r, 8, 340, 120);
+    normalized.turns = clampSceneNumber(shape.turns, 1, 12, 4);
+    return normalized;
+  }
+
+  if (type === "wave") {
+    normalized.x = clampSceneNumber(shape.x, 0, 100, 50);
+    normalized.y = clampSceneNumber(shape.y, 0, 100, 50);
+    normalized.length = clampSceneNumber(shape.length, 20, 860, 360);
+    normalized.amp = clampSceneNumber(shape.amp, 4, 120, 26);
+    normalized.cycles = clampSceneNumber(shape.cycles, 1, 16, 3);
+    return normalized;
+  }
+
+  return null;
+}
+
+function sanitizeSceneFrame(frame, index = 0) {
+  if (!frame || typeof frame !== "object") {
+    return null;
+  }
+
+  const shapes = Array.isArray(frame.shapes)
+    ? frame.shapes.map((shape) => sanitizeSceneShape(shape)).filter(Boolean)
+    : [];
+
+  const caption = truncateSceneText(frame.caption || `Etapa ${index + 1}`, 64);
+  if (!shapes.length) {
+    shapes.push({
+      type: "text",
+      text: caption || `Etapa ${index + 1}`,
+      x: 50,
+      y: 50,
+      size: 34,
+      weight: 700,
+      align: "center",
+      color: "#bfe8ff",
+    });
+  }
+
+  const backgroundRaw = frame.background && typeof frame.background === "object" ? frame.background : {};
+
+  return {
+    caption: caption || `Etapa ${index + 1}`,
+    duration_ms: clampSceneNumber(frame.duration_ms, 900, 9000, 2200),
+    background: {
+      color: normalizeSceneColor(backgroundRaw.color, "#050816"),
+      glow: normalizeSceneColor(backgroundRaw.glow, "#214f95"),
+    },
+    shapes: shapes.slice(0, 18),
+  };
+}
+
+function sanitizeParticleScript(rawScript, prompt) {
+  const script = rawScript && typeof rawScript === "object" ? rawScript : {};
+  const rawFrames = Array.isArray(script.frames) ? script.frames : [];
+  const frames = rawFrames
+    .slice(0, 8)
+    .map((frame, index) => sanitizeSceneFrame(frame, index))
+    .filter(Boolean);
+
+  if (!frames.length) {
+    return buildGenericSceneScript(prompt);
+  }
+
+  return {
+    title: truncateSceneText(script.title || prompt || "Cena IA", 80),
+    frames,
+  };
+}
+
+function extractJsonPayload(rawText) {
+  const raw = String(rawText || "").trim();
+  if (!raw) {
+    return null;
+  }
+
+  const direct = (() => {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  })();
+  if (direct) {
+    return direct;
+  }
+
+  const fenced = raw.match(/```(?:json)?\\s*([\\s\\S]*?)```/i);
+  if (fenced?.[1]) {
+    try {
+      return JSON.parse(fenced[1].trim());
+    } catch {
+      // continue
+    }
+  }
+
+  const first = raw.indexOf("{");
+  const last = raw.lastIndexOf("}");
+  if (first >= 0 && last > first) {
+    const chunk = raw.slice(first, last + 1);
+    try {
+      return JSON.parse(chunk);
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+async function requestAiSceneScript(prompt) {
+  const plannerPrompt = [
+    "Voce e um diretor de animacao por particulas para uma interface sem texto corrido.",
+    "Retorne SOMENTE JSON valido, sem markdown e sem comentarios.",
+    "Formato obrigatorio:",
+    "{",
+    "  \"title\": \"resumo curto\",",
+    "  \"frames\": [",
+    "    {",
+    "      \"caption\": \"etapa\",",
+    "      \"duration_ms\": 2200,",
+    "      \"background\": {\"color\": \"#050816\", \"glow\": \"#2a66b0\"},",
+    "      \"shapes\": [",
+    "        {\"type\":\"text\",\"text\":\"...\",\"x\":50,\"y\":20,\"size\":40,\"color\":\"#bfe8ff\"},",
+    "        {\"type\":\"arrow\",\"x1\":20,\"y1\":30,\"x2\":80,\"y2\":30,\"color\":\"#7edbff\",\"width\":4},",
+    "        {\"type\":\"line\"|\"circle\"|\"ring\"|\"rect\"|\"spiral\"|\"wave\"|\"dot\", ...}",
+    "      ]",
+    "    }",
+    "  ]",
+    "}",
+    "Use x/y em percentual (0..100).",
+    "Duracao de cada frame entre 1200 e 5000 ms.",
+    "No maximo 6 frames e 12 shapes por frame.",
+    "Objetivo: responder visualmente ao pedido do usuario.",
+    `Pedido do usuario: ${prompt}`,
+  ].join("\\n");
+
+  const payload = await fetchJson(activeAgentEndpoint("chat"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: plannerPrompt }),
+  });
+
+  const raw = [payload?.reply, Array.isArray(payload?.payloads) ? payload.payloads.join("\\n") : ""]
+    .filter(Boolean)
+    .join("\\n")
+    .trim();
+
+  const jsonPayload = extractJsonPayload(raw);
+  if (!jsonPayload) {
+    throw new Error("resposta sem JSON valido para cena");
+  }
+  return sanitizeParticleScript(jsonPayload, prompt);
+}
+
+function extractPromptKeywords(prompt) {
+  const cleaned = String(prompt || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\\u00c0-\\u017f\\s]/g, " ")
+    .replace(/\\s+/g, " ")
+    .trim();
+
+  if (!cleaned) {
+    return [];
+  }
+
+  const stopWords = new Set([
+    "como", "fazer", "faço", "faco", "voce", "você", "sabe", "seria", "sobre", "para", "com", "sem",
+    "que", "isso", "essa", "esse", "uma", "um", "das", "dos", "de", "da", "do", "e", "a", "o", "as",
+    "os", "me", "mostrar", "mostra", "consegue", "explicar", "imagine", "imagina", "quero", "pode",
+  ]);
+
+  const unique = [];
+  for (const token of cleaned.split(" ")) {
+    if (!token || token.length < 3 || stopWords.has(token)) {
+      continue;
+    }
+    if (!unique.includes(token)) {
+      unique.push(token);
+    }
+  }
+  return unique.slice(0, 5);
+}
+
+function buildBhaskaraSceneScript() {
+  return {
+    title: "Bhaskara em etapas",
+    frames: [
+      {
+        caption: "Equacao de segundo grau",
+        duration_ms: 2300,
+        background: { color: "#050816", glow: "#1e4f89" },
+        shapes: [
+          { type: "text", text: "ax^2 + bx + c = 0", x: 50, y: 20, size: 48, color: "#bfe8ff" },
+          { type: "rect", x: 50, y: 40, w: 520, h: 96, color: "#69ccff", width: 4 },
+          { type: "text", text: "Exemplo: 2x^2 + 5x - 3 = 0", x: 50, y: 40, size: 34, color: "#d9f2ff" },
+          { type: "arrow", x1: 18, y1: 62, x2: 42, y2: 62, color: "#72d6ff", width: 4 },
+          { type: "arrow", x1: 82, y1: 62, x2: 58, y2: 62, color: "#72d6ff", width: 4 },
+        ],
+      },
+      {
+        caption: "Calculando o delta",
+        duration_ms: 2500,
+        background: { color: "#060d20", glow: "#266cbf" },
+        shapes: [
+          { type: "text", text: "Delta = b^2 - 4ac", x: 50, y: 22, size: 46, color: "#bfe8ff" },
+          { type: "text", text: "Delta = 5^2 - 4*2*(-3) = 49", x: 50, y: 46, size: 34, color: "#d9f4ff" },
+          { type: "circle", x: 50, y: 68, r: 90, color: "#81dcff", width: 5, fill: "#58b6ff22" },
+          { type: "text", text: "Delta > 0", x: 50, y: 68, size: 36, color: "#e7f8ff" },
+        ],
+      },
+      {
+        caption: "Aplicando a formula",
+        duration_ms: 2600,
+        background: { color: "#050a18", glow: "#2f6bc0" },
+        shapes: [
+          { type: "text", text: "x = (-b +- sqrt(Delta)) / 2a", x: 50, y: 22, size: 40, color: "#cbecff" },
+          { type: "arrow", x1: 20, y1: 40, x2: 80, y2: 40, color: "#79dbff", width: 4 },
+          { type: "text", text: "x1 = (-5 + 7) / 4 = 0.5", x: 50, y: 58, size: 34, color: "#dff4ff" },
+          { type: "text", text: "x2 = (-5 - 7) / 4 = -3", x: 50, y: 74, size: 34, color: "#dff4ff" },
+        ],
+      },
+      {
+        caption: "Resultado final",
+        duration_ms: 2100,
+        background: { color: "#040611", glow: "#225089" },
+        shapes: [
+          { type: "ring", x: 34, y: 56, r: 72, color: "#8ee3ff", width: 5 },
+          { type: "ring", x: 66, y: 56, r: 72, color: "#8ee3ff", width: 5 },
+          { type: "text", text: "x1 = 0.5", x: 34, y: 56, size: 34, color: "#f0fbff" },
+          { type: "text", text: "x2 = -3", x: 66, y: 56, size: 34, color: "#f0fbff" },
+        ],
+      },
+    ],
+  };
+}
+
+function buildGojoSceneScript() {
+  return {
+    title: "Expansao imaginada",
+    frames: [
+      {
+        caption: "O espaco comeca a se fechar",
+        duration_ms: 2200,
+        background: { color: "#050a1b", glow: "#2e65c1" },
+        shapes: [
+          { type: "ring", x: 50, y: 50, r: 180, color: "#8adfff", width: 4 },
+          { type: "text", text: "Limite se formando", x: 50, y: 18, size: 28, color: "#bfe8ff" },
+          { type: "spiral", x: 50, y: 50, r: 120, turns: 4, color: "#77d8ff", width: 3 },
+        ],
+      },
+      {
+        caption: "Camadas infinitas comprimindo",
+        duration_ms: 2600,
+        background: { color: "#030613", glow: "#3a79d4" },
+        shapes: [
+          { type: "ring", x: 50, y: 50, r: 190, color: "#7dd9ff", width: 3 },
+          { type: "ring", x: 50, y: 50, r: 145, color: "#7dd9ff", width: 3 },
+          { type: "ring", x: 50, y: 50, r: 100, color: "#7dd9ff", width: 3 },
+          { type: "ring", x: 50, y: 50, r: 60, color: "#7dd9ff", width: 3 },
+          { type: "text", text: "Informacao sem fim", x: 50, y: 82, size: 28, color: "#dff4ff" },
+        ],
+      },
+      {
+        caption: "Centro absoluto",
+        duration_ms: 2600,
+        background: { color: "#02040d", glow: "#4a90e8" },
+        shapes: [
+          { type: "circle", x: 50, y: 50, r: 62, color: "#8fe4ff", width: 5, fill: "#80d6ff2a" },
+          { type: "dot", x: 50, y: 50, r: 16, color: "#ecf9ff" },
+          { type: "wave", x: 50, y: 72, length: 420, amp: 18, cycles: 3, color: "#8fe2ff", width: 3 },
+          { type: "text", text: "Tudo converge para um unico ponto", x: 50, y: 20, size: 30, color: "#d5f1ff" },
+        ],
+      },
+      {
+        caption: "Dominio completo",
+        duration_ms: 2300,
+        background: { color: "#030713", glow: "#2c68c2" },
+        shapes: [
+          { type: "text", text: "Expansao concluida", x: 50, y: 22, size: 34, color: "#e8f8ff" },
+          { type: "spiral", x: 50, y: 52, r: 168, turns: 5, color: "#85deff", width: 3 },
+          { type: "arrow", x1: 20, y1: 78, x2: 45, y2: 58, color: "#7ed8ff", width: 4 },
+          { type: "arrow", x1: 80, y1: 78, x2: 55, y2: 58, color: "#7ed8ff", width: 4 },
+        ],
+      },
+    ],
+  };
+}
+
+function buildGenericSceneScript(prompt) {
+  const clipped = truncateSceneText(prompt || "Explique visualmente", 74);
+  const keywords = extractPromptKeywords(prompt);
+  const keywordShapes = [];
+  const angles = [220, 300, 20, 80, 150];
+
+  keywords.forEach((keyword, index) => {
+    const angle = (angles[index % angles.length] * Math.PI) / 180;
+    const x = 50 + Math.cos(angle) * 27;
+    const y = 52 + Math.sin(angle) * 27;
+    keywordShapes.push({ type: "arrow", x1: 50, y1: 52, x2: x, y2: y, color: "#78d8ff", width: 3 });
+    keywordShapes.push({ type: "text", text: truncateSceneText(keyword, 14), x, y, size: 24, color: "#ddf4ff" });
+  });
+
+  return {
+    title: "Cena visual",
+    frames: [
+      {
+        caption: "Interpretando sua pergunta",
+        duration_ms: 2100,
+        background: { color: "#050816", glow: "#1e518d" },
+        shapes: [
+          { type: "text", text: clipped, x: 50, y: 28, size: 30, color: "#ccecff" },
+          { type: "ring", x: 50, y: 58, r: 130, color: "#77d6ff", width: 4 },
+          { type: "dot", x: 50, y: 58, r: 11, color: "#ebf9ff" },
+        ],
+      },
+      {
+        caption: "Ligando os conceitos",
+        duration_ms: 2400,
+        background: { color: "#040712", glow: "#2e6dc2" },
+        shapes: [
+          { type: "text", text: "Mapa de ideias", x: 50, y: 18, size: 30, color: "#d9f3ff" },
+          { type: "circle", x: 50, y: 52, r: 88, color: "#74d8ff", width: 4, fill: "#74d8ff18" },
+          { type: "text", text: "Tema", x: 50, y: 52, size: 26, color: "#f0fbff" },
+          ...keywordShapes,
+        ],
+      },
+      {
+        caption: "Resumo visual",
+        duration_ms: 2200,
+        background: { color: "#040713", glow: "#21599e" },
+        shapes: [
+          { type: "text", text: "Resposta montada por etapas", x: 50, y: 28, size: 30, color: "#d9f3ff" },
+          { type: "wave", x: 50, y: 54, length: 420, amp: 16, cycles: 4, color: "#84ddff", width: 3 },
+          { type: "spiral", x: 50, y: 68, r: 90, turns: 3, color: "#79d7ff", width: 3 },
+        ],
+      },
+    ],
+  };
+}
+
+function buildFallbackParticleScript(prompt) {
+  const normalized = String(prompt || "").toLowerCase();
+  if (/(bhaskara|baskara|bascara)/i.test(normalized)) {
+    return buildBhaskaraSceneScript();
+  }
+  if (/(gojo|expansao|expansão|dominio|domínio)/i.test(normalized)) {
+    return buildGojoSceneScript();
+  }
+  return buildGenericSceneScript(prompt);
+}
+
+function stopAiScenePlayback({ keepTimeline = true } = {}) {
+  aiSceneRequestToken += 1;
+  if (window.particleSystem) {
+    window.particleSystem.stopScene();
+  }
+  aiSceneInFlight = false;
+  aiSceneAnimating = false;
+  setAiSceneBusyState();
+
+  if (!keepTimeline) {
+    renderAiSceneSteps(null);
+  }
+}
+
+async function applyParticleTextFromInput() {
   if (!window.particleSystem) {
     setStatus("playground de particulas indisponivel", "error");
     return;
   }
 
-  const raw = aiParticleInput ? aiParticleInput.value : "";
-  const text = normalizeParticleText(raw);
-  if (aiParticleInput) {
-    aiParticleInput.value = text;
+  if (aiSceneInFlight) {
+    return;
   }
 
-  if (!text) {
+  const raw = aiParticleInput ? aiParticleInput.value : "";
+  const prompt = normalizeScenePrompt(raw);
+  if (aiParticleInput) {
+    aiParticleInput.value = prompt;
+  }
+
+  if (!prompt) {
+    stopAiScenePlayback({ keepTimeline: false });
     window.particleSystem.setParticleState("neutral");
+    setAiSceneStatus("Escreva uma pergunta para montar a cena.");
     setStatus("particulas em modo neutro");
     return;
   }
 
-  window.particleSystem.formText(text);
-  setStatus(`particulas: ${text}`);
+  aiSceneInFlight = true;
+  aiSceneAnimating = false;
+  const requestToken = aiSceneRequestToken + 1;
+  aiSceneRequestToken = requestToken;
+  setAiSceneBusyState();
+  setAiSceneStatus(`Planejando cena com ${activeAgentLabel()}...`);
+  setStatus("ia visual preparando", "running");
+
+  let script = null;
+  let usedFallback = false;
+
+  try {
+    script = await requestAiSceneScript(prompt);
+  } catch (error) {
+    usedFallback = true;
+    script = buildFallbackParticleScript(prompt);
+    setAiSceneStatus(`Modo visual local: ${error.message}`);
+  } finally {
+    if (requestToken === aiSceneRequestToken) {
+      aiSceneInFlight = false;
+      setAiSceneBusyState();
+    }
+  }
+
+  if (requestToken !== aiSceneRequestToken) {
+    return;
+  }
+
+  if (!script || !Array.isArray(script.frames) || !script.frames.length) {
+    setAiSceneStatus("Nao foi possivel montar a cena.");
+    setStatus("erro cena visual", "error");
+    return;
+  }
+
+  aiSceneLastScript = script;
+  aiSceneAnimating = true;
+  setAiSceneBusyState();
+  renderAiSceneSteps(script, 0);
+  setAiSceneStatus(
+    usedFallback
+      ? "Cena em execucao (fallback visual local)."
+      : `Cena em execucao com ${script.frames.length} etapa(s).`
+  );
+
+  window.particleSystem.playScript(script, {
+    loop: false,
+    onFrame: (index) => {
+      renderAiSceneSteps(script, index);
+    },
+    onComplete: () => {
+      aiSceneAnimating = false;
+      setAiSceneBusyState();
+      renderAiSceneSteps(script, script.frames.length - 1);
+      setAiSceneStatus("Cena concluida. Envie outra pergunta para uma nova animacao.");
+      setStatus("cena visual concluida");
+    },
+  });
 }
 
 function isMeaningfulCatalogSummary(value) {
@@ -2557,16 +3203,14 @@ function switchTab(nextTab) {
   if (window.particleSystem) {
     if (nextTab === "ai-interaction") {
       window.particleSystem.onWindowResize();
-      const text = normalizeParticleText(aiParticleInput ? aiParticleInput.value : "");
-      if (text) {
-        if (aiParticleInput) {
-          aiParticleInput.value = text;
-        }
-        window.particleSystem.formText(text);
-      } else {
+      if (!aiSceneAnimating) {
         window.particleSystem.setParticleState("neutral");
       }
+      if (!aiSceneLastScript) {
+        setAiSceneStatus("Pronto para montar uma cena.");
+      }
     } else {
+      stopAiScenePlayback({ keepTimeline: true });
       window.particleSystem.setParticleState("none");
     }
   }
@@ -2754,24 +3398,46 @@ if (openclawMessageInput) {
 }
 if (aiParticleInput) {
   aiParticleInput.addEventListener("input", () => {
-    aiParticleInput.value = aiParticleInput.value.toUpperCase().slice(0, 10);
+    if (aiParticleInput.value.length > 320) {
+      aiParticleInput.value = aiParticleInput.value.slice(0, 320);
+    }
   });
   aiParticleInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
+    if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      applyParticleTextFromInput();
+      void applyParticleTextFromInput();
     }
   });
   aiParticleInput.addEventListener("blur", () => {
-    aiParticleInput.value = normalizeParticleText(aiParticleInput.value);
+    aiParticleInput.value = normalizeScenePrompt(aiParticleInput.value);
   });
 }
 if (aiParticleBtn) {
   aiParticleBtn.addEventListener("click", () => {
-    applyParticleTextFromInput();
+    void applyParticleTextFromInput();
     if (aiParticleInput) {
       aiParticleInput.focus();
     }
+  });
+}
+if (aiParticleStopBtn) {
+  aiParticleStopBtn.addEventListener("click", () => {
+    stopAiScenePlayback({ keepTimeline: true });
+    setAiSceneStatus("Cena interrompida.");
+    setStatus("cena visual interrompida");
+  });
+}
+if (aiSceneExampleButtons.length) {
+  aiSceneExampleButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const prompt = normalizeScenePrompt(button.dataset.prompt || "");
+      if (!prompt || !aiParticleInput) {
+        return;
+      }
+      aiParticleInput.value = prompt;
+      void applyParticleTextFromInput();
+      aiParticleInput.focus();
+    });
   });
 }
 
@@ -3067,6 +3733,9 @@ async function bootstrap() {
 
     renderOpenClawViews();
     setOpenClawRuntimeButtons("");
+    setAiSceneBusyState();
+    renderAiSceneSteps(null);
+    setAiSceneStatus("Pronto para montar uma cena.");
 
     renderThreadList();
     rebuildChatFromThread();
@@ -3090,6 +3759,8 @@ async function bootstrap() {
       window.particleSystem = new ParticleSystem("bg-canvas");
     } catch (e) {
       console.error("Failed to initialize Particle System:", e);
+      window.particleSystem = createParticleSystemFallback();
+      setAiSceneStatus("Modo fallback ativo: sem WebGL, mas com timeline de cena.");
     }
 
     downloadsTimer = window.setInterval(() => {

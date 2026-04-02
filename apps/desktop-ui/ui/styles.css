@@ -83,11 +83,58 @@ body {
   z-index: 10;
   padding: 32px;
   border-radius: var(--radius-xl);
-  max-width: 500px;
+  max-width: 720px;
   width: 100%;
-  text-align: center;
+  text-align: left;
   margin-top: auto;
   margin-bottom: 24px;
+}
+
+.ai-scene-input {
+  margin-top: 14px;
+  min-height: 64px;
+  resize: vertical;
+}
+
+.ai-scene-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.ai-scene-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.ai-scene-example-btn {
+  font-size: 0.8rem;
+}
+
+.ai-scene-steps {
+  margin-top: 12px;
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-scene-step {
+  border: 1px solid rgba(106, 183, 255, 0.3);
+  background: rgba(16, 40, 72, 0.35);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  color: #d7edff;
+}
+
+.ai-scene-step.active {
+  border-color: rgba(121, 219, 255, 0.9);
+  background: rgba(22, 87, 143, 0.5);
 }
 
 .bg-a {
