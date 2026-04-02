@@ -395,6 +395,13 @@ textarea:focus {
   padding: 8px 10px;
 }
 
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .tab-list {
   display: inline-flex;
   gap: 4px;
@@ -429,6 +436,12 @@ textarea:focus {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.topbar-new-chat-btn {
+  border-radius: 999px;
+  padding: 8px 12px;
+  white-space: nowrap;
 }
 
 .chat-model-switcher {
@@ -1396,6 +1409,11 @@ textarea:focus {
     align-items: stretch;
   }
 
+  .topbar-left {
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
   .topbar-right {
     justify-content: space-between;
     flex-wrap: wrap;
@@ -1426,6 +1444,14 @@ textarea:focus {
   .tab-list {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .topbar-left {
+    width: 100%;
+  }
+
+  .topbar-new-chat-btn {
+    width: 100%;
   }
 
   .tab-btn {

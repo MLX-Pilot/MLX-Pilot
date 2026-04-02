@@ -29,10 +29,11 @@ const chatModelCurrent = document.getElementById("chat-model-current");
 const chatModelMenu = document.getElementById("chat-model-menu");
 const chatModelSelect = document.getElementById("chat-model-select");
 const refreshModelsBtn = document.getElementById("refresh-models");
+const newChatThreadTopBtn = document.getElementById("new-chat-thread-top");
 
 const chatHistoryMeta = document.getElementById("chat-history-meta");
 const chatHistoryList = document.getElementById("chat-history-list");
-const newChatThreadBtn = document.getElementById("new-chat-thread");
+const newChatThreadButtons = Array.from(document.querySelectorAll('[data-action="new-chat"]'));
 
 const selectedThreadLabel = document.getElementById("selected-thread-label");
 const selectedModelLabel = document.getElementById("selected-model-label");
@@ -448,6 +449,23 @@ function toggleThreadMenu(threadId) {
 
   openThreadMenuId = openThreadMenuId === threadId ? null : threadId;
   renderThreadList();
+}
+
+function createNewChatThread() {
+  if (isGenerating) {
+    addSystemMessage("Pare a geracao atual antes de iniciar nova conversa.");
+    return;
+  }
+
+  closeThreadMenu();
+  setEditMode(null);
+  const thread = createThread({ modelId: selectedModelId });
+  chatThreads.unshift(thread);
+  activeThreadId = thread.id;
+  persistThreads();
+  renderThreadList();
+  rebuildChatFromThread();
+  messageInput.focus();
 }
 
 function getModelLabelById(modelId) {
@@ -2234,6 +2252,9 @@ function switchTab(nextTab) {
 
   appShell.classList.toggle("chat-mode", nextTab === "chat");
   chatModelSwitcher.classList.toggle("hidden", nextTab !== "chat");
+  if (newChatThreadTopBtn) {
+    newChatThreadTopBtn.classList.toggle("hidden", nextTab !== "chat");
+  }
 
   if (nextTab === "discover") {
     void searchCatalogModels();
@@ -2267,21 +2288,8 @@ if (braveApiKeyInput) {
   });
 }
 
-newChatThreadBtn.addEventListener("click", () => {
-  if (isGenerating) {
-    addSystemMessage("Pare a geracao atual antes de iniciar nova conversa.");
-    return;
-  }
-
-  closeThreadMenu();
-  setEditMode(null);
-  const thread = createThread({ modelId: selectedModelId });
-  chatThreads.unshift(thread);
-  activeThreadId = thread.id;
-  persistThreads();
-  renderThreadList();
-  rebuildChatFromThread();
-  messageInput.focus();
+newChatThreadButtons.forEach((button) => {
+  button.addEventListener("click", createNewChatThread);
 });
 
 refreshModelsBtn.addEventListener("click", () => {
