@@ -319,19 +319,23 @@ function applyAgentPanelCopy() {
     openclawModelSourceLabel.textContent = "Origem do modelo";
   }
   if (openclawModelSourceCloudOption) {
-    openclawModelSourceCloudOption.textContent = "Nuvem (OpenClaw configurado)";
+    openclawModelSourceCloudOption.textContent = isNanobot
+      ? "Nuvem (catalogo compartilhado OpenClaw)"
+      : "Nuvem (OpenClaw configurado)";
   }
   if (openclawModelSourceLocalOption) {
     openclawModelSourceLocalOption.textContent = "Local (MLX-Pilot)";
   }
   if (openclawCloudLabel) {
-    openclawCloudLabel.textContent = "Modelos cloud";
+    openclawCloudLabel.textContent = isNanobot
+      ? "Modelos cloud compartilhados"
+      : "Modelos cloud";
   }
   if (openclawLocalLabel) {
-    openclawLocalLabel.textContent = "Modelos locais";
+    openclawLocalLabel.textContent = "Modelos locais compartilhados";
   }
   if (refreshOpenclawModelsBtn) {
-    refreshOpenclawModelsBtn.textContent = isNanobot ? "Carregar modelo atual" : "Atualizar modelos";
+    refreshOpenclawModelsBtn.textContent = "Atualizar modelos";
   }
   if (applyOpenclawModelBtn) {
     applyOpenclawModelBtn.textContent = isNanobot ? "Aplicar modelo NanoBot" : "Aplicar modelo";
@@ -2911,19 +2915,6 @@ async function sendOpenClawMessage() {
 }
 
 function renderOpenClawModelSelectors() {
-  if (isNanobotActive()) {
-    const current = openclawModelsCatalog.current || null;
-    const model = (current?.model || "").trim();
-    if (nanobotModelInput) {
-      nanobotModelInput.value = model;
-    }
-    openclawModelCurrent.textContent = model
-      ? `Modelo atual: ${current.label || model}`
-      : "Modelo atual: -";
-    toggleOpenClawSourceFields();
-    return;
-  }
-
   const cloud = Array.isArray(openclawModelsCatalog.cloud_models)
     ? openclawModelsCatalog.cloud_models
     : [];
@@ -2992,18 +2983,11 @@ function renderOpenClawModelSelectors() {
 }
 
 function toggleOpenClawSourceFields() {
-  const isNanobot = isNanobotActive();
   if (openclawModelSource?.parentElement) {
-    openclawModelSource.parentElement.classList.toggle("hidden", isNanobot);
+    openclawModelSource.parentElement.classList.remove("hidden");
   }
   if (nanobotModelPicker) {
-    nanobotModelPicker.classList.toggle("hidden", !isNanobot);
-  }
-
-  if (isNanobot) {
-    openclawCloudPicker.classList.add("hidden");
-    openclawLocalPicker.classList.add("hidden");
-    return;
+    nanobotModelPicker.classList.add("hidden");
   }
 
   const source = openclawModelSource.value || "cloud";
@@ -3012,24 +2996,6 @@ function toggleOpenClawSourceFields() {
 }
 
 async function loadOpenClawModelCatalog() {
-  if (isNanobotActive()) {
-    try {
-      const current = await fetchJson(activeAgentEndpoint("model"));
-      openclawModelsCatalog = {
-        cloud_models: [],
-        local_models: [],
-        current: current || null,
-      };
-      renderOpenClawModelSelectors();
-      openclawConfigFeedback.textContent = current?.model
-        ? "Modelo NanoBot carregado."
-        : "Nenhum modelo NanoBot definido.";
-    } catch (error) {
-      openclawConfigFeedback.textContent = `Erro ao carregar modelo NanoBot: ${error.message}`;
-    }
-    return;
-  }
-
   try {
     const payload = await fetchJson(activeAgentEndpoint("models"));
     openclawModelsCatalog = {
@@ -3039,43 +3005,38 @@ async function loadOpenClawModelCatalog() {
     };
 
     renderOpenClawModelSelectors();
-    openclawConfigFeedback.textContent = "Modelos carregados.";
+    openclawConfigFeedback.textContent = isNanobotActive()
+      ? "Modelos do NanoBot carregados."
+      : "Modelos carregados.";
   } catch (error) {
+    if (isNanobotActive()) {
+      try {
+        const current = await fetchJson(activeAgentEndpoint("model"));
+        openclawModelsCatalog = {
+          cloud_models: [],
+          local_models: [],
+          current: current || null,
+        };
+        renderOpenClawModelSelectors();
+        openclawConfigFeedback.textContent = current?.model
+          ? "Modelo NanoBot carregado (fallback)."
+          : "Nenhum modelo NanoBot definido.";
+        return;
+      } catch {
+        // fallback falhou, manter erro original
+      }
+    }
     openclawConfigFeedback.textContent = `Erro ao carregar modelos: ${error.message}`;
   }
 }
 
 async function applyOpenClawModelSelection() {
-  if (isNanobotActive()) {
-    const model = (nanobotModelInput?.value || "").trim();
-    if (!model) {
-      openclawConfigFeedback.textContent = "Informe o modelo do NanoBot.";
-      return;
-    }
-
-    openclawConfigFeedback.textContent = "Aplicando modelo NanoBot...";
-    setStatus("aplicando modelo nanobot", "running");
-
-    try {
-      const current = await fetchJson(activeAgentEndpoint("model"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model }),
-      });
-      openclawModelsCatalog.current = current;
-      renderOpenClawModelSelectors();
-      openclawConfigFeedback.textContent = `Modelo aplicado: ${current.label || current.model || model}`;
-      setStatus("modelo nanobot atualizado");
-    } catch (error) {
-      openclawConfigFeedback.textContent = `Falha ao aplicar modelo: ${error.message}`;
-      setStatus("erro modelo nanobot", "error");
-    }
-    return;
-  }
-
   const source = openclawModelSource.value || "cloud";
-  openclawConfigFeedback.textContent = "Aplicando modelo...";
-  setStatus("aplicando modelo openclaw", "running");
+  const frameworkLabel = isNanobotActive() ? "nanobot" : "openclaw";
+  openclawConfigFeedback.textContent = isNanobotActive()
+    ? "Aplicando modelo NanoBot..."
+    : "Aplicando modelo...";
+  setStatus(`aplicando modelo ${frameworkLabel}`, "running");
 
   const payload = { source };
 
@@ -3107,10 +3068,10 @@ async function applyOpenClawModelSelection() {
     openclawModelsCatalog.current = current;
     renderOpenClawModelSelectors();
     openclawConfigFeedback.textContent = `Modelo aplicado: ${current.label}`;
-    setStatus("modelo openclaw atualizado");
+    setStatus(`modelo ${frameworkLabel} atualizado`);
   } catch (error) {
     openclawConfigFeedback.textContent = `Falha ao aplicar modelo: ${error.message}`;
-    setStatus("erro modelo openclaw", "error");
+    setStatus(`erro modelo ${frameworkLabel}`, "error");
   }
 }
 
