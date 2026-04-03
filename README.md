@@ -1,248 +1,123 @@
+<p align="center">
+  <img src="apps/desktop-ui/ui/assets/mlxpilot-wordmark.png" alt="MLX Pilot" />
+</p>
+
 # MLX Pilot (Arquitetura Multi-Provider)
 
-Projeto em Rust com foco em arquitetura de TCC para execução local de LLMs com **roteamento multi-provider**:
-- **MLX** (Apple Silicon)
-- **llama.cpp embutido** (cross-platform via `llama-server` gerenciado pelo daemon)
-- **Ollama** (compatibilidade)
+Projeto em Rust para execucao local de LLMs com roteamento multi-provider:
+- MLX (Apple Silicon)
+- llama.cpp embutido (cross-platform via `llama-server` gerenciado pelo daemon)
+- Ollama (compatibilidade)
 
-Também oferece descoberta/download de modelos e interface desktop.
+Tambem oferece descoberta/download de modelos e interface desktop (Tauri).
 
 ---
 
-## Conceitos que ajudam a entender o projeto
+## Conceitos principais
 
-Se você não tem familiaridade com Rust, daemons ou APIs, esta seção resume o que você precisa saber.
+### O que e um daemon?
 
-### O que é um daemon?
+Um daemon e um programa que roda em segundo plano (sem janela), esperando requisicoes.
+Neste projeto, o daemon e um servidor HTTP local (por padrao `127.0.0.1:11435`) que expoe endpoints como `/health`, `/models`, `/chat` e `/catalog/...`.
 
-Um **daemon** é um programa que fica rodando em segundo plano (sem janela), esperando pedidos. Aqui, o daemon é um **servidor HTTP**: ele escuta em um endereço (por exemplo `127.0.0.1:11435`) e responde a requisições como “liste os modelos” ou “gere uma resposta de chat”. A interface desktop e qualquer outro cliente conversam com o sistema **só** através desse servidor.
+### Camadas do projeto
 
-### O que é este projeto em termos de “camadas”?
+1. Backend (Rust)
+- Servidor HTTP com endpoints de saude, modelos, chat e catalogo.
+- Roteamento dinamico para providers de inferencia.
 
-1. **Backend (Rust)**  
-   - Um servidor HTTP (daemon) que expõe endpoints como `/health`, `/models`, `/chat`, `/catalog/...`.  
-   - Esse servidor usa **providers plugáveis** para listar modelos e executar inferência (MLX, llama.cpp embutido e Ollama).
+2. Catalogo remoto
+- Integracao com Hugging Face para busca, detalhes e downloads.
 
-2. **Catálogo remoto**  
-   - Integração com Hugging Face: buscar modelos, ver detalhes, enfileirar downloads para uma pasta local e acompanhar o status.
+3. Interface desktop (Tauri)
+- App nativo com abas de Chat e Descobrir Modelos.
 
-3. **Interface desktop (Tauri)**  
-   - App nativo (janela) que consome a API do daemon. Abas: **Chat** (conversar com um modelo) e **Descobrir Modelos** (buscar e baixar do catálogo).
+### Workspace Cargo
 
-### Workspace Rust (Cargo)
-
-O projeto é um **workspace Cargo**: várias “crates” (bibliotecas/executáveis) em um mesmo repositório. O `Cargo.toml` na raiz declara os membros; cada pasta tem seu próprio `Cargo.toml`. Isso organiza o código em partes reutilizáveis e deixa a compilação e os testes mais simples.
+O repositorio e um workspace Rust com multiplas crates (core, providers e daemon), alem do app desktop.
 
 ---
 
 ## O que esta fase entrega
 
-- **Daemon HTTP** em Rust com endpoints:
-  - `GET /health` — saúde do serviço
-  - `GET /models` — lista de modelos locais
-  - `POST /chat` — chat (e `POST /chat/stream` para streaming)
-  - `GET /catalog/sources` — fontes do catálogo
-  - `GET /catalog/models` — busca de modelos no catálogo
-  - `POST /catalog/downloads` — enfileirar download
-  - `GET /catalog/downloads` e `GET /catalog/downloads/{job_id}` — status dos downloads
-- **Provider MLX**: lista modelos em uma pasta local e executa inferência via CLI (`python3 -m mlx_lm.generate` por padrão).
-- **Catálogo remoto (Hugging Face)**: busca por nome, task, likes, downloads e tamanho; download em 1 clique para pasta local, com fila de jobs e status.
-- **UI desktop (Tauri + frontend estático)**: abas **Chat** e **Descobrir Modelos**.
+- Daemon HTTP em Rust com endpoints:
+- `GET /health`
+- `GET /models`
+- `POST /chat`
+- `POST /chat/stream`
+- `GET /catalog/sources`
+- `GET /catalog/models`
+- `POST /catalog/downloads`
+- `GET /catalog/downloads`
+- `GET /catalog/downloads/{job_id}`
+- Provider MLX para modelos locais via CLI (`python3 -m mlx_lm.generate`, por padrao).
+- Provider llama.cpp embutido com `llama-server` gerenciado pelo daemon.
+- Provider Ollama para compatibilidade.
+- UI desktop (Tauri + frontend estatico).
 
 ---
 
-## Arquitetura do repositório: o que é cada pasta
+## Estrutura do repositorio
 
-```
+```text
 mlx-ollama-pilot/
-├── Cargo.toml              # Workspace: define crates (core, providers, daemon)
-├── crates/
-│   ├── core/               # Contratos de domínio (tipos, erros, trait do provider)
-│   ├── providers/
-│   │   ├── mlx/            # Provider MLX
-│   │   ├── llamacpp/       # Provider llama.cpp embutido (gerencia llama-server)
-│   │   └── ollama/         # Provider Ollama (compatibilidade)
-│   └── daemon/             # Servidor HTTP (Axum) e orquestração (chat, catálogo, etc.)
-├── apps/
-│   └── desktop-ui/         # App desktop Tauri + frontend (HTML/JS/CSS)
-├── scripts/                # Scripts para subir/parar daemon e rodar o app desktop
-└── target/                 # Gerado pelo Cargo (compilados, dependências) — pode ignorar
+|-- Cargo.toml
+|-- crates/
+|   |-- core/
+|   |-- providers/
+|   |   |-- mlx/
+|   |   |-- llamacpp/
+|   |   '-- ollama/
+|   '-- daemon/
+|-- apps/
+|   '-- desktop-ui/
+|       |-- ui/
+|       '-- src-tauri/
+'-- scripts/
 ```
 
-### Descrição de cada parte
-
-| Pasta / arquivo | O que é | Para que serve |
-|-----------------|---------|----------------|
-| **`crates/core`** | Biblioteca Rust de **domínio** | Define contratos (tipos de chat, erros e trait `ModelProvider`) usados por qualquer backend de inferência. |
-| **`crates/providers/mlx`** | Provider **MLX** | Executa modelos MLX locais via CLI (`mlx_lm.generate`). |
-| **`crates/providers/llamacpp`** | Provider **llama.cpp embutido** | Descobre modelos `.gguf`, sobe/gerencia `llama-server` automaticamente por modelo e chama API OpenAI-compatible local (`/v1/chat/completions`). |
-| **`crates/providers/ollama`** | Provider **Ollama** | Compatibilidade/fallback cross-platform via API local Ollama. |
-| **`crates/daemon`** | **Servidor HTTP** (executável) | Expõe `/health`, `/models`, `/chat`, `/chat/stream`, `/web/brave/search`, `/openclaw/...`, `/catalog/...` e roteia dinamicamente para o provider correto. |
-| **`apps/desktop-ui`** | **App desktop** (Tauri) | `src-tauri/`: código Rust do shell Tauri (janela, permissões). `ui/`: frontend estático (HTML, JS, CSS) que chama a API do daemon em `127.0.0.1:11435`. Abas Chat e Descobrir Modelos. |
-| **`scripts/`** | Scripts de conveniência | `run-desktop.sh`: sobe o daemon e abre o app desktop. `stop-daemon.sh`: encerra o processo do daemon. Úteis para quem não quer rodar daemon e Tauri manualmente. |
-| **`target/`** | Saída do Cargo | Compilados e artefatos. Não versionar; pode ser apagado (o Cargo recria). |
-
-### Fluxo resumido
-
-- **Frontend (desktop-ui)** → HTTP → **Daemon** → **Provider MLX** (lista modelos, chama Python para inferência) e **Catálogo** (Hugging Face, downloads).
-- O **core** não depende do daemon nem do provider; o daemon e o provider dependem do core.
+| Pasta | Papel |
+|---|---|
+| `crates/core` | Contratos de dominio (tipos, erros, trait `ModelProvider`). |
+| `crates/providers/mlx` | Provider MLX. |
+| `crates/providers/llamacpp` | Provider llama.cpp embutido. |
+| `crates/providers/ollama` | Provider Ollama. |
+| `crates/daemon` | Servidor HTTP principal. |
+| `apps/desktop-ui` | App desktop Tauri e frontend. |
+| `scripts` | Scripts de conveniencia (`run-desktop.sh`, `stop-daemon.sh`) para macOS/Linux. |
 
 ---
 
-## Requisitos para desenvolver e rodar (ex.: Mac mini M4)
+## Requisitos
 
-- **Rust**: toolchain instalado (ex.: `rustup`). Usado para compilar o daemon e o app Tauri.
-- **Python** com `mlx-lm` no ambiente que o daemon usa (o daemon chama `python3 -m mlx_lm.generate` ou comando configurado).
-- **Modelos locais**: por padrão esperados em `/Users/kaike/models` (configurável por variável de ambiente).
+### Requisitos gerais
 
-Não é necessário ter um executável pré-compilado: o projeto é rodado a partir do código-fonte com `cargo run` e `cargo tauri dev`.
+- Rust (toolchain estavel via `rustup`)
+- Python com `mlx-lm` no ambiente usado pelo daemon (quando for usar MLX)
+- Modelos locais
 
----
+### Windows
 
-## Como rodar o projeto (sem executável pré-compilado)
-
-O projeto **não** é distribuído como um único executável; você compila e roda a partir do código. Duas formas típicas:
-
-### Opção 1: Só o daemon (API)
-
-No diretório do projeto:
-
-```bash
-cd /Users/kaike/mlx-ollama-pilot
-cargo run -p mlx-ollama-daemon
-```
-
-- `cargo run` compila (se precisar) e executa.
-- `-p mlx-ollama-daemon` indica o pacote do daemon (em `crates/daemon`).
-- O daemon sobe em `127.0.0.1:11435` (por padrão). Você pode testar com `curl` (veja “Testar API” mais abaixo).
-
-### Opção 2: Daemon + app desktop (recomendado para uso diário)
-
-Use o script que sobe o daemon e abre a interface:
-
-```bash
-cd /Users/kaike/mlx-ollama-pilot
-./scripts/run-desktop.sh
-```
-
-O script:
-
-1. Garante que não há outro daemon na porta 11435 (reinicia se precisar).
-2. Sobe o daemon em background com `cargo run -p mlx-ollama-daemon`.
-3. Espera o daemon ficar saudável e abre o app Tauri com `cargo tauri dev` (em `apps/desktop-ui/src-tauri`).
-
-Para parar o daemon depois:
-
-```bash
-cd /Users/kaike/mlx-ollama-pilot
-./scripts/stop-daemon.sh
-```
-
-**Resumo:** se ainda não está compilado em um executável, use `cargo run -p mlx-ollama-daemon` para só a API, ou `./scripts/run-desktop.sh` para API + interface desktop.
-
----
-
-## Configuração do daemon (variáveis de ambiente)
-
-| Variável | Default | Descrição |
-|----------|---------|-----------|
-| `APP_BIND_ADDR` | `127.0.0.1:11435` | Endereço e porta em que o daemon escuta |
-| `APP_LOCAL_PROVIDER` | `auto` | `auto`, `mlx`, `llamacpp` ou `ollama` |
-| `APP_MODELS_DIR` | `/Users/kaike/models` | Pasta raiz de modelos locais |
-| `APP_MLX_COMMAND` | `python3` | Comando base para inferência |
-| `APP_MLX_PREFIX_ARGS` | `-m mlx_lm.generate` | Argumentos antes do modelo/prompt |
-| `APP_MLX_SUFFIX_ARGS` | (vazio) | Argumentos após |
-| `APP_MLX_TIMEOUT_SECS` | `900` | Timeout da inferência em segundos |
-| `APP_LLAMACPP_SERVER_BINARY` | `llama-server` | Binário do servidor llama.cpp |
-| `APP_LLAMACPP_BASE_URL` | `http://127.0.0.1:11439` | URL do servidor embutido llama.cpp |
-| `APP_LLAMACPP_AUTO_START` | `true` | Sobe o `llama-server` automaticamente |
-| `APP_LLAMACPP_AUTO_INSTALL` | `true` | Tenta instalar llama.cpp automaticamente (best-effort) |
-| `APP_LLAMACPP_CONTEXT_SIZE` | `16384` | Context window do `llama-server` |
-| `APP_LLAMACPP_GPU_LAYERS` | `999` | Camadas na GPU para llama.cpp |
-| `APP_OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | URL Ollama |
-| `APP_REMOTE_DOWNLOADS_DIR` | `/Users/kaike/models` | Pasta onde os downloads do catálogo vão |
-| `APP_HF_API_BASE` | `https://huggingface.co` | Base da API Hugging Face |
-| `APP_HF_PYTHON` | (venv se existir, senão `python3`) | Python para ferramentas HF |
-| `APP_HF_TOKEN` | (vazio) | Token HF para modelos gated/privados |
-| `APP_CATALOG_SEARCH_LIMIT` | `18` | Limite de resultados na busca do catálogo |
-| `APP_CATALOG_DOWNLOAD_TIMEOUT_SECS` | `21600` | Timeout de download do catálogo |
-
----
-
-## Testar a API
-
-Com o daemon rodando:
-
-```bash
-curl http://127.0.0.1:11435/models
-```
-
-```bash
-curl -X POST http://127.0.0.1:11435/chat \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "model_id": "Qwen3-Coder-30B-A3B-Instruct-MLX-4bit",
-    "messages": [{"role":"user", "content":"Explique recursao em uma frase."}],
-    "options": {"temperature":0.2, "max_tokens":128}
-  }'
-```
-
-```bash
-curl 'http://127.0.0.1:11435/catalog/models?source=huggingface&query=mlx%20qwen&limit=5'
-```
-
-```bash
-curl -X POST http://127.0.0.1:11435/catalog/downloads \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "source": "huggingface",
-    "model_id": "hf-internal-testing/tiny-random-gpt2",
-    "allow_patterns": ["*.json", "*.safetensors"]
-  }'
-```
-
-```bash
-curl http://127.0.0.1:11435/catalog/downloads
-```
-
----
-
-## Resumo para o time
-
-- **O que é cada pasta:** `crates/core` = domínio; `crates/providers/*` = backends de inferência; `crates/daemon` = servidor HTTP; `apps/desktop-ui` = app desktop; `scripts/` = atalhos para rodar/parar.
-- **Como rodar sem executável pronto:** `cargo run -p mlx-ollama-daemon` (só API) ou `./scripts/run-desktop.sh` (API + app desktop).
-- **Parar o daemon:** `./scripts/stop-daemon.sh`.
-
-Com isso, qualquer pessoa do time consegue entender a arquitetura e rodar o projeto a partir do código-fonte.
-
----
-
-## Tutorial Windows (PowerShell)
-
-Se o objetivo for rodar no Windows sem usar os scripts `.sh`, use este fluxo.
-
-### 1) Instalar toolchain e depend�ncias
-
-No PowerShell (preferencialmente como Administrador):
+Instale Rust e Build Tools:
 
 ```powershell
 winget install -e --id Rustlang.Rustup
 winget install -e --id Microsoft.VisualStudio.2022.BuildTools
 ```
 
-No instalador do Visual Studio Build Tools, marque:
+No instalador do Visual Studio Build Tools, selecione:
 - `Desktop development with C++`
 - `MSVC v143`
 - `Windows 10/11 SDK`
 
-Feche e abra o PowerShell e valide:
+Validacao:
 
 ```powershell
 rustup --version
 cargo --version
 ```
 
-Se `cargo` ainda nao estiver no `PATH`:
+Se `cargo` nao estiver no PATH:
 
 ```powershell
 $env:Path += ";$env:USERPROFILE\.cargo\bin"
@@ -255,64 +130,41 @@ Instale a CLI do Tauri:
 cargo install tauri-cli --locked
 ```
 
-### 2) Rodar em modo desenvolvimento
+### macOS/Linux
 
-Terminal 1 (daemon):
+- Rust (`rustup`)
+- Ferramentas de build nativas do sistema
+- (Opcional) `scripts/run-desktop.sh` e `scripts/stop-daemon.sh` para fluxo rapido
+
+---
+
+## Como rodar (desenvolvimento)
+
+### Opcao A: somente daemon (API)
+
+```bash
+cargo run -p mlx-ollama-daemon
+```
+
+### Opcao B: daemon + desktop
+
+#### Windows (PowerShell)
+
+Terminal 1:
 
 ```powershell
 cd g:\ai\mlx-ollama-pilot
 cargo run -p mlx-ollama-daemon
 ```
 
-Terminal 2 (desktop):
+Terminal 2:
 
 ```powershell
 cd g:\ai\mlx-ollama-pilot\apps\desktop-ui\src-tauri
 cargo tauri dev
 ```
 
-### 3) Gerar binarios de release
-
-Daemon:
-
-```powershell
-cd g:\ai\mlx-ollama-pilot
-cargo build -p mlx-ollama-daemon --release
-```
-
-Desktop (instalador e executavel):
-
-```powershell
-cd g:\ai\mlx-ollama-pilot\apps\desktop-ui\src-tauri
-cargo tauri build
-```
-
-Artefatos esperados:
-- Daemon: `target\release\mlx-ollama-daemon.exe`
-- Desktop bundle: `apps\desktop-ui\src-tauri\target\release\bundle\...` (ex.: `.msi`, `.exe`)
-
----
-
-## Como distribuir para usuario final (sem exigir Rust/Cargo)
-
-Para o usuario apenas instalar e abrir:
-
-1. Gere release com `cargo tauri build` (desktop) e `cargo build --release` (daemon).
-2. Empacote os artefatos por sistema operacional (Windows `.msi/.exe`, macOS `.dmg/.app`, Linux `.deb/.AppImage`).
-3. Publique em GitHub Releases (ou outro canal) com versionamento semantico.
-4. Opcional e recomendado: assinatura de codigo do instalador para evitar alertas de seguranca.
-
-Fluxo recomendado de produto:
-- O app desktop inicia o daemon automaticamente (processo filho/sidecar) para o usuario nao precisar abrir dois programas.
-- O instalador inclui tudo necessario para execucao local, exceto dependencias grandes opcionais (modelos).
-- Atualizacoes podem ser feitas por nova release (manual) ou updater do Tauri (automatico).
-
----
-
-## Nota importante para Developer Command Prompt (cmd)
-
-Se voce estiver no `Developer Command Prompt for VS 2022` (cmd), use `cd /d` para trocar de unidade e pasta.
-No `cmd`, `cd g:\...` pode nao trocar de drive.
+Se estiver no **Developer Command Prompt for VS 2022** (`cmd`), use:
 
 ```cmd
 cd /d g:\ai\mlx-ollama-pilot
@@ -323,3 +175,115 @@ cargo run -p mlx-ollama-daemon
 cd /d g:\ai\mlx-ollama-pilot\apps\desktop-ui\src-tauri
 cargo tauri dev
 ```
+
+No `cmd`, `cd g:\...` pode nao trocar a unidade. Use `cd /d ...` (ou rode `g:` antes).
+
+#### macOS/Linux
+
+```bash
+./scripts/run-desktop.sh
+```
+
+Para parar o daemon:
+
+```bash
+./scripts/stop-daemon.sh
+```
+
+---
+
+## Build de release
+
+### Daemon
+
+```bash
+cargo build -p mlx-ollama-daemon --release
+```
+
+### Desktop (Tauri)
+
+```bash
+cd apps/desktop-ui/src-tauri
+cargo tauri build
+```
+
+Artefatos esperados:
+- Daemon (Windows): `target\release\mlx-ollama-daemon.exe`
+- Daemon (Unix): `target/release/mlx-ollama-daemon`
+- Bundle desktop: `apps/desktop-ui/src-tauri/target/release/bundle/...` (ex.: `.msi`, `.exe`, `.dmg`, `.deb`, `.AppImage`)
+
+---
+
+## Distribuicao para usuario final (instalador pronto)
+
+Para o usuario nao precisar instalar Rust/Cargo:
+
+1. Gere os artefatos de release (`cargo build --release` e `cargo tauri build`).
+2. Publique os instaladores por plataforma (Windows/macOS/Linux).
+3. Distribua em GitHub Releases com versionamento semantico.
+4. Recomenda-se assinatura de codigo dos instaladores.
+
+Fluxo de produto recomendado:
+- O app desktop inicia o daemon automaticamente (sidecar/processo filho).
+- O instalador entrega app ja compilado.
+- Atualizacoes podem ser manuais (nova release) ou automaticas via updater do Tauri.
+
+---
+
+## Configuracao via variaveis de ambiente (daemon)
+
+| Variavel | Padrao | Descricao |
+|---|---|---|
+| `APP_BIND_ADDR` | `127.0.0.1:11435` | Endereco e porta do daemon |
+| `APP_LOCAL_PROVIDER` | `auto` | `auto`, `mlx`, `llamacpp` ou `ollama` |
+| `APP_MODELS_DIR` | `/Users/kaike/models` | Pasta raiz de modelos locais |
+| `APP_MLX_COMMAND` | `python3` | Comando base para inferencia |
+| `APP_MLX_PREFIX_ARGS` | `-m mlx_lm.generate` | Args antes do modelo/prompt |
+| `APP_MLX_SUFFIX_ARGS` | vazio | Args apos o prompt |
+| `APP_MLX_TIMEOUT_SECS` | `900` | Timeout da inferencia |
+| `APP_LLAMACPP_SERVER_BINARY` | `llama-server` | Binario do llama.cpp |
+| `APP_LLAMACPP_BASE_URL` | `http://127.0.0.1:11439` | URL do servidor llama.cpp |
+| `APP_LLAMACPP_AUTO_START` | `true` | Sobe `llama-server` automaticamente |
+| `APP_LLAMACPP_AUTO_INSTALL` | `true` | Tenta instalar llama.cpp automaticamente |
+| `APP_LLAMACPP_CONTEXT_SIZE` | `16384` | Context window |
+| `APP_LLAMACPP_GPU_LAYERS` | `999` | Camadas na GPU |
+| `APP_OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | URL do Ollama |
+| `APP_REMOTE_DOWNLOADS_DIR` | `/Users/kaike/models` | Destino dos downloads do catalogo |
+| `APP_HF_API_BASE` | `https://huggingface.co` | Base da API Hugging Face |
+| `APP_HF_PYTHON` | venv ou `python3` | Python para ferramentas HF |
+| `APP_HF_TOKEN` | vazio | Token HF (modelos privados/gated) |
+| `APP_CATALOG_SEARCH_LIMIT` | `18` | Limite da busca |
+| `APP_CATALOG_DOWNLOAD_TIMEOUT_SECS` | `21600` | Timeout de download |
+
+---
+
+## Testar API rapidamente
+
+Com o daemon rodando:
+
+```bash
+curl http://127.0.0.1:11435/health
+curl http://127.0.0.1:11435/models
+```
+
+Exemplo de chat:
+
+```bash
+curl -X POST http://127.0.0.1:11435/chat \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model_id": "Qwen3-Coder-30B-A3B-Instruct-MLX-4bit",
+    "messages": [{"role":"user", "content":"Explique recursao em uma frase."}],
+    "options": {"temperature":0.2, "max_tokens":128}
+  }'
+```
+
+---
+
+## Resumo rapido
+
+- Backend: `crates/daemon`
+- Providers: `crates/providers/*`
+- UI desktop: `apps/desktop-ui`
+- Execucao dev no Windows: dois terminais (`cargo run` + `cargo tauri dev`)
+- Distribuicao final: `cargo tauri build` + publicacao dos instaladores
