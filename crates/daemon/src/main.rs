@@ -641,7 +641,13 @@ async fn list_chat_models(state: &AppState) -> Result<Vec<ModelDescriptor>, Prov
         LocalProviderMode::Llamacpp => state.llamacpp_provider.list_models().await,
         LocalProviderMode::Ollama => state.ollama_provider.list_models().await,
         LocalProviderMode::Auto => {
-            let mlx_models = state.mlx_provider.list_models().await?;
+            let mlx_models = match state.mlx_provider.list_models().await {
+                Ok(models) => models,
+                Err(error) => {
+                    warn!("mlx unavailable while listing models in auto mode: {error}");
+                    Vec::new()
+                }
+            };
             let llamacpp_models = match state.llamacpp_provider.list_models().await {
                 Ok(models) => models,
                 Err(error) => {
