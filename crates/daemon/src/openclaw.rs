@@ -138,7 +138,7 @@ impl OpenClawRuntime {
                 .await
                 .map_err(|e| OpenClawError::Io {
                     context: "falha criando diretorio pai do openclaw".to_string(),
-                    source: e,
+                    source: e.to_string(),
                 })?;
         }
 
@@ -153,7 +153,7 @@ impl OpenClawRuntime {
                 .await
                 .map_err(|e| OpenClawError::Io {
                     context: "falha rodando git clone".to_string(),
-                    source: e,
+                    source: e.to_string(),
                 })?;
 
             if !output.status.success() {
@@ -166,14 +166,14 @@ impl OpenClawRuntime {
 
         // 2. npm install
         let output = Command::new(&self.cfg.node_command)
-            .arg(npm_command_name())
+            .arg(Self::npm_command_name())
             .arg("install")
             .current_dir(parent_dir)
             .output()
             .await
             .map_err(|e| OpenClawError::Io {
                 context: "falha rodando npm install".to_string(),
-                source: e,
+                source: e.to_string(),
             })?;
 
         if !output.status.success() {
