@@ -2,7 +2,7 @@ import { ParticleSystem } from "./particles.js";
 
 const STORAGE_DAEMON_URL = "mlxPilotDaemonUrl";
 const STORAGE_CHAT_THREADS = "mlxPilotChatThreadsV2";
-const STORAGE_OPENCLAW_OBSERVABILITY = "mlxPilotOpenClawObservabilityV1";
+const STORAGE_AGENT_OBSERVABILITY_PREFIX = "mlxPilotAgentObservabilityV2";
 const STORAGE_BRAVE_API_KEY = "mlxPilotBraveApiKey";
 const STORAGE_CHAT_WEBSEARCH_ENABLED = "mlxPilotWebsearchEnabled";
 
@@ -23,6 +23,7 @@ const braveApiKeyInput = document.getElementById("brave-api-key");
 const saveUrlBtn = document.getElementById("save-url");
 
 const tabButtons = Array.from(document.querySelectorAll(".tab-btn[data-tab]"));
+const agentTabLabel = document.getElementById("agent-tab-label");
 const panelChat = document.getElementById("panel-chat");
 const panelDiscover = document.getElementById("panel-discover");
 const panelOpenClaw = document.getElementById("panel-openclaw");
@@ -71,6 +72,16 @@ const refreshOpenclawStatusBtn = document.getElementById("refresh-openclaw-statu
 const openclawStartBtn = document.getElementById("openclaw-start-btn");
 const openclawStopBtn = document.getElementById("openclaw-stop-btn");
 const openclawRestartBtn = document.getElementById("openclaw-restart-btn");
+const agentPanelEyebrow = document.getElementById("agent-panel-eyebrow");
+const agentPanelTitle = document.getElementById("agent-panel-title");
+const agentSubtabsLabel = document.getElementById("agent-subtabs-label");
+const agentChatTitle = document.getElementById("agent-chat-title");
+const agentLogsTitle = document.getElementById("agent-logs-title");
+const agentObservabilityTitle = document.getElementById("agent-observability-title");
+const agentConfigTitle = document.getElementById("agent-config-title");
+const agentLogOptionGateway = document.getElementById("agent-log-option-gateway");
+const agentLogOptionError = document.getElementById("agent-log-option-error");
+const agentLogOptionSync = document.getElementById("agent-log-option-sync");
 
 const openclawViewButtons = Array.from(document.querySelectorAll(".openclaw-view-btn"));
 const openclawMultiViewToggle = document.getElementById("openclaw-multi-view");
@@ -99,12 +110,19 @@ const openclawTools = document.getElementById("openclaw-tools");
 const openclawModelSource = document.getElementById("openclaw-model-source");
 const openclawCloudPicker = document.getElementById("openclaw-cloud-picker");
 const openclawLocalPicker = document.getElementById("openclaw-local-picker");
+const nanobotModelPicker = document.getElementById("nanobot-model-picker");
+const nanobotModelInput = document.getElementById("nanobot-model-input");
 const openclawCloudModelSelect = document.getElementById("openclaw-cloud-model-select");
 const openclawLocalModelSelect = document.getElementById("openclaw-local-model-select");
 const refreshOpenclawModelsBtn = document.getElementById("refresh-openclaw-models");
 const applyOpenclawModelBtn = document.getElementById("apply-openclaw-model");
 const openclawModelCurrent = document.getElementById("openclaw-model-current");
 const openclawConfigFeedback = document.getElementById("openclaw-config-feedback");
+const openclawModelSourceLabel = document.getElementById("openclaw-model-source-label");
+const openclawModelSourceCloudOption = document.getElementById("openclaw-model-source-cloud-option");
+const openclawModelSourceLocalOption = document.getElementById("openclaw-model-source-local-option");
+const openclawCloudLabel = document.getElementById("openclaw-cloud-label");
+const openclawLocalLabel = document.getElementById("openclaw-local-label");
 
 const settingModelsDir = document.getElementById("setting-models-dir");
 const discoverModelsDir = document.getElementById("discover-models-dir");
@@ -114,6 +132,9 @@ const settingOpenclawState = document.getElementById("setting-openclaw-state");
 const saveSettingsBtn = document.getElementById("save-settings-btn");
 const installOpenclawBtn = document.getElementById("install-openclaw-btn");
 const installOpenclawFeedback = document.getElementById("install-openclaw-feedback");
+const checkOpenclawStatusBtn = document.getElementById("check-openclaw-status-btn");
+const openclawInstallStatusFeedback = document.getElementById("openclaw-install-status-feedback");
+const openclawInstallStatusOutput = document.getElementById("openclaw-install-status-output");
 
 const frameworkRadios = document.querySelectorAll('input[name="agent-framework"]');
 const openclawSettingsGroup = document.getElementById("openclaw-settings-group");
@@ -121,6 +142,16 @@ const nanobotSettingsGroup = document.getElementById("nanobot-settings-group");
 const settingNanobotCli = document.getElementById("setting-nanobot-cli");
 const installNanobotBtn = document.getElementById("install-nanobot-btn");
 const installNanobotFeedback = document.getElementById("install-nanobot-feedback");
+const checkNanobotStatusBtn = document.getElementById("check-nanobot-status-btn");
+const initNanobotBtn = document.getElementById("init-nanobot-btn");
+const nanobotStatusFeedback = document.getElementById("nanobot-status-feedback");
+const nanobotStatusOutput = document.getElementById("nanobot-status-output");
+const refreshOpenclawEnvBtn = document.getElementById("refresh-openclaw-env-btn");
+const saveOpenclawEnvBtn = document.getElementById("save-openclaw-env-btn");
+const revealOpenclawEnvToggle = document.getElementById("reveal-openclaw-env");
+const openclawEnvFeedback = document.getElementById("openclaw-env-feedback");
+const openclawEnvPath = document.getElementById("openclaw-env-path");
+const openclawEnvList = document.getElementById("openclaw-env-list");
 
 let daemonBaseUrl = localStorage.getItem(STORAGE_DAEMON_URL) || "http://127.0.0.1:11435";
 let selectedModelId = null;
@@ -131,6 +162,7 @@ let activeThreadId = null;
 let openThreadMenuId = null;
 
 let activeTab = "chat";
+let activeAgentFramework = "openclaw";
 let chatModelMenuOpen = false;
 let isGenerating = false;
 let activeStreamController = null;
@@ -142,6 +174,17 @@ let downloadsTimer = null;
 
 const aiParticleInput = document.getElementById("ai-particle-input");
 const aiParticleBtn = document.getElementById("ai-particle-btn");
+const aiParticleStopBtn = document.getElementById("ai-particle-stop-btn");
+const aiSceneStatus = document.getElementById("ai-scene-status");
+const aiSceneSteps = document.getElementById("ai-scene-steps");
+const aiSceneExampleButtons = Array.from(document.querySelectorAll(".ai-scene-example-btn"));
+
+let aiSceneInFlight = false;
+let aiSceneLastScript = null;
+let aiSceneAnimating = false;
+let aiSceneRequestToken = 0;
+let openclawInstallInFlight = false;
+let openclawStatusCheckInFlight = false;
 
 let openclawStatusLoaded = false;
 let openclawObservabilityLoaded = false;
@@ -152,6 +195,7 @@ let openclawLogCursor = 0;
 let openclawRuntimeActionInFlight = false;
 let openclawSelectedViews = new Set(["chat"]);
 let openclawMultiView = false;
+let openclawEnvironmentInFlight = false;
 let openclawModelsCatalog = {
   cloud_models: [],
   local_models: [],
@@ -203,6 +247,206 @@ async function fetchJson(path, options = {}) {
   }
 
   return response.json();
+}
+
+function isNanobotActive() {
+  return activeAgentFramework === "nanobot";
+}
+
+function activeAgentLabel() {
+  return isNanobotActive() ? "NanoBot" : "OpenClaw";
+}
+
+function activeAgentEndpoint(path) {
+  const normalized = String(path || "").replace(/^\/+/, "");
+  const prefix = isNanobotActive() ? "/nanobot" : "/openclaw";
+  return `${prefix}/${normalized}`;
+}
+
+function observabilityStorageKey() {
+  return `${STORAGE_AGENT_OBSERVABILITY_PREFIX}:${activeAgentFramework}`;
+}
+
+function applyFrameworkGroupsVisibility() {
+  openclawSettingsGroup.classList.toggle("hidden", isNanobotActive());
+  nanobotSettingsGroup.classList.toggle("hidden", !isNanobotActive());
+}
+
+function applyAgentPanelCopy() {
+  const label = activeAgentLabel();
+  const isNanobot = isNanobotActive();
+
+  if (agentTabLabel) {
+    agentTabLabel.textContent = label;
+  }
+  if (agentPanelEyebrow) {
+    agentPanelEyebrow.textContent = `${label} Integration`;
+  }
+  if (agentPanelTitle) {
+    agentPanelTitle.textContent = isNanobot
+      ? "Chat, runtime e configuracao do NanoBot"
+      : "Chat, observabilidade e configuracao";
+  }
+  if (agentSubtabsLabel) {
+    agentSubtabsLabel.setAttribute("aria-label", `${label} visualizacao`);
+  }
+  if (agentChatTitle) {
+    agentChatTitle.textContent = `Chat com ${label}`;
+  }
+  if (agentLogsTitle) {
+    agentLogsTitle.textContent = `Logs em tempo real (${label})`;
+  }
+  if (agentObservabilityTitle) {
+    agentObservabilityTitle.textContent = `Skills e Tools da ultima resposta (${label})`;
+  }
+  if (agentConfigTitle) {
+    agentConfigTitle.textContent = isNanobot
+      ? "Configuracao de modelo NanoBot"
+      : "Configuracao de modelo OpenClaw";
+  }
+  if (openclawMessageInput) {
+    openclawMessageInput.placeholder = `Converse com o ${label} aqui...`;
+  }
+  if (openclawSendBtn) {
+    openclawSendBtn.textContent = `Enviar para ${label}`;
+  }
+  if (refreshOpenclawStatusBtn) {
+    refreshOpenclawStatusBtn.textContent = isNanobot ? "Atualizar status NanoBot" : "Atualizar status";
+  }
+  if (agentLogOptionGateway) {
+    agentLogOptionGateway.textContent = "gateway.log";
+  }
+  if (agentLogOptionError) {
+    agentLogOptionError.textContent = "gateway.err.log";
+  }
+  if (agentLogOptionSync) {
+    agentLogOptionSync.textContent = isNanobot ? "agent.log" : "openclaw-mlx-sync.log";
+  }
+  if (openclawModelSourceLabel) {
+    openclawModelSourceLabel.textContent = "Origem do modelo";
+  }
+  if (openclawModelSourceCloudOption) {
+    openclawModelSourceCloudOption.textContent = isNanobot
+      ? "Nuvem (catalogo compartilhado OpenClaw)"
+      : "Nuvem (OpenClaw configurado)";
+  }
+  if (openclawModelSourceLocalOption) {
+    openclawModelSourceLocalOption.textContent = "Local (MLX-Pilot)";
+  }
+  if (openclawCloudLabel) {
+    openclawCloudLabel.textContent = isNanobot
+      ? "Modelos cloud compartilhados"
+      : "Modelos cloud";
+  }
+  if (openclawLocalLabel) {
+    openclawLocalLabel.textContent = "Modelos locais compartilhados";
+  }
+  if (refreshOpenclawModelsBtn) {
+    refreshOpenclawModelsBtn.textContent = "Atualizar modelos";
+  }
+  if (applyOpenclawModelBtn) {
+    applyOpenclawModelBtn.textContent = isNanobot ? "Aplicar modelo NanoBot" : "Aplicar modelo";
+  }
+}
+
+function applyAgentFramework(nextFramework, { syncRadio = false, refreshPanel = false } = {}) {
+  const normalized = nextFramework === "nanobot" ? "nanobot" : "openclaw";
+  const changed = normalized !== activeAgentFramework;
+  activeAgentFramework = normalized;
+
+  if (syncRadio) {
+    frameworkRadios.forEach((radio) => {
+      radio.checked = radio.value === normalized;
+    });
+  }
+
+  applyFrameworkGroupsVisibility();
+  applyAgentPanelCopy();
+  toggleOpenClawSourceFields();
+
+  if (changed) {
+    openclawStatusLoaded = false;
+    openclawObservabilityLoaded = false;
+    resetOpenClawLogState();
+    openclawRuntimeMeta.textContent = "runtime: verificando...";
+  }
+
+  if (normalized === "nanobot") {
+    void loadNanobotStatus();
+  } else {
+    void loadOpenclawInstallStatus({ showLoading: false, syncInstallFeedback: false });
+  }
+
+  if (refreshPanel && activeTab === "openclaw") {
+    onOpenClawTabSelected();
+  }
+}
+
+function createParticleSystemFallback() {
+  let frameTimer = null;
+  let frameIndex = -1;
+  let frames = [];
+  let shouldLoop = false;
+
+  const clearTimer = () => {
+    if (frameTimer) {
+      window.clearTimeout(frameTimer);
+      frameTimer = null;
+    }
+  };
+
+  const playNext = (callbacks) => {
+    if (!frames.length) {
+      callbacks.onComplete?.();
+      return;
+    }
+
+    frameIndex += 1;
+    if (frameIndex >= frames.length) {
+      if (!shouldLoop) {
+        callbacks.onComplete?.();
+        return;
+      }
+      frameIndex = 0;
+    }
+
+    callbacks.onFrame?.(frameIndex, frames[frameIndex]);
+    const durationMs = clampSceneNumber(frames[frameIndex]?.duration_ms, 900, 9000, 2200);
+    frameTimer = window.setTimeout(() => playNext(callbacks), durationMs);
+  };
+
+  return {
+    onWindowResize() {
+      // no-op fallback
+    },
+    setParticleState() {
+      // no-op fallback
+    },
+    formText() {
+      // no-op fallback
+    },
+    stopScene() {
+      clearTimer();
+      frames = [];
+      frameIndex = -1;
+      shouldLoop = false;
+    },
+    playScript(script, options = {}) {
+      clearTimer();
+      frames = Array.isArray(script?.frames) ? script.frames : [];
+      frameIndex = -1;
+      shouldLoop = Boolean(options.loop);
+
+      if (!frames.length) {
+        options.onComplete?.();
+        return;
+      }
+      playNext({
+        onFrame: options.onFrame,
+        onComplete: options.onComplete,
+      });
+    },
+  };
 }
 
 function formatNumber(value) {
@@ -259,6 +503,605 @@ function formatEpoch(epochMs) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+function normalizeScenePrompt(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value
+    .replace(/\s+/g, " ")
+    .replace(/\u00a0/g, " ")
+    .trim()
+    .slice(0, 320);
+}
+
+function truncateSceneText(value, max = 78) {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.length <= max) {
+    return normalized;
+  }
+  return `${normalized.slice(0, max - 3)}...`;
+}
+
+function clampSceneNumber(value, min, max, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.max(min, Math.min(max, parsed));
+}
+
+function normalizeSceneColor(value, fallback) {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 32) {
+    return fallback;
+  }
+  return normalized;
+}
+
+function setAiSceneStatus(text) {
+  if (!aiSceneStatus) {
+    return;
+  }
+  aiSceneStatus.textContent = text;
+}
+
+function setAiSceneBusyState() {
+  if (aiParticleBtn) {
+    aiParticleBtn.disabled = aiSceneInFlight;
+    aiParticleBtn.textContent = aiSceneInFlight ? "Montando cena..." : "Animar resposta";
+  }
+  if (aiParticleStopBtn) {
+    aiParticleStopBtn.disabled = !aiSceneAnimating && !aiSceneInFlight;
+  }
+}
+
+function renderAiSceneSteps(script, activeIndex = -1) {
+  if (!aiSceneSteps) {
+    return;
+  }
+
+  aiSceneSteps.innerHTML = "";
+  const frames = Array.isArray(script?.frames) ? script.frames : [];
+  if (!frames.length) {
+    return;
+  }
+
+  frames.forEach((frame, index) => {
+    const item = document.createElement("li");
+    item.className = "ai-scene-step";
+    if (index === activeIndex) {
+      item.classList.add("active");
+    }
+
+    const caption = truncateSceneText(frame.caption || `Etapa ${index + 1}`, 42);
+    const duration = clampSceneNumber(frame.duration_ms, 500, 9000, 2200);
+    const seconds = (duration / 1000).toFixed(1).replace(".0", "");
+    item.textContent = `${index + 1}. ${caption} (${seconds}s)`;
+    aiSceneSteps.appendChild(item);
+  });
+}
+
+function sanitizeSceneShape(shape) {
+  if (!shape || typeof shape !== "object") {
+    return null;
+  }
+
+  const type = String(shape.type || "").trim().toLowerCase();
+  const allowed = new Set(["text", "line", "arrow", "circle", "ring", "rect", "box", "spiral", "wave", "dot", "point"]);
+  if (!allowed.has(type)) {
+    return null;
+  }
+
+  const normalized = { type };
+
+  if (type === "text") {
+    normalized.text = truncateSceneText(shape.text || "", 96);
+    if (!normalized.text) {
+      return null;
+    }
+    normalized.x = clampSceneNumber(shape.x, 0, 100, 50);
+    normalized.y = clampSceneNumber(shape.y, 0, 100, 50);
+    normalized.size = clampSceneNumber(shape.size, 10, 110, 32);
+    normalized.weight = clampSceneNumber(shape.weight, 300, 900, 700);
+    normalized.align = ["left", "center", "right"].includes(String(shape.align || "").toLowerCase())
+      ? String(shape.align).toLowerCase()
+      : "center";
+    normalized.color = normalizeSceneColor(shape.color, "#bfe8ff");
+    return normalized;
+  }
+
+  normalized.color = normalizeSceneColor(shape.color, "#72d5ff");
+  normalized.width = clampSceneNumber(shape.width, 1, 18, 4);
+
+  if (["line", "arrow"].includes(type)) {
+    normalized.x1 = clampSceneNumber(shape.x1, 0, 100, 30);
+    normalized.y1 = clampSceneNumber(shape.y1, 0, 100, 30);
+    normalized.x2 = clampSceneNumber(shape.x2, 0, 100, 70);
+    normalized.y2 = clampSceneNumber(shape.y2, 0, 100, 70);
+    if (type === "arrow") {
+      normalized.head = clampSceneNumber(shape.head, 6, 34, 16);
+    }
+    return normalized;
+  }
+
+  if (["circle", "ring", "dot", "point"].includes(type)) {
+    normalized.x = clampSceneNumber(shape.x, 0, 100, 50);
+    normalized.y = clampSceneNumber(shape.y, 0, 100, 50);
+    normalized.r = clampSceneNumber(shape.r, 2, 320, type === "dot" || type === "point" ? 8 : 70);
+    if (type === "circle") {
+      normalized.fill = normalizeSceneColor(shape.fill, `${normalized.color}22`);
+    }
+    return normalized;
+  }
+
+  if (["rect", "box"].includes(type)) {
+    normalized.x = clampSceneNumber(shape.x, 0, 100, 50);
+    normalized.y = clampSceneNumber(shape.y, 0, 100, 50);
+    normalized.w = clampSceneNumber(shape.w, 6, 660, 180);
+    normalized.h = clampSceneNumber(shape.h, 6, 420, 100);
+    normalized.fill = normalizeSceneColor(shape.fill, "transparent");
+    return normalized;
+  }
+
+  if (type === "spiral") {
+    normalized.x = clampSceneNumber(shape.x, 0, 100, 50);
+    normalized.y = clampSceneNumber(shape.y, 0, 100, 50);
+    normalized.r = clampSceneNumber(shape.r, 8, 340, 120);
+    normalized.turns = clampSceneNumber(shape.turns, 1, 12, 4);
+    return normalized;
+  }
+
+  if (type === "wave") {
+    normalized.x = clampSceneNumber(shape.x, 0, 100, 50);
+    normalized.y = clampSceneNumber(shape.y, 0, 100, 50);
+    normalized.length = clampSceneNumber(shape.length, 20, 860, 360);
+    normalized.amp = clampSceneNumber(shape.amp, 4, 120, 26);
+    normalized.cycles = clampSceneNumber(shape.cycles, 1, 16, 3);
+    return normalized;
+  }
+
+  return null;
+}
+
+function sanitizeSceneFrame(frame, index = 0) {
+  if (!frame || typeof frame !== "object") {
+    return null;
+  }
+
+  const shapes = Array.isArray(frame.shapes)
+    ? frame.shapes.map((shape) => sanitizeSceneShape(shape)).filter(Boolean)
+    : [];
+
+  const caption = truncateSceneText(frame.caption || `Etapa ${index + 1}`, 64);
+  if (!shapes.length) {
+    shapes.push({
+      type: "text",
+      text: caption || `Etapa ${index + 1}`,
+      x: 50,
+      y: 50,
+      size: 34,
+      weight: 700,
+      align: "center",
+      color: "#bfe8ff",
+    });
+  }
+
+  const backgroundRaw = frame.background && typeof frame.background === "object" ? frame.background : {};
+
+  return {
+    caption: caption || `Etapa ${index + 1}`,
+    duration_ms: clampSceneNumber(frame.duration_ms, 900, 9000, 2200),
+    background: {
+      color: normalizeSceneColor(backgroundRaw.color, "#050816"),
+      glow: normalizeSceneColor(backgroundRaw.glow, "#214f95"),
+    },
+    shapes: shapes.slice(0, 18),
+  };
+}
+
+function sanitizeParticleScript(rawScript, prompt) {
+  const script = rawScript && typeof rawScript === "object" ? rawScript : {};
+  const rawFrames = Array.isArray(script.frames) ? script.frames : [];
+  const frames = rawFrames
+    .slice(0, 8)
+    .map((frame, index) => sanitizeSceneFrame(frame, index))
+    .filter(Boolean);
+
+  if (!frames.length) {
+    return buildGenericSceneScript(prompt);
+  }
+
+  return {
+    title: truncateSceneText(script.title || prompt || "Cena IA", 80),
+    frames,
+  };
+}
+
+function extractJsonPayload(rawText) {
+  const raw = String(rawText || "").trim();
+  if (!raw) {
+    return null;
+  }
+
+  const direct = (() => {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  })();
+  if (direct) {
+    return direct;
+  }
+
+  const fenced = raw.match(/```(?:json)?\\s*([\\s\\S]*?)```/i);
+  if (fenced?.[1]) {
+    try {
+      return JSON.parse(fenced[1].trim());
+    } catch {
+      // continue
+    }
+  }
+
+  const first = raw.indexOf("{");
+  const last = raw.lastIndexOf("}");
+  if (first >= 0 && last > first) {
+    const chunk = raw.slice(first, last + 1);
+    try {
+      return JSON.parse(chunk);
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+async function requestAiSceneScript(prompt) {
+  const plannerPrompt = [
+    "Voce e um diretor de animacao por particulas para uma interface sem texto corrido.",
+    "Retorne SOMENTE JSON valido, sem markdown e sem comentarios.",
+    "Formato obrigatorio:",
+    "{",
+    "  \"title\": \"resumo curto\",",
+    "  \"frames\": [",
+    "    {",
+    "      \"caption\": \"etapa\",",
+    "      \"duration_ms\": 2200,",
+    "      \"background\": {\"color\": \"#050816\", \"glow\": \"#2a66b0\"},",
+    "      \"shapes\": [",
+    "        {\"type\":\"text\",\"text\":\"...\",\"x\":50,\"y\":20,\"size\":40,\"color\":\"#bfe8ff\"},",
+    "        {\"type\":\"arrow\",\"x1\":20,\"y1\":30,\"x2\":80,\"y2\":30,\"color\":\"#7edbff\",\"width\":4},",
+    "        {\"type\":\"line\"|\"circle\"|\"ring\"|\"rect\"|\"spiral\"|\"wave\"|\"dot\", ...}",
+    "      ]",
+    "    }",
+    "  ]",
+    "}",
+    "Use x/y em percentual (0..100).",
+    "Duracao de cada frame entre 1200 e 5000 ms.",
+    "No maximo 6 frames e 12 shapes por frame.",
+    "Objetivo: responder visualmente ao pedido do usuario.",
+    `Pedido do usuario: ${prompt}`,
+  ].join("\\n");
+
+  const payload = await fetchJson(activeAgentEndpoint("chat"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: plannerPrompt }),
+  });
+
+  const raw = [payload?.reply, Array.isArray(payload?.payloads) ? payload.payloads.join("\\n") : ""]
+    .filter(Boolean)
+    .join("\\n")
+    .trim();
+
+  const jsonPayload = extractJsonPayload(raw);
+  if (!jsonPayload) {
+    throw new Error("resposta sem JSON valido para cena");
+  }
+  return sanitizeParticleScript(jsonPayload, prompt);
+}
+
+function extractPromptKeywords(prompt) {
+  const cleaned = String(prompt || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\\u00c0-\\u017f\\s]/g, " ")
+    .replace(/\\s+/g, " ")
+    .trim();
+
+  if (!cleaned) {
+    return [];
+  }
+
+  const stopWords = new Set([
+    "como", "fazer", "faço", "faco", "voce", "você", "sabe", "seria", "sobre", "para", "com", "sem",
+    "que", "isso", "essa", "esse", "uma", "um", "das", "dos", "de", "da", "do", "e", "a", "o", "as",
+    "os", "me", "mostrar", "mostra", "consegue", "explicar", "imagine", "imagina", "quero", "pode",
+  ]);
+
+  const unique = [];
+  for (const token of cleaned.split(" ")) {
+    if (!token || token.length < 3 || stopWords.has(token)) {
+      continue;
+    }
+    if (!unique.includes(token)) {
+      unique.push(token);
+    }
+  }
+  return unique.slice(0, 5);
+}
+
+function buildBhaskaraSceneScript() {
+  return {
+    title: "Bhaskara em etapas",
+    frames: [
+      {
+        caption: "Equacao de segundo grau",
+        duration_ms: 2300,
+        background: { color: "#050816", glow: "#1e4f89" },
+        shapes: [
+          { type: "text", text: "ax^2 + bx + c = 0", x: 50, y: 20, size: 48, color: "#bfe8ff" },
+          { type: "rect", x: 50, y: 40, w: 520, h: 96, color: "#69ccff", width: 4 },
+          { type: "text", text: "Exemplo: 2x^2 + 5x - 3 = 0", x: 50, y: 40, size: 34, color: "#d9f2ff" },
+          { type: "arrow", x1: 18, y1: 62, x2: 42, y2: 62, color: "#72d6ff", width: 4 },
+          { type: "arrow", x1: 82, y1: 62, x2: 58, y2: 62, color: "#72d6ff", width: 4 },
+        ],
+      },
+      {
+        caption: "Calculando o delta",
+        duration_ms: 2500,
+        background: { color: "#060d20", glow: "#266cbf" },
+        shapes: [
+          { type: "text", text: "Delta = b^2 - 4ac", x: 50, y: 22, size: 46, color: "#bfe8ff" },
+          { type: "text", text: "Delta = 5^2 - 4*2*(-3) = 49", x: 50, y: 46, size: 34, color: "#d9f4ff" },
+          { type: "circle", x: 50, y: 68, r: 90, color: "#81dcff", width: 5, fill: "#58b6ff22" },
+          { type: "text", text: "Delta > 0", x: 50, y: 68, size: 36, color: "#e7f8ff" },
+        ],
+      },
+      {
+        caption: "Aplicando a formula",
+        duration_ms: 2600,
+        background: { color: "#050a18", glow: "#2f6bc0" },
+        shapes: [
+          { type: "text", text: "x = (-b +- sqrt(Delta)) / 2a", x: 50, y: 22, size: 40, color: "#cbecff" },
+          { type: "arrow", x1: 20, y1: 40, x2: 80, y2: 40, color: "#79dbff", width: 4 },
+          { type: "text", text: "x1 = (-5 + 7) / 4 = 0.5", x: 50, y: 58, size: 34, color: "#dff4ff" },
+          { type: "text", text: "x2 = (-5 - 7) / 4 = -3", x: 50, y: 74, size: 34, color: "#dff4ff" },
+        ],
+      },
+      {
+        caption: "Resultado final",
+        duration_ms: 2100,
+        background: { color: "#040611", glow: "#225089" },
+        shapes: [
+          { type: "ring", x: 34, y: 56, r: 72, color: "#8ee3ff", width: 5 },
+          { type: "ring", x: 66, y: 56, r: 72, color: "#8ee3ff", width: 5 },
+          { type: "text", text: "x1 = 0.5", x: 34, y: 56, size: 34, color: "#f0fbff" },
+          { type: "text", text: "x2 = -3", x: 66, y: 56, size: 34, color: "#f0fbff" },
+        ],
+      },
+    ],
+  };
+}
+
+function buildGojoSceneScript() {
+  return {
+    title: "Expansao imaginada",
+    frames: [
+      {
+        caption: "O espaco comeca a se fechar",
+        duration_ms: 2200,
+        background: { color: "#050a1b", glow: "#2e65c1" },
+        shapes: [
+          { type: "ring", x: 50, y: 50, r: 180, color: "#8adfff", width: 4 },
+          { type: "text", text: "Limite se formando", x: 50, y: 18, size: 28, color: "#bfe8ff" },
+          { type: "spiral", x: 50, y: 50, r: 120, turns: 4, color: "#77d8ff", width: 3 },
+        ],
+      },
+      {
+        caption: "Camadas infinitas comprimindo",
+        duration_ms: 2600,
+        background: { color: "#030613", glow: "#3a79d4" },
+        shapes: [
+          { type: "ring", x: 50, y: 50, r: 190, color: "#7dd9ff", width: 3 },
+          { type: "ring", x: 50, y: 50, r: 145, color: "#7dd9ff", width: 3 },
+          { type: "ring", x: 50, y: 50, r: 100, color: "#7dd9ff", width: 3 },
+          { type: "ring", x: 50, y: 50, r: 60, color: "#7dd9ff", width: 3 },
+          { type: "text", text: "Informacao sem fim", x: 50, y: 82, size: 28, color: "#dff4ff" },
+        ],
+      },
+      {
+        caption: "Centro absoluto",
+        duration_ms: 2600,
+        background: { color: "#02040d", glow: "#4a90e8" },
+        shapes: [
+          { type: "circle", x: 50, y: 50, r: 62, color: "#8fe4ff", width: 5, fill: "#80d6ff2a" },
+          { type: "dot", x: 50, y: 50, r: 16, color: "#ecf9ff" },
+          { type: "wave", x: 50, y: 72, length: 420, amp: 18, cycles: 3, color: "#8fe2ff", width: 3 },
+          { type: "text", text: "Tudo converge para um unico ponto", x: 50, y: 20, size: 30, color: "#d5f1ff" },
+        ],
+      },
+      {
+        caption: "Dominio completo",
+        duration_ms: 2300,
+        background: { color: "#030713", glow: "#2c68c2" },
+        shapes: [
+          { type: "text", text: "Expansao concluida", x: 50, y: 22, size: 34, color: "#e8f8ff" },
+          { type: "spiral", x: 50, y: 52, r: 168, turns: 5, color: "#85deff", width: 3 },
+          { type: "arrow", x1: 20, y1: 78, x2: 45, y2: 58, color: "#7ed8ff", width: 4 },
+          { type: "arrow", x1: 80, y1: 78, x2: 55, y2: 58, color: "#7ed8ff", width: 4 },
+        ],
+      },
+    ],
+  };
+}
+
+function buildGenericSceneScript(prompt) {
+  const clipped = truncateSceneText(prompt || "Explique visualmente", 74);
+  const keywords = extractPromptKeywords(prompt);
+  const keywordShapes = [];
+  const angles = [220, 300, 20, 80, 150];
+
+  keywords.forEach((keyword, index) => {
+    const angle = (angles[index % angles.length] * Math.PI) / 180;
+    const x = 50 + Math.cos(angle) * 27;
+    const y = 52 + Math.sin(angle) * 27;
+    keywordShapes.push({ type: "arrow", x1: 50, y1: 52, x2: x, y2: y, color: "#78d8ff", width: 3 });
+    keywordShapes.push({ type: "text", text: truncateSceneText(keyword, 14), x, y, size: 24, color: "#ddf4ff" });
+  });
+
+  return {
+    title: "Cena visual",
+    frames: [
+      {
+        caption: "Interpretando sua pergunta",
+        duration_ms: 2100,
+        background: { color: "#050816", glow: "#1e518d" },
+        shapes: [
+          { type: "text", text: clipped, x: 50, y: 28, size: 30, color: "#ccecff" },
+          { type: "ring", x: 50, y: 58, r: 130, color: "#77d6ff", width: 4 },
+          { type: "dot", x: 50, y: 58, r: 11, color: "#ebf9ff" },
+        ],
+      },
+      {
+        caption: "Ligando os conceitos",
+        duration_ms: 2400,
+        background: { color: "#040712", glow: "#2e6dc2" },
+        shapes: [
+          { type: "text", text: "Mapa de ideias", x: 50, y: 18, size: 30, color: "#d9f3ff" },
+          { type: "circle", x: 50, y: 52, r: 88, color: "#74d8ff", width: 4, fill: "#74d8ff18" },
+          { type: "text", text: "Tema", x: 50, y: 52, size: 26, color: "#f0fbff" },
+          ...keywordShapes,
+        ],
+      },
+      {
+        caption: "Resumo visual",
+        duration_ms: 2200,
+        background: { color: "#040713", glow: "#21599e" },
+        shapes: [
+          { type: "text", text: "Resposta montada por etapas", x: 50, y: 28, size: 30, color: "#d9f3ff" },
+          { type: "wave", x: 50, y: 54, length: 420, amp: 16, cycles: 4, color: "#84ddff", width: 3 },
+          { type: "spiral", x: 50, y: 68, r: 90, turns: 3, color: "#79d7ff", width: 3 },
+        ],
+      },
+    ],
+  };
+}
+
+function buildFallbackParticleScript(prompt) {
+  const normalized = String(prompt || "").toLowerCase();
+  if (/(bhaskara|baskara|bascara)/i.test(normalized)) {
+    return buildBhaskaraSceneScript();
+  }
+  if (/(gojo|expansao|expansão|dominio|domínio)/i.test(normalized)) {
+    return buildGojoSceneScript();
+  }
+  return buildGenericSceneScript(prompt);
+}
+
+function stopAiScenePlayback({ keepTimeline = true } = {}) {
+  aiSceneRequestToken += 1;
+  if (window.particleSystem) {
+    window.particleSystem.stopScene();
+  }
+  aiSceneInFlight = false;
+  aiSceneAnimating = false;
+  setAiSceneBusyState();
+
+  if (!keepTimeline) {
+    renderAiSceneSteps(null);
+  }
+}
+
+async function applyParticleTextFromInput() {
+  if (!window.particleSystem) {
+    setStatus("playground de particulas indisponivel", "error");
+    return;
+  }
+
+  if (aiSceneInFlight) {
+    return;
+  }
+
+  const raw = aiParticleInput ? aiParticleInput.value : "";
+  const prompt = normalizeScenePrompt(raw);
+  if (aiParticleInput) {
+    aiParticleInput.value = prompt;
+  }
+
+  if (!prompt) {
+    stopAiScenePlayback({ keepTimeline: false });
+    window.particleSystem.setParticleState("neutral");
+    setAiSceneStatus("Escreva uma pergunta para montar a cena.");
+    setStatus("particulas em modo neutro");
+    return;
+  }
+
+  aiSceneInFlight = true;
+  aiSceneAnimating = false;
+  const requestToken = aiSceneRequestToken + 1;
+  aiSceneRequestToken = requestToken;
+  setAiSceneBusyState();
+  setAiSceneStatus(`Planejando cena com ${activeAgentLabel()}...`);
+  setStatus("ia visual preparando", "running");
+
+  let script = null;
+  let usedFallback = false;
+
+  try {
+    script = await requestAiSceneScript(prompt);
+  } catch (error) {
+    usedFallback = true;
+    script = buildFallbackParticleScript(prompt);
+    setAiSceneStatus(`Modo visual local: ${error.message}`);
+  } finally {
+    if (requestToken === aiSceneRequestToken) {
+      aiSceneInFlight = false;
+      setAiSceneBusyState();
+    }
+  }
+
+  if (requestToken !== aiSceneRequestToken) {
+    return;
+  }
+
+  if (!script || !Array.isArray(script.frames) || !script.frames.length) {
+    setAiSceneStatus("Nao foi possivel montar a cena.");
+    setStatus("erro cena visual", "error");
+    return;
+  }
+
+  aiSceneLastScript = script;
+  aiSceneAnimating = true;
+  setAiSceneBusyState();
+  renderAiSceneSteps(script, 0);
+  setAiSceneStatus(
+    usedFallback
+      ? "Cena em execucao (fallback visual local)."
+      : `Cena em execucao com ${script.frames.length} etapa(s).`
+  );
+
+  window.particleSystem.playScript(script, {
+    loop: false,
+    onFrame: (index) => {
+      renderAiSceneSteps(script, index);
+    },
+    onComplete: () => {
+      aiSceneAnimating = false;
+      setAiSceneBusyState();
+      renderAiSceneSteps(script, script.frames.length - 1);
+      setAiSceneStatus("Cena concluida. Envie outra pergunta para uma nova animacao.");
+      setStatus("cena visual concluida");
+    },
+  });
 }
 
 function isMeaningfulCatalogSummary(value) {
@@ -1774,7 +2617,7 @@ function normalizeOpenClawObservability(response = {}) {
 }
 
 function persistOpenClawObservability(snapshot) {
-  localStorage.setItem(STORAGE_OPENCLAW_OBSERVABILITY, JSON.stringify(snapshot));
+  localStorage.setItem(observabilityStorageKey(), JSON.stringify(snapshot));
 }
 
 function applyOpenClawObservability(snapshot, { persist = true } = {}) {
@@ -1794,7 +2637,10 @@ function applyOpenClawObservability(snapshot, { persist = true } = {}) {
 
 function restoreOpenClawObservabilityFromStorage() {
   try {
-    const raw = localStorage.getItem(STORAGE_OPENCLAW_OBSERVABILITY);
+    let raw = localStorage.getItem(observabilityStorageKey());
+    if (!raw && !isNanobotActive()) {
+      raw = localStorage.getItem("mlxPilotOpenClawObservabilityV1");
+    }
     if (!raw) {
       return false;
     }
@@ -1817,7 +2663,7 @@ function updateOpenClawObservability(response) {
 
 async function loadOpenClawObservability() {
   try {
-    const payload = await fetchJson("/openclaw/observability");
+    const payload = await fetchJson(activeAgentEndpoint("observability"));
     applyOpenClawObservability(payload);
     openclawObservabilityLoaded = true;
   } catch (error) {
@@ -1864,7 +2710,7 @@ function renderOpenClawRuntimeState(runtime) {
 
 async function loadOpenClawRuntimeStatus() {
   try {
-    const runtime = await fetchJson("/openclaw/runtime");
+    const runtime = await fetchJson(activeAgentEndpoint("runtime"));
     renderOpenClawRuntimeState(runtime);
   } catch (error) {
     openclawRuntimeMeta.textContent = `runtime indisponivel • ${error.message}`;
@@ -1877,12 +2723,13 @@ async function runOpenClawRuntimeAction(action) {
     return;
   }
 
+  const agentLabel = activeAgentLabel().toLowerCase();
   openclawRuntimeActionInFlight = true;
   setOpenClawRuntimeButtons("");
-  setStatus(`openclaw ${action}`, "running");
+  setStatus(`${agentLabel} ${action}`, "running");
 
   try {
-    const payload = await fetchJson("/openclaw/runtime", {
+    const payload = await fetchJson(activeAgentEndpoint("runtime"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action }),
@@ -1891,9 +2738,9 @@ async function runOpenClawRuntimeAction(action) {
     renderOpenClawRuntimeState(payload.runtime);
     await loadOpenClawStatus();
     await loadOpenClawObservability();
-    setStatus(`openclaw ${action} ok`);
+    setStatus(`${agentLabel} ${action} ok`);
   } catch (error) {
-    setStatus(`erro openclaw ${action}`, "error");
+    setStatus(`erro ${agentLabel} ${action}`, "error");
     openclawRuntimeMeta.textContent = `falha ${action} • ${error.message}`;
   } finally {
     openclawRuntimeActionInFlight = false;
@@ -1928,6 +2775,184 @@ function addOpenClawChatMessage(role, content, meta = "") {
   openclawChatLog.scrollTop = openclawChatLog.scrollHeight;
 }
 
+function createOpenClawAssistantStreamCard() {
+  const node = assistantStreamTemplate.content.firstElementChild.cloneNode(true);
+  node.classList.add("role-assistant");
+
+  const ui = {
+    node,
+    stateLabel: node.querySelector(".assistant-state-label"),
+    typingIndicator: node.querySelector(".typing-indicator"),
+    thinkingSection: node.querySelector(".assistant-thinking"),
+    thinkingText: node.querySelector(".assistant-thinking-text"),
+    answerSection: node.querySelector(".assistant-answer"),
+    answerText: node.querySelector(".assistant-answer-text"),
+    metricsSection: node.querySelector(".assistant-metrics"),
+    metricsText: node.querySelector(".assistant-metrics-text"),
+    finalAnswer: "",
+    thinkingQueue: "",
+    answerQueue: "",
+    flushTimer: null,
+  };
+
+  openclawChatLog.appendChild(node);
+  openclawChatLog.scrollTop = openclawChatLog.scrollHeight;
+  return ui;
+}
+
+function setOpenClawAssistantState(ui, status) {
+  const labels = {
+    waiting: "aguardando modelo",
+    thinking: "thinking",
+    answering: "respondendo",
+    completed: "finalizado",
+    error: "erro",
+  };
+  ui.stateLabel.textContent = labels[status] || status;
+  ui.typingIndicator.classList.toggle("hidden", status !== "waiting");
+  if (status === "thinking") {
+    ui.thinkingSection.classList.remove("hidden");
+  }
+  if (status === "answering" || status === "completed") {
+    ui.answerSection.classList.remove("hidden");
+  }
+}
+
+function flushOpenClawAssistantQueues(ui) {
+  let changed = false;
+
+  if (ui.thinkingQueue.length) {
+    const chunk = ui.thinkingQueue.slice(0, STREAM_CHARS_PER_TICK);
+    ui.thinkingQueue = ui.thinkingQueue.slice(chunk.length);
+    ui.thinkingSection.classList.remove("hidden");
+    ui.thinkingText.textContent += chunk;
+    changed = true;
+  }
+
+  if (ui.answerQueue.length) {
+    const chunk = ui.answerQueue.slice(0, STREAM_CHARS_PER_TICK);
+    ui.answerQueue = ui.answerQueue.slice(chunk.length);
+    ui.answerSection.classList.remove("hidden");
+    ui.answerText.textContent += chunk;
+    ui.finalAnswer = ui.answerText.textContent;
+    changed = true;
+  }
+
+  if (changed) {
+    openclawChatLog.scrollTop = openclawChatLog.scrollHeight;
+  }
+
+  if (!ui.thinkingQueue.length && !ui.answerQueue.length && ui.flushTimer !== null) {
+    window.clearInterval(ui.flushTimer);
+    ui.flushTimer = null;
+  }
+}
+
+function scheduleOpenClawAssistantFlush(ui) {
+  if (ui.flushTimer !== null) {
+    return;
+  }
+  ui.flushTimer = window.setInterval(() => {
+    flushOpenClawAssistantQueues(ui);
+  }, STREAM_TICK_MS);
+}
+
+async function waitForOpenClawAssistantFlush(ui) {
+  if (!ui.thinkingQueue.length && !ui.answerQueue.length && ui.flushTimer === null) {
+    return;
+  }
+  await new Promise((resolve) => {
+    const pollTimer = window.setInterval(() => {
+      if (!ui.thinkingQueue.length && !ui.answerQueue.length && ui.flushTimer === null) {
+        window.clearInterval(pollTimer);
+        resolve();
+      }
+    }, STREAM_TICK_MS);
+  });
+}
+
+function appendOpenClawThinking(ui, delta) {
+  if (!delta) {
+    return;
+  }
+  ui.thinkingQueue += delta;
+  scheduleOpenClawAssistantFlush(ui);
+}
+
+function appendOpenClawAnswer(ui, delta) {
+  if (!delta) {
+    return;
+  }
+  ui.answerQueue += delta;
+  scheduleOpenClawAssistantFlush(ui);
+}
+
+function sanitizeAgentReplyText(rawReply) {
+  const text = String(rawReply || "").replace(/\r/g, "");
+  const filtered = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .filter((line) => !/^={4,}$/.test(line))
+    .filter((line) => !/^Prompt:\s/i.test(line))
+    .filter((line) => !/^Generation:\s/i.test(line))
+    .filter((line) => !/^Peak memory:\s/i.test(line))
+    .filter((line) => !/^completed\s*•/i.test(line))
+    .filter((line) => !/tokens-per-sec/i.test(line));
+  return filtered.join("\n").trim();
+}
+
+function normalizeAgentReplySplit(split) {
+  const thinking = String(split?.thinking || "").trim();
+  const answer = String(split?.answer || "").trim();
+  if (!answer && thinking) {
+    return { thinking: "", answer: thinking };
+  }
+  return { thinking, answer };
+}
+
+function renderOpenClawAssistantMeta(ui, response) {
+  const lines = [];
+  if (response?.status) {
+    lines.push(`Status: ${response.status}`);
+  }
+  if (response?.summary) {
+    lines.push(response.summary);
+  }
+  if (response?.duration_ms != null) {
+    lines.push(`Latencia: ${response.duration_ms} ms`);
+  }
+  if (response?.run_id) {
+    lines.push(`Run: ${response.run_id}`);
+  }
+  if (response?.provider || response?.model) {
+    lines.push(`Modelo: ${response.provider || "-"} • ${response.model || "-"}`);
+  }
+
+  const usage = response?.usage || {};
+  const promptTokens = usage.prompt ?? usage.prompt_tokens ?? usage.input;
+  const completionTokens = usage.completion ?? usage.completion_tokens ?? usage.output;
+  const totalTokens = usage.total ?? usage.total_tokens;
+  const usageLine = [
+    promptTokens != null ? `Prompt ${promptTokens}` : "",
+    completionTokens != null ? `Generation ${completionTokens}` : "",
+    totalTokens != null ? `Total ${totalTokens}` : "",
+  ]
+    .filter(Boolean)
+    .join(" • ");
+  if (usageLine) {
+    lines.push(usageLine);
+  }
+
+  if (!lines.length) {
+    return;
+  }
+
+  ui.metricsSection.classList.remove("hidden");
+  ui.metricsText.textContent = lines.join("\n");
+  openclawChatLog.scrollTop = openclawChatLog.scrollHeight;
+}
+
 function setOpenClawSendingState(nextState) {
   openclawChatInFlight = nextState;
   openclawSendBtn.disabled = nextState;
@@ -1936,8 +2961,18 @@ function setOpenClawSendingState(nextState) {
 
 async function loadOpenClawStatus() {
   try {
-    const status = await fetchJson("/openclaw/status");
+    const status = await fetchJson(activeAgentEndpoint("status"));
     openclawStatusLoaded = true;
+
+    if (isNanobotActive()) {
+      if (status.installed) {
+        const configBadge = status.config_exists ? "config ok" : "sem config";
+        openclawStatusText.textContent = `online • ${configBadge} • ${status.version || "versao n/d"}`;
+      } else {
+        openclawStatusText.textContent = status.message || "offline";
+      }
+      return;
+    }
 
     if (status.available) {
       openclawStatusText.textContent = `online • session ${status.session_key}`;
@@ -1984,7 +3019,7 @@ async function pollOpenClawLogs({ reset = false } = {}) {
   });
 
   try {
-    const chunk = await fetchJson(`/openclaw/logs?${params.toString()}`);
+    const chunk = await fetchJson(`${activeAgentEndpoint("logs")}?${params.toString()}`);
 
     if (!chunk.exists) {
       openclawLogMeta.textContent = `arquivo nao encontrado: ${chunk.path}`;
@@ -2033,31 +3068,43 @@ async function sendOpenClawMessage() {
   openclawMessageInput.value = "";
   addOpenClawChatMessage("user", message);
   setOpenClawSendingState(true);
-  setStatus("consultando openclaw", "running");
+  setStatus(`consultando ${activeAgentLabel().toLowerCase()}`, "running");
 
   try {
-    const response = await fetchJson("/openclaw/chat", {
+    const response = await fetchJson(activeAgentEndpoint("chat"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message }),
     });
 
-    const reply = response.reply?.trim() || "(sem resposta textual)";
-    const meta = [
-      response.status || "",
-      response.summary || "",
-      response.duration_ms != null ? `${response.duration_ms} ms` : "",
-      response.run_id ? `run ${response.run_id}` : "",
-    ]
-      .filter(Boolean)
-      .join(" • ");
+    const streamUi = createOpenClawAssistantStreamCard();
+    setOpenClawAssistantState(streamUi, "waiting");
+    const sanitizedReply = sanitizeAgentReplyText(response.reply || "");
+    const split = normalizeAgentReplySplit(splitThinkingAndAnswer(sanitizedReply));
 
-    addOpenClawChatMessage("assistant", reply, meta);
+    if (split.thinking) {
+      setOpenClawAssistantState(streamUi, "thinking");
+      appendOpenClawThinking(streamUi, split.thinking);
+    }
+
+    if (split.answer) {
+      setOpenClawAssistantState(streamUi, "answering");
+      appendOpenClawAnswer(streamUi, split.answer);
+    }
+
+    if (!split.thinking && !split.answer) {
+      setOpenClawAssistantState(streamUi, "answering");
+      appendOpenClawAnswer(streamUi, "(sem resposta textual)");
+    }
+
+    await waitForOpenClawAssistantFlush(streamUi);
+    setOpenClawAssistantState(streamUi, "completed");
+    renderOpenClawAssistantMeta(streamUi, response);
     updateOpenClawObservability(response);
-    setStatus("openclaw respondeu");
+    setStatus(`${activeAgentLabel().toLowerCase()} respondeu`);
   } catch (error) {
-    addOpenClawChatMessage("system", `Erro no OpenClaw: ${error.message}`);
-    setStatus("erro openclaw", "error");
+    addOpenClawChatMessage("system", `Erro no ${activeAgentLabel()}: ${error.message}`);
+    setStatus(`erro ${activeAgentLabel().toLowerCase()}`, "error");
   } finally {
     setOpenClawSendingState(false);
     openclawMessageInput.focus();
@@ -2133,6 +3180,13 @@ function renderOpenClawModelSelectors() {
 }
 
 function toggleOpenClawSourceFields() {
+  if (openclawModelSource?.parentElement) {
+    openclawModelSource.parentElement.classList.remove("hidden");
+  }
+  if (nanobotModelPicker) {
+    nanobotModelPicker.classList.add("hidden");
+  }
+
   const source = openclawModelSource.value || "cloud";
   openclawCloudPicker.classList.toggle("hidden", source !== "cloud");
   openclawLocalPicker.classList.toggle("hidden", source !== "local");
@@ -2140,7 +3194,7 @@ function toggleOpenClawSourceFields() {
 
 async function loadOpenClawModelCatalog() {
   try {
-    const payload = await fetchJson("/openclaw/models");
+    const payload = await fetchJson(activeAgentEndpoint("models"));
     openclawModelsCatalog = {
       cloud_models: Array.isArray(payload.cloud_models) ? payload.cloud_models : [],
       local_models: Array.isArray(payload.local_models) ? payload.local_models : [],
@@ -2148,16 +3202,38 @@ async function loadOpenClawModelCatalog() {
     };
 
     renderOpenClawModelSelectors();
-    openclawConfigFeedback.textContent = "Modelos carregados.";
+    openclawConfigFeedback.textContent = isNanobotActive()
+      ? "Modelos do NanoBot carregados."
+      : "Modelos carregados.";
   } catch (error) {
+    if (isNanobotActive()) {
+      try {
+        const current = await fetchJson(activeAgentEndpoint("model"));
+        openclawModelsCatalog = {
+          cloud_models: [],
+          local_models: [],
+          current: current || null,
+        };
+        renderOpenClawModelSelectors();
+        openclawConfigFeedback.textContent = current?.model
+          ? "Modelo NanoBot carregado (fallback)."
+          : "Nenhum modelo NanoBot definido.";
+        return;
+      } catch {
+        // fallback falhou, manter erro original
+      }
+    }
     openclawConfigFeedback.textContent = `Erro ao carregar modelos: ${error.message}`;
   }
 }
 
 async function applyOpenClawModelSelection() {
   const source = openclawModelSource.value || "cloud";
-  openclawConfigFeedback.textContent = "Aplicando modelo...";
-  setStatus("aplicando modelo openclaw", "running");
+  const frameworkLabel = isNanobotActive() ? "nanobot" : "openclaw";
+  openclawConfigFeedback.textContent = isNanobotActive()
+    ? "Aplicando modelo NanoBot..."
+    : "Aplicando modelo...";
+  setStatus(`aplicando modelo ${frameworkLabel}`, "running");
 
   const payload = { source };
 
@@ -2180,7 +3256,7 @@ async function applyOpenClawModelSelection() {
   }
 
   try {
-    const current = await fetchJson("/openclaw/model", {
+    const current = await fetchJson(activeAgentEndpoint("model"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -2189,10 +3265,10 @@ async function applyOpenClawModelSelection() {
     openclawModelsCatalog.current = current;
     renderOpenClawModelSelectors();
     openclawConfigFeedback.textContent = `Modelo aplicado: ${current.label}`;
-    setStatus("modelo openclaw atualizado");
+    setStatus(`modelo ${frameworkLabel} atualizado`);
   } catch (error) {
     openclawConfigFeedback.textContent = `Falha ao aplicar modelo: ${error.message}`;
-    setStatus("erro modelo openclaw", "error");
+    setStatus(`erro modelo ${frameworkLabel}`, "error");
   }
 }
 
@@ -2291,10 +3367,16 @@ function switchTab(nextTab) {
 
   if (window.particleSystem) {
     if (nextTab === "ai-interaction") {
-      window.particleSystem.setParticleState('neutral');
+      window.particleSystem.onWindowResize();
+      if (!aiSceneAnimating) {
+        window.particleSystem.setParticleState("neutral");
+      }
+      if (!aiSceneLastScript) {
+        setAiSceneStatus("Pronto para montar uma cena.");
+      }
     } else {
-      // We only want the particles visible/active in the AI interaction tab now
-      window.particleSystem.setParticleState('none'); // We can treat non-active tabs differently if needed, or simply let it run in background since we localized the canvas via CSS
+      stopAiScenePlayback({ keepTimeline: true });
+      window.particleSystem.setParticleState("none");
     }
   }
 
@@ -2479,6 +3561,50 @@ if (messageInput) {
 if (openclawMessageInput) {
   openclawMessageInput.addEventListener("input", () => autoResizeTextarea(openclawMessageInput));
 }
+if (aiParticleInput) {
+  aiParticleInput.addEventListener("input", () => {
+    if (aiParticleInput.value.length > 320) {
+      aiParticleInput.value = aiParticleInput.value.slice(0, 320);
+    }
+  });
+  aiParticleInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void applyParticleTextFromInput();
+    }
+  });
+  aiParticleInput.addEventListener("blur", () => {
+    aiParticleInput.value = normalizeScenePrompt(aiParticleInput.value);
+  });
+}
+if (aiParticleBtn) {
+  aiParticleBtn.addEventListener("click", () => {
+    void applyParticleTextFromInput();
+    if (aiParticleInput) {
+      aiParticleInput.focus();
+    }
+  });
+}
+if (aiParticleStopBtn) {
+  aiParticleStopBtn.addEventListener("click", () => {
+    stopAiScenePlayback({ keepTimeline: true });
+    setAiSceneStatus("Cena interrompida.");
+    setStatus("cena visual interrompida");
+  });
+}
+if (aiSceneExampleButtons.length) {
+  aiSceneExampleButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const prompt = normalizeScenePrompt(button.dataset.prompt || "");
+      if (!prompt || !aiParticleInput) {
+        return;
+      }
+      aiParticleInput.value = prompt;
+      void applyParticleTextFromInput();
+      aiParticleInput.focus();
+    });
+  });
+}
 
 document.addEventListener("click", (event) => {
   const target = event.target;
@@ -2595,6 +3721,11 @@ saveSettingsBtn.addEventListener("click", async () => {
       body: JSON.stringify(payload)
     });
 
+    await loadOpenclawInstallStatus({ showLoading: false });
+    if (isNanobotActive()) {
+      await loadNanobotStatus();
+    }
+
     btn.textContent = "Salvo!";
     setTimeout(() => {
       btn.textContent = oldText;
@@ -2616,18 +3747,387 @@ async function loadConfig() {
     if (settingOpenclawState) settingOpenclawState.value = cfg.openclaw_state_dir || "";
     if (settingNanobotCli) settingNanobotCli.value = cfg.nanobot_cli_path || "";
 
-    // Also set the correct framework radio if backend has preference (for future-proofing, defaulting to openclaw if not)
-    const activeFramework = cfg.active_agent_framework || "openclaw";
-    frameworkRadios.forEach(radio => {
-      radio.checked = (radio.value === activeFramework);
-      if (radio.checked) {
-        openclawSettingsGroup.classList.toggle("hidden", radio.value !== "openclaw");
-        nanobotSettingsGroup.classList.toggle("hidden", radio.value !== "nanobot");
-      }
-    });
+    const activeFramework = cfg.active_agent_framework === "nanobot" ? "nanobot" : "openclaw";
+    applyAgentFramework(activeFramework, { syncRadio: true, refreshPanel: false });
+    await loadOpenclawInstallStatus({ showLoading: false });
+    await loadOpenclawEnvironment({ showLoading: false });
 
   } catch (err) {
     console.error("Failed to load config from backend", err);
+  }
+}
+
+function yesNo(value) {
+  return value ? "sim" : "nao";
+}
+
+function setOpenclawInstallButtonState({ installed = false, inFlight = false } = {}) {
+  if (!installOpenclawBtn) {
+    return;
+  }
+
+  if (inFlight) {
+    installOpenclawBtn.disabled = true;
+    installOpenclawBtn.textContent = "Instalando... isso pode demorar um pouco.";
+    return;
+  }
+
+  if (installed) {
+    installOpenclawBtn.disabled = true;
+    installOpenclawBtn.textContent = "Instalado";
+    return;
+  }
+
+  installOpenclawBtn.disabled = false;
+  installOpenclawBtn.textContent = "Instalar OpenClaw agora";
+}
+
+function renderOpenclawInstallStatus({ status = null, runtime = null, runtimeError = null } = {}) {
+  if (!openclawInstallStatusOutput) {
+    return;
+  }
+
+  if (!status) {
+    openclawInstallStatusOutput.textContent = "-";
+    return;
+  }
+
+  const healthOk = status.health?.ok ?? status.health?.result?.ok;
+  const lines = [
+    `CLI configurada: ${status.cli_path || "-"}`,
+    `CLI encontrada: ${yesNo(status.cli_exists)}`,
+    `State dir: ${status.state_dir || "-"}`,
+    `State dir existe: ${yesNo(status.state_dir_exists)}`,
+    `Disponivel: ${yesNo(status.available)}`,
+    `Health RPC: ${typeof healthOk === "boolean" ? (healthOk ? "ok" : "falha") : "-"}`,
+    `Sessao: ${status.session_key || "-"}`,
+    `Gateway log: ${status.gateway_log || "-"}`,
+    `Error log: ${status.error_log || "-"}`,
+    `Sync log: ${status.sync_log || "-"}`,
+  ];
+
+  if (status.error) {
+    lines.push(`Erro status: ${status.error}`);
+  }
+
+  if (runtime) {
+    lines.push(
+      "",
+      "Runtime gateway:",
+      `Service status: ${runtime.service_status || "-"}`,
+      `Service state: ${runtime.service_state || "-"}`,
+      `PID: ${runtime.pid || "-"}`,
+      `RPC ok: ${yesNo(runtime.rpc_ok)}`,
+      `Porta: ${runtime.port_status || "-"}`,
+      `Issues: ${Array.isArray(runtime.issues) && runtime.issues.length ? runtime.issues.join(" | ") : "-"}`
+    );
+  } else if (runtimeError) {
+    lines.push("", `Runtime: indisponivel (${runtimeError})`);
+  }
+
+  openclawInstallStatusOutput.textContent = lines.join("\n");
+}
+
+async function loadOpenclawInstallStatus({ showLoading = true, syncInstallFeedback = true } = {}) {
+  if (openclawStatusCheckInFlight) {
+    return null;
+  }
+
+  openclawStatusCheckInFlight = true;
+  if (checkOpenclawStatusBtn) {
+    checkOpenclawStatusBtn.disabled = true;
+  }
+
+  if (showLoading && openclawInstallStatusFeedback) {
+    openclawInstallStatusFeedback.textContent = "Checando status do OpenClaw...";
+  }
+
+  try {
+    const status = await fetchJson("/openclaw/status", { method: "GET" });
+    const installed = Boolean(status.cli_exists);
+    setOpenclawInstallButtonState({ installed, inFlight: openclawInstallInFlight });
+
+    let runtime = null;
+    let runtimeError = null;
+    try {
+      runtime = await fetchJson("/openclaw/runtime", { method: "GET" });
+    } catch (error) {
+      runtimeError = error.message;
+    }
+
+    renderOpenclawInstallStatus({ status, runtime, runtimeError });
+
+    if (openclawInstallStatusFeedback) {
+      if (installed) {
+        const suffix = status.available
+          ? "Gateway respondeu ao healthcheck."
+          : status.error
+            ? `Gateway indisponivel: ${status.error}`
+            : "Gateway indisponivel.";
+        openclawInstallStatusFeedback.textContent = `OpenClaw detectado. ${suffix}`;
+      } else {
+        openclawInstallStatusFeedback.textContent =
+          "OpenClaw nao detectado no caminho configurado. Ajuste o caminho ou rode a instalacao.";
+      }
+    }
+
+    if (syncInstallFeedback && installOpenclawFeedback && !openclawInstallInFlight) {
+      installOpenclawFeedback.textContent = installed
+        ? "OpenClaw ja instalado no caminho configurado."
+        : "OpenClaw nao detectado. Execute a instalacao automatizada.";
+    }
+
+    return status;
+  } catch (error) {
+    setOpenclawInstallButtonState({ installed: false, inFlight: openclawInstallInFlight });
+    if (openclawInstallStatusFeedback) {
+      openclawInstallStatusFeedback.textContent = `Falha ao consultar status: ${error.message}`;
+    }
+    if (openclawInstallStatusOutput) {
+      openclawInstallStatusOutput.textContent = "-";
+    }
+    if (syncInstallFeedback && installOpenclawFeedback && !openclawInstallInFlight) {
+      installOpenclawFeedback.textContent = `Falha ao validar instalacao: ${error.message}`;
+    }
+    return null;
+  } finally {
+    openclawStatusCheckInFlight = false;
+    if (checkOpenclawStatusBtn) {
+      checkOpenclawStatusBtn.disabled = openclawInstallInFlight;
+    }
+  }
+}
+
+function formatOpenclawEnvironmentSource(source) {
+  if (source === "env_file") {
+    return "arquivo";
+  }
+  if (source === "process_env") {
+    return "processo";
+  }
+  if (source === "env_example") {
+    return "exemplo";
+  }
+  return "catalogo";
+}
+
+function setOpenclawEnvironmentButtonsDisabled(disabled) {
+  if (refreshOpenclawEnvBtn) {
+    refreshOpenclawEnvBtn.disabled = disabled;
+  }
+  if (saveOpenclawEnvBtn) {
+    saveOpenclawEnvBtn.disabled = disabled;
+  }
+}
+
+function setOpenclawEnvironmentInputVisibility() {
+  if (!openclawEnvList) {
+    return;
+  }
+  const reveal = revealOpenclawEnvToggle?.checked ?? true;
+  openclawEnvList.querySelectorAll("input[data-env-key]").forEach((input) => {
+    input.type = reveal ? "text" : "password";
+  });
+}
+
+function renderOpenclawEnvironment(payload) {
+  if (!openclawEnvList) {
+    return;
+  }
+
+  const variables = Array.isArray(payload?.variables) ? payload.variables : [];
+  if (openclawEnvPath) {
+    const path = payload?.env_path || "-";
+    const envBadge = payload?.env_exists ? "ok" : "faltando";
+    const examplePath = payload?.env_example_path || "-";
+    const exampleBadge = payload?.env_example_exists ? "ok" : "faltando";
+    openclawEnvPath.textContent = `env: ${path} (${envBadge}) • exemplo: ${examplePath} (${exampleBadge})`;
+  }
+
+  openclawEnvList.innerHTML = "";
+  if (!variables.length) {
+    const empty = document.createElement("p");
+    empty.className = "meta-note";
+    empty.textContent = "Nenhuma variavel de API encontrada.";
+    openclawEnvList.appendChild(empty);
+    return;
+  }
+
+  variables.forEach((entry) => {
+    const item = document.createElement("article");
+    item.className = "openclaw-env-item";
+
+    const head = document.createElement("div");
+    head.className = "openclaw-env-head";
+
+    const keyNode = document.createElement("p");
+    keyNode.className = "openclaw-env-key";
+    keyNode.textContent = entry.key || "-";
+
+    const sourceNode = document.createElement("span");
+    sourceNode.className = "openclaw-env-source";
+    sourceNode.textContent = formatOpenclawEnvironmentSource(entry.source);
+
+    head.appendChild(keyNode);
+    head.appendChild(sourceNode);
+    item.appendChild(head);
+
+    const input = document.createElement("input");
+    input.className = "input";
+    input.dataset.envKey = entry.key || "";
+    input.value = entry.value || "";
+    input.placeholder = entry.masked && entry.masked !== "-" ? entry.masked : "";
+    input.type = (revealOpenclawEnvToggle?.checked ?? true) ? "text" : "password";
+    input.autocomplete = "off";
+    item.appendChild(input);
+
+    const meta = document.createElement("p");
+    meta.className = "openclaw-env-meta";
+    const status = entry.present ? "configurado" : "vazio";
+    meta.textContent = `${entry.label || entry.key || "-"} • ${status}`;
+    item.appendChild(meta);
+
+    openclawEnvList.appendChild(item);
+  });
+}
+
+async function loadOpenclawEnvironment({ showLoading = true } = {}) {
+  if (!openclawEnvList || openclawEnvironmentInFlight) {
+    return null;
+  }
+
+  openclawEnvironmentInFlight = true;
+  setOpenclawEnvironmentButtonsDisabled(true);
+
+  if (showLoading && openclawEnvFeedback) {
+    openclawEnvFeedback.textContent = "Carregando environment...";
+  }
+
+  try {
+    const payload = await fetchJson("/openclaw/environment?reveal=true", { method: "GET" });
+    renderOpenclawEnvironment(payload);
+    if (openclawEnvFeedback) {
+      const count = Array.isArray(payload?.variables) ? payload.variables.length : 0;
+      openclawEnvFeedback.textContent = `Environment carregado (${count} variaveis).`;
+    }
+    setOpenclawEnvironmentInputVisibility();
+    return payload;
+  } catch (error) {
+    if (openclawEnvFeedback) {
+      openclawEnvFeedback.textContent = `Falha ao carregar environment: ${error.message}`;
+    }
+    return null;
+  } finally {
+    openclawEnvironmentInFlight = false;
+    setOpenclawEnvironmentButtonsDisabled(false);
+  }
+}
+
+function collectOpenclawEnvironmentValues() {
+  const values = {};
+  if (!openclawEnvList) {
+    return values;
+  }
+
+  openclawEnvList.querySelectorAll("input[data-env-key]").forEach((input) => {
+    const key = (input.dataset.envKey || "").trim();
+    if (!key) {
+      return;
+    }
+    values[key] = input.value || "";
+  });
+  return values;
+}
+
+async function saveOpenclawEnvironment() {
+  if (!openclawEnvList || openclawEnvironmentInFlight) {
+    return;
+  }
+
+  const values = collectOpenclawEnvironmentValues();
+  if (!Object.keys(values).length) {
+    if (openclawEnvFeedback) {
+      openclawEnvFeedback.textContent = "Nenhuma variavel disponivel para salvar.";
+    }
+    return;
+  }
+
+  openclawEnvironmentInFlight = true;
+  setOpenclawEnvironmentButtonsDisabled(true);
+  if (openclawEnvFeedback) {
+    openclawEnvFeedback.textContent = "Salvando environment...";
+  }
+
+  try {
+    await fetchJson("/openclaw/environment", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values }),
+    });
+    if (openclawEnvFeedback) {
+      openclawEnvFeedback.textContent = "Environment salvo e sincronizado com o NanoBot.";
+    }
+    await loadOpenclawEnvironment({ showLoading: false });
+  } catch (error) {
+    if (openclawEnvFeedback) {
+      openclawEnvFeedback.textContent = `Falha ao salvar environment: ${error.message}`;
+    }
+  } finally {
+    openclawEnvironmentInFlight = false;
+    setOpenclawEnvironmentButtonsDisabled(false);
+  }
+}
+
+function renderNanobotStatus(payload) {
+  if (!nanobotStatusOutput) {
+    return;
+  }
+
+  const lines = [
+    `Comando: ${payload.command || "-"}`,
+    `Instalado: ${payload.installed ? "sim" : "nao"}`,
+    `Versao: ${payload.version || "-"}`,
+    `Config: ${payload.config_path || "-"} (${payload.config_exists ? "ok" : "faltando"})`,
+    `Workspace: ${payload.workspace_path || "-"} (${payload.workspace_exists ? "ok" : "faltando"})`,
+  ];
+
+  if (payload.raw_status) {
+    lines.push("", "Saida do comando status:", payload.raw_status);
+  }
+
+  nanobotStatusOutput.textContent = lines.join("\n");
+}
+
+async function loadNanobotStatus() {
+  if (!nanobotStatusFeedback) {
+    return;
+  }
+
+  nanobotStatusFeedback.textContent = "Checando status do NanoBot...";
+  try {
+    const payload = await fetchJson("/nanobot/status", { method: "GET" });
+    nanobotStatusFeedback.textContent = payload.message || "Status carregado.";
+    renderNanobotStatus(payload);
+  } catch (error) {
+    nanobotStatusFeedback.textContent = `Falha ao consultar status: ${error.message}`;
+    if (nanobotStatusOutput) {
+      nanobotStatusOutput.textContent = "-";
+    }
+  }
+}
+
+async function runNanobotOnboard() {
+  if (!nanobotStatusFeedback) {
+    return;
+  }
+
+  nanobotStatusFeedback.textContent = "Executando onboard do NanoBot...";
+  try {
+    const payload = await fetchJson("/nanobot/onboard", { method: "POST" });
+    nanobotStatusFeedback.textContent = payload.message || "Onboard executado.";
+    await loadNanobotStatus();
+  } catch (error) {
+    nanobotStatusFeedback.textContent = `Falha no onboard: ${error.message}`;
   }
 }
 
@@ -2659,28 +4159,45 @@ if (discoverModelsDir) {
   });
 }
 
-frameworkRadios.forEach(radio => {
-  radio.addEventListener('change', (e) => {
-    openclawSettingsGroup.classList.toggle("hidden", e.target.value !== "openclaw");
-    nanobotSettingsGroup.classList.toggle("hidden", e.target.value !== "nanobot");
+frameworkRadios.forEach((radio) => {
+  radio.addEventListener("change", (event) => {
+    const nextFramework = event.target.value === "nanobot" ? "nanobot" : "openclaw";
+    applyAgentFramework(nextFramework, { syncRadio: false, refreshPanel: true });
   });
 });
 
 installOpenclawBtn.addEventListener("click", async () => {
+  if (openclawInstallInFlight) {
+    return;
+  }
+
+  openclawInstallInFlight = true;
+  setOpenclawInstallButtonState({ inFlight: true });
+  if (checkOpenclawStatusBtn) {
+    checkOpenclawStatusBtn.disabled = true;
+  }
+
+  let installFailed = false;
   try {
-    const btn = installOpenclawBtn;
-    btn.disabled = true;
-    btn.textContent = "Instalando... isso pode demorar um pouco.";
     installOpenclawFeedback.textContent = "Baixando repositorio e dependencias...";
     installOpenclawFeedback.classList.remove("hidden");
 
     const payload = await fetchJson("/openclaw/install", { method: "POST" });
     installOpenclawFeedback.textContent = payload.message || "OpenClaw instalado com sucesso!";
-    btn.textContent = "Instalado";
   } catch (error) {
+    installFailed = true;
     installOpenclawFeedback.textContent = `Erro na instalacao: ${error.message}`;
-    installOpenclawBtn.disabled = false;
-    installOpenclawBtn.textContent = "Tentar Novamente";
+  } finally {
+    openclawInstallInFlight = false;
+    const status = await loadOpenclawInstallStatus({ showLoading: false, syncInstallFeedback: false });
+
+    if (installFailed && !(status && status.cli_exists)) {
+      installOpenclawBtn.disabled = false;
+      installOpenclawBtn.textContent = "Tentar Novamente";
+      return;
+    }
+
+    setOpenclawInstallButtonState({ installed: Boolean(status?.cli_exists), inFlight: false });
   }
 });
 
@@ -2689,18 +4206,55 @@ installNanobotBtn.addEventListener("click", async () => {
     const btn = installNanobotBtn;
     btn.disabled = true;
     btn.textContent = "Instalando Nanobot...";
-    installNanobotFeedback.textContent = "Clonando repositorio (isso pode demorar).";
+    installNanobotFeedback.textContent = "Executando clone/pull e instalacao pip (isso pode demorar).";
     installNanobotFeedback.classList.remove("hidden");
 
     const payload = await fetchJson("/nanobot/install", { method: "POST" });
     installNanobotFeedback.textContent = payload.message || "Nanobot instalado com sucesso!";
     btn.textContent = "Instalado";
+    await loadNanobotStatus();
   } catch (error) {
     installNanobotFeedback.textContent = `Erro na instalacao: ${error.message}`;
     installNanobotBtn.disabled = false;
     installNanobotBtn.textContent = "Tentar Novamente";
   }
 });
+
+if (checkOpenclawStatusBtn) {
+  checkOpenclawStatusBtn.addEventListener("click", () => {
+    void loadOpenclawInstallStatus();
+  });
+}
+
+if (checkNanobotStatusBtn) {
+  checkNanobotStatusBtn.addEventListener("click", () => {
+    void loadNanobotStatus();
+  });
+}
+
+if (initNanobotBtn) {
+  initNanobotBtn.addEventListener("click", () => {
+    void runNanobotOnboard();
+  });
+}
+
+if (refreshOpenclawEnvBtn) {
+  refreshOpenclawEnvBtn.addEventListener("click", () => {
+    void loadOpenclawEnvironment();
+  });
+}
+
+if (saveOpenclawEnvBtn) {
+  saveOpenclawEnvBtn.addEventListener("click", () => {
+    void saveOpenclawEnvironment();
+  });
+}
+
+if (revealOpenclawEnvToggle) {
+  revealOpenclawEnvToggle.addEventListener("change", () => {
+    setOpenclawEnvironmentInputVisibility();
+  });
+}
 
 async function bootstrap() {
   try {
@@ -2712,11 +4266,10 @@ async function bootstrap() {
     ensureActiveThread();
 
     renderOpenClawViews();
-    if (!restoreOpenClawObservabilityFromStorage()) {
-      clearChipList(openclawSkills, "Nenhuma skill reportada");
-      clearChipList(openclawTools, "Nenhuma tool reportada");
-    }
     setOpenClawRuntimeButtons("");
+    setAiSceneBusyState();
+    renderAiSceneSteps(null);
+    setAiSceneStatus("Pronto para montar uma cena.");
 
     renderThreadList();
     rebuildChatFromThread();
@@ -2726,6 +4279,10 @@ async function bootstrap() {
     await loadCatalogSources();
     await searchCatalogModels();
     await loadConfig();
+    if (!restoreOpenClawObservabilityFromStorage()) {
+      clearChipList(openclawSkills, "Nenhuma skill reportada");
+      clearChipList(openclawTools, "Nenhuma tool reportada");
+    }
     await loadDownloads();
 
     if (downloadsTimer) {
@@ -2736,6 +4293,8 @@ async function bootstrap() {
       window.particleSystem = new ParticleSystem("bg-canvas");
     } catch (e) {
       console.error("Failed to initialize Particle System:", e);
+      window.particleSystem = createParticleSystemFallback();
+      setAiSceneStatus("Modo fallback ativo: sem WebGL, mas com timeline de cena.");
     }
 
     downloadsTimer = window.setInterval(() => {

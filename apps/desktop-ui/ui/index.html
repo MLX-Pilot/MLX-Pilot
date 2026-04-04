@@ -73,7 +73,7 @@
               Descobrir Modelos
             </button>
             <button class="tab-btn" data-tab="openclaw" role="tab" aria-selected="false">
-              OpenClaw
+              <span id="agent-tab-label">OpenClaw</span>
             </button>
             <button class="tab-btn" data-tab="ai-interaction" role="tab" aria-selected="false">
               Interacao IA
@@ -197,8 +197,8 @@
       <section id="panel-openclaw" class="main-panel" role="tabpanel">
         <header class="openclaw-header glass">
           <div>
-            <p class="chat-eyebrow">OpenClaw Integration</p>
-            <h2>Chat, observabilidade e configuracao</h2>
+            <p id="agent-panel-eyebrow" class="chat-eyebrow">OpenClaw Integration</p>
+            <h2 id="agent-panel-title">Chat, observabilidade e configuracao</h2>
             <p id="openclaw-status-text" class="meta-note">status: verificando...</p>
             <p id="openclaw-runtime-meta" class="meta-note">runtime: verificando...</p>
           </div>
@@ -213,7 +213,7 @@
         </header>
 
         <section class="openclaw-controls glass">
-          <div class="openclaw-subtabs" role="tablist" aria-label="OpenClaw visualizacao">
+          <div id="agent-subtabs-label" class="openclaw-subtabs" role="tablist" aria-label="OpenClaw visualizacao">
             <button class="tab-btn openclaw-view-btn active" data-openclaw-view="chat">Chat</button>
             <button class="tab-btn openclaw-view-btn" data-openclaw-view="logs">Logs</button>
             <button class="tab-btn openclaw-view-btn" data-openclaw-view="observability">Skills e Tools</button>
@@ -229,13 +229,13 @@
         <section id="openclaw-panels" class="openclaw-panels single-mode">
           <article id="openclaw-panel-chat" class="openclaw-panel openclaw-chat-panel glass active">
             <div class="panel-title-row">
-              <h3>Chat com OpenClaw</h3>
+              <h3 id="agent-chat-title">Chat com OpenClaw</h3>
             </div>
 
             <section id="openclaw-chat-log" class="openclaw-chat-log"></section>
 
             <form id="openclaw-chat-form" class="openclaw-chat-form">
-              <textarea id="openclaw-message-input" rows="1" placeholder="Converse com o OpenClaw aqui..."
+              <textarea id="openclaw-message-input" rows="1" placeholder="Converse com o agente aqui..."
                 required></textarea>
               <div class="chat-form-actions">
                 <button type="submit" class="primary-btn">Enviar para OpenClaw</button>
@@ -245,7 +245,7 @@
 
           <article id="openclaw-panel-logs" class="openclaw-panel openclaw-log-panel glass">
             <div class="panel-title-row">
-              <h3>Logs em tempo real</h3>
+              <h3 id="agent-logs-title">Logs em tempo real</h3>
               <button id="clear-openclaw-log" class="ghost-btn">Limpar</button>
             </div>
 
@@ -253,9 +253,9 @@
               <label class="field-group">
                 <span>Stream</span>
                 <select id="openclaw-log-stream" class="input">
-                  <option value="gateway">gateway.log</option>
-                  <option value="error">gateway.err.log</option>
-                  <option value="sync">openclaw-mlx-sync.log</option>
+                  <option id="agent-log-option-gateway" value="gateway">gateway.log</option>
+                  <option id="agent-log-option-error" value="error">gateway.err.log</option>
+                  <option id="agent-log-option-sync" value="sync">openclaw-mlx-sync.log</option>
                 </select>
               </label>
 
@@ -267,7 +267,7 @@
           </article>
 
           <article id="openclaw-panel-observability" class="openclaw-panel openclaw-meta-panel glass">
-            <h3>Skills e Tools da ultima resposta</h3>
+            <h3 id="agent-observability-title">Skills e Tools da ultima resposta</h3>
 
             <div class="openclaw-meta-block">
               <p class="openclaw-meta-label">Modelo</p>
@@ -291,24 +291,29 @@
           </article>
 
           <article id="openclaw-panel-config" class="openclaw-panel openclaw-config-panel glass">
-            <h3>Configuracao de modelo OpenClaw</h3>
+            <h3 id="agent-config-title">Configuracao de modelo OpenClaw</h3>
 
             <label class="field-group">
-              <span>Origem do modelo</span>
+              <span id="openclaw-model-source-label">Origem do modelo</span>
               <select id="openclaw-model-source" class="input">
-                <option value="cloud">Nuvem (OpenClaw configurado)</option>
-                <option value="local">Local (MLX-Pilot)</option>
+                <option id="openclaw-model-source-cloud-option" value="cloud">Nuvem (OpenClaw configurado)</option>
+                <option id="openclaw-model-source-local-option" value="local">Local (MLX-Pilot)</option>
               </select>
             </label>
 
             <label id="openclaw-cloud-picker" class="field-group">
-              <span>Modelos cloud</span>
+              <span id="openclaw-cloud-label">Modelos cloud</span>
               <select id="openclaw-cloud-model-select" class="input"></select>
             </label>
 
             <label id="openclaw-local-picker" class="field-group hidden">
-              <span>Modelos locais</span>
+              <span id="openclaw-local-label">Modelos locais</span>
               <select id="openclaw-local-model-select" class="input"></select>
+            </label>
+
+            <label id="nanobot-model-picker" class="field-group hidden">
+              <span id="nanobot-model-label">Modelo NanoBot</span>
+              <input id="nanobot-model-input" class="input" placeholder="Ex: openai-codex/gpt-5.1-codex" />
             </label>
 
             <div class="openclaw-config-actions">
@@ -413,6 +418,16 @@
                 <p id="install-openclaw-feedback" class="meta-note mt-2" style="margin-top: 8px;">-</p>
               </div>
             </section>
+
+            <section class="settings-controls glass" style="margin-top: 16px;">
+              <h3>Diagnostico do OpenClaw</h3>
+              <p class="meta-note">Valide instalacao, estado de runtime e logs configurados.</p>
+              <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+                <button id="check-openclaw-status-btn" type="button" class="ghost-btn">Checar status OpenClaw</button>
+              </div>
+              <p id="openclaw-install-status-feedback" class="meta-note mt-2" style="margin-top: 8px;">-</p>
+              <pre id="openclaw-install-status-output" class="openclaw-log-viewer" style="max-height: 220px; margin-top: 8px;">-</pre>
+            </section>
           </div>
 
           <div id="nanobot-settings-group" class="hidden">
@@ -427,21 +442,48 @@
               <p class="meta-note" style="margin-bottom: 12px;">Defina os diretorios onde o NanoBot esta localizado.</p>
 
               <label class="field-group">
-                <span>NanoBot CLI (Caminho principal)</span>
-                <input id="setting-nanobot-cli" class="input" placeholder="Ex: /Users/kaike/prod/nanobot/run.py" />
+                <span>NanoBot CLI (comando, binario ou pasta do repo)</span>
+                <input id="setting-nanobot-cli" class="input"
+                  placeholder="Ex: nanobot ou /Users/kaike/prod/nanobot" />
               </label>
             </section>
 
             <section class="settings-controls glass" style="margin-top: 16px;">
               <h3>Instalacao do NanoBot</h3>
-              <p class="meta-note">Se o NanoBot nao estiver instalado, voce pode iniciar o processo automatizado
-                aqui (git clone).</p>
+              <p class="meta-note">Fluxo automatizado: clone/pull do repositorio + pip install -e.</p>
               <div style="margin-top: 12px;">
                 <button id="install-nanobot-btn" type="button" class="ghost-btn">Instalar NanoBot agora</button>
                 <p id="install-nanobot-feedback" class="meta-note mt-2" style="margin-top: 8px;">-</p>
               </div>
             </section>
+
+            <section class="settings-controls glass" style="margin-top: 16px;">
+              <h3>Diagnostico e Bootstrap</h3>
+              <p class="meta-note">Valide instalacao/versao e inicialize o config em ~/.nanobot/config.json.</p>
+              <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+                <button id="check-nanobot-status-btn" type="button" class="ghost-btn">Checar status NanoBot</button>
+                <button id="init-nanobot-btn" type="button" class="ghost-btn">Inicializar (onboard)</button>
+              </div>
+              <p id="nanobot-status-feedback" class="meta-note mt-2" style="margin-top: 8px;">-</p>
+              <pre id="nanobot-status-output" class="openclaw-log-viewer" style="max-height: 220px; margin-top: 8px;">-</pre>
+            </section>
           </div>
+
+          <section id="environment-settings-group" class="settings-controls glass">
+            <h3>Environment e Secrets (OpenClaw + NanoBot)</h3>
+            <p class="meta-note">Gerencie chaves e tokens usados pelo OpenClaw e sincronizados com o NanoBot cloud.</p>
+            <div class="openclaw-config-actions" style="margin-top: 12px;">
+              <button id="refresh-openclaw-env-btn" type="button" class="ghost-btn">Atualizar environment</button>
+              <button id="save-openclaw-env-btn" type="button" class="primary-btn">Salvar environment</button>
+              <label class="openclaw-multi-toggle">
+                <input id="reveal-openclaw-env" type="checkbox" checked />
+                Mostrar valores reais
+              </label>
+            </div>
+            <p id="openclaw-env-feedback" class="meta-note mt-2" style="margin-top: 8px;">-</p>
+            <p id="openclaw-env-path" class="meta-note mt-2" style="margin-top: 8px;">-</p>
+            <div id="openclaw-env-list" class="openclaw-env-grid"></div>
+          </section>
         </div>
       </section>
 
@@ -450,14 +492,28 @@
         <div id="bg-canvas"></div>
 
         <div class="ai-interaction-ui glass">
-          <p class="chat-eyebrow">Playground</p>
-          <h2>Particulas Dinamicas</h2>
-          <p class="meta-note">Digite um texto abaixo para a IA montar visualmente nas particulas flutuantes.</p>
-          <div style="display: flex; gap: 8px; margin-top: 16px;">
-            <input id="ai-particle-input" class="input" placeholder="Ex: HELLO" maxlength="10"
-              style="text-transform: uppercase;">
-            <button id="ai-particle-btn" class="primary-btn">Enviar</button>
+          <p class="chat-eyebrow">Interacao Visual</p>
+          <h2>IA em Particulas</h2>
+          <p class="meta-note">Pergunte normalmente. A resposta vira animacao por setas, numeros, formas e etapas.</p>
+
+          <textarea id="ai-particle-input" class="input ai-scene-input" rows="2"
+            placeholder="Ex: Voce sabe como se faz o calculo de baskara?"></textarea>
+
+          <div class="ai-scene-actions">
+            <button id="ai-particle-btn" class="primary-btn">Animar resposta</button>
+            <button id="ai-particle-stop-btn" class="ghost-btn" type="button">Parar cena</button>
           </div>
+
+          <p id="ai-scene-status" class="meta-note">Pronto para montar uma cena.</p>
+
+          <div class="ai-scene-examples">
+            <button type="button" class="ghost-btn ai-scene-example-btn"
+              data-prompt="Voce sabe como se faz o calculo de baskara?">Exemplo Baskara</button>
+            <button type="button" class="ghost-btn ai-scene-example-btn"
+              data-prompt="Consegue me mostrar como voce imagina a expansao de Satoru Gojo?">Exemplo Gojo</button>
+          </div>
+
+          <ul id="ai-scene-steps" class="ai-scene-steps"></ul>
         </div>
       </section>
 
