@@ -47,21 +47,11 @@ impl Default for LlamaCppProviderConfig {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct ServerState {
     child: Option<Child>,
     model_path: Option<PathBuf>,
     model_name: Option<String>,
-}
-
-impl Default for ServerState {
-    fn default() -> Self {
-        Self {
-            child: None,
-            model_path: None,
-            model_name: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -153,30 +143,26 @@ impl LlamaCppProvider {
     }
 
     async fn install_llamacpp(&self) -> Result<(), ProviderError> {
-        if cfg!(target_os = "macos") {
-            if command_available("brew").await {
-                run_command("brew", &["install", "llama.cpp"], Duration::from_secs(1800)).await?;
-                return Ok(());
-            }
+        if cfg!(target_os = "macos") && command_available("brew").await {
+            run_command("brew", &["install", "llama.cpp"], Duration::from_secs(1800)).await?;
+            return Ok(());
         }
 
-        if cfg!(target_os = "windows") {
-            if command_available("winget").await {
-                let _ = run_command(
-                    "winget",
-                    &[
-                        "install",
-                        "--id",
-                        "ggml.llama.cpp",
-                        "-e",
-                        "--accept-package-agreements",
-                        "--accept-source-agreements",
-                        "--silent",
-                    ],
-                    Duration::from_secs(1800),
-                )
-                .await;
-            }
+        if cfg!(target_os = "windows") && command_available("winget").await {
+            let _ = run_command(
+                "winget",
+                &[
+                    "install",
+                    "--id",
+                    "ggml.llama.cpp",
+                    "-e",
+                    "--accept-package-agreements",
+                    "--accept-source-agreements",
+                    "--silent",
+                ],
+                Duration::from_secs(1800),
+            )
+            .await;
         }
 
         Err(ProviderError::Unavailable {

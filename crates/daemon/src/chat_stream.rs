@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+#[allow(unused_imports)]
 use std::process::{Command as StdCommand, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
@@ -495,7 +496,7 @@ fn build_prompt(messages: &[ChatMessage]) -> String {
     prompt
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 struct ParsedMetrics {
     prompt_tokens: Option<usize>,
     prompt_tps: Option<f32>,
@@ -539,18 +540,6 @@ impl ParsedMetrics {
         }
 
         Some(lines.join("\n"))
-    }
-}
-
-impl Default for ParsedMetrics {
-    fn default() -> Self {
-        Self {
-            prompt_tokens: None,
-            prompt_tps: None,
-            generation_tokens: None,
-            generation_tps: None,
-            peak_memory_gb: None,
-        }
     }
 }
 

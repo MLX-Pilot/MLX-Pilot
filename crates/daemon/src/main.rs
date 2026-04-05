@@ -1,3 +1,4 @@
+mod agent_api;
 mod catalog;
 mod chat_stream;
 mod config;
@@ -62,6 +63,7 @@ struct AppState {
     chat_runtime: ChatRuntimeConfig,
     openclaw_runtime: Arc<OpenClawRuntime>,
     nanobot_runtime: Arc<Mutex<NanoBotRuntimeManager>>,
+    agent_state: agent_api::AgentState,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -359,6 +361,19 @@ async fn main() -> anyhow::Result<()> {
             sync_log: cfg.openclaw_sync_log.clone(),
         })),
         nanobot_runtime: Arc::new(Mutex::new(NanoBotRuntimeManager::new())),
+        agent_state: agent_api::AgentState {
+            default_model_id: std::env::var("APP_AGENT_MODEL")
+                .unwrap_or_else(|_| "qwen2.5:7b".to_string()),
+            default_workspace: std::env::var("APP_AGENT_WORKSPACE")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default()),
+            policy: Arc::new(agent_api::DefaultPolicy),
+            approval: Arc::new(agent_api::AutoApproval),
+            event_bus: Arc::new(mlx_agent_core::EventBus::default()),
+            audit: Arc::new(mlx_agent_core::AuditLog::new(
+                std::env::temp_dir().join("mlx-pilot-audit"),
+            )),
+        },
     };
 
     let app = Router::new()
@@ -409,6 +424,9 @@ async fn main() -> anyhow::Result<()> {
             "/catalog/downloads/{job_id}/cancel",
             post(catalog_cancel_download),
         )
+        // ── Agent API ──
+        .route("/agent/run", post(agent_api::agent_run))
+        .route("/agent/stream", post(agent_api::agent_stream))
         .with_state(state)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
@@ -1293,7 +1311,7 @@ async fn nanobot_status() -> Result<Json<NanoBotStatusResponse>, AppError> {
     let command_cwd = resolve_nanobot_command_cwd(&cfg);
     let config_path = nanobot_config_path();
     let workspace_path =
-        resolve_nanobot_workspace_from_config().unwrap_or_else(|| nanobot_workspace_path());
+        resolve_nanobot_workspace_from_config().unwrap_or_else(nanobot_workspace_path);
 
     let version = run_nanobot_command(&spec, &["--version"], command_cwd.as_deref())
         .ok()
@@ -3194,12 +3212,10 @@ fn build_nanobot_model_response(config: Option<&Value>) -> OpenClawCurrentModel 
             })
     } else if reference.is_empty() && model.is_empty() {
         "-".to_string()
+    } else if reference.is_empty() {
+        model.clone()
     } else {
-        if reference.is_empty() {
-            model.clone()
-        } else {
-            reference.clone()
-        }
+        reference.clone()
     };
 
     OpenClawCurrentModel {
