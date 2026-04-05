@@ -394,7 +394,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/nanobot/logs", get(nanobot_logs))
         .route("/nanobot/observability", get(nanobot_observability))
         .route("/nanobot/models", get(nanobot_models))
-        .route("/nanobot/model", get(nanobot_get_model).post(nanobot_set_model))
+        .route(
+            "/nanobot/model",
+            get(nanobot_get_model).post(nanobot_set_model),
+        )
         .route("/catalog/sources", get(catalog_sources))
         .route("/catalog/models", get(catalog_models))
         .route(
@@ -436,7 +439,9 @@ async fn get_config() -> Result<Json<AppConfig>, AppError> {
 }
 
 async fn update_config(Json(new_config): Json<AppConfig>) -> Result<Json<AppConfig>, AppError> {
-    new_config.save_settings().map_err(|e| AppError::NotFound(format!("Falha ao salvar config: {}", e)))?;
+    new_config
+        .save_settings()
+        .map_err(|e| AppError::NotFound(format!("Falha ao salvar config: {}", e)))?;
     Ok(Json(new_config))
 }
 
@@ -1287,19 +1292,15 @@ async fn nanobot_status() -> Result<Json<NanoBotStatusResponse>, AppError> {
     let spec = resolve_nanobot_command(&cfg);
     let command_cwd = resolve_nanobot_command_cwd(&cfg);
     let config_path = nanobot_config_path();
-    let workspace_path = resolve_nanobot_workspace_from_config()
-        .unwrap_or_else(|| nanobot_workspace_path());
+    let workspace_path =
+        resolve_nanobot_workspace_from_config().unwrap_or_else(|| nanobot_workspace_path());
 
     let version = run_nanobot_command(&spec, &["--version"], command_cwd.as_deref())
         .ok()
         .filter(|output| output.status.success())
         .map(|output| {
             let text = decode_stdout(&output);
-            text.lines()
-                .next()
-                .map(str::trim)
-                .unwrap_or("")
-                .to_string()
+            text.lines().next().map(str::trim).unwrap_or("").to_string()
         })
         .filter(|value| !value.is_empty());
 
@@ -1353,13 +1354,13 @@ async fn nanobot_onboard() -> Result<Json<InstallResponse>, AppError> {
         }));
     }
 
-    let output = run_nanobot_command(&spec, &["onboard"], command_cwd.as_deref()).map_err(
-        |error| {
-        AppError::Provider(ProviderError::Io {
-            context: "Falha ao executar nanobot onboard".to_string(),
-            source: error,
-        })
-    })?;
+    let output =
+        run_nanobot_command(&spec, &["onboard"], command_cwd.as_deref()).map_err(|error| {
+            AppError::Provider(ProviderError::Io {
+                context: "Falha ao executar nanobot onboard".to_string(),
+                source: error,
+            })
+        })?;
 
     if output.status.success() {
         return Ok(Json(InstallResponse {
@@ -1383,15 +1384,19 @@ async fn nanobot_install(
     let repo_dir = resolve_nanobot_repo_dir(&cfg)?;
     let repo_parent = repo_dir
         .parent()
-        .ok_or_else(|| AppError::Provider(ProviderError::Unavailable {
-            details: "Nao foi possivel determinar diretorio pai do NanoBot.".to_string(),
-        }))?
+        .ok_or_else(|| {
+            AppError::Provider(ProviderError::Unavailable {
+                details: "Nao foi possivel determinar diretorio pai do NanoBot.".to_string(),
+            })
+        })?
         .to_path_buf();
 
-    std::fs::create_dir_all(&repo_parent).map_err(|error| AppError::Provider(ProviderError::Io {
-        context: "Falha ao criar diretorio pai do NanoBot".to_string(),
-        source: error,
-    }))?;
+    std::fs::create_dir_all(&repo_parent).map_err(|error| {
+        AppError::Provider(ProviderError::Io {
+            context: "Falha ao criar diretorio pai do NanoBot".to_string(),
+            source: error,
+        })
+    })?;
 
     if repo_dir.join(".git").exists() {
         let output = Command::new("git")
@@ -1400,10 +1405,12 @@ async fn nanobot_install(
             .arg("pull")
             .arg("--ff-only")
             .output()
-            .map_err(|error| AppError::Provider(ProviderError::Io {
-                context: "Falha ao atualizar repositorio NanoBot".to_string(),
-                source: error,
-            }))?;
+            .map_err(|error| {
+                AppError::Provider(ProviderError::Io {
+                    context: "Falha ao atualizar repositorio NanoBot".to_string(),
+                    source: error,
+                })
+            })?;
 
         if !output.status.success() {
             return Err(AppError::Provider(ProviderError::CommandFailed {
@@ -1414,10 +1421,12 @@ async fn nanobot_install(
     } else {
         if repo_dir.exists() {
             let has_files = std::fs::read_dir(&repo_dir)
-                .map_err(|error| AppError::Provider(ProviderError::Io {
-                    context: "Falha ao ler diretorio de destino do NanoBot".to_string(),
-                    source: error,
-                }))?
+                .map_err(|error| {
+                    AppError::Provider(ProviderError::Io {
+                        context: "Falha ao ler diretorio de destino do NanoBot".to_string(),
+                        source: error,
+                    })
+                })?
                 .next()
                 .is_some();
             if has_files {
@@ -1435,14 +1444,19 @@ async fn nanobot_install(
             .arg("https://github.com/HKUDS/nanobot.git")
             .arg(&repo_dir)
             .output()
-            .map_err(|error| AppError::Provider(ProviderError::Io {
-                context: "Falha ao clonar repositorio NanoBot".to_string(),
-                source: error,
-            }))?;
+            .map_err(|error| {
+                AppError::Provider(ProviderError::Io {
+                    context: "Falha ao clonar repositorio NanoBot".to_string(),
+                    source: error,
+                })
+            })?;
 
         if !output.status.success() {
             return Err(AppError::Provider(ProviderError::CommandFailed {
-                command: format!("git clone https://github.com/HKUDS/nanobot.git {}", repo_dir.display()),
+                command: format!(
+                    "git clone https://github.com/HKUDS/nanobot.git {}",
+                    repo_dir.display()
+                ),
                 stderr: decode_command_output(&output),
             }));
         }
@@ -1455,10 +1469,12 @@ async fn nanobot_install(
             .arg("venv")
             .arg(&venv_dir)
             .output()
-            .map_err(|error| AppError::Provider(ProviderError::Io {
-                context: "Falha ao criar venv local do NanoBot".to_string(),
-                source: error,
-            }))?;
+            .map_err(|error| {
+                AppError::Provider(ProviderError::Io {
+                    context: "Falha ao criar venv local do NanoBot".to_string(),
+                    source: error,
+                })
+            })?;
 
         if !venv_output.status.success() {
             return Err(AppError::Provider(ProviderError::CommandFailed {
@@ -1476,10 +1492,12 @@ async fn nanobot_install(
         .arg("--upgrade")
         .arg("pip")
         .output()
-        .map_err(|error| AppError::Provider(ProviderError::Io {
-            context: "Falha ao atualizar pip no venv do NanoBot".to_string(),
-            source: error,
-        }))?;
+        .map_err(|error| {
+            AppError::Provider(ProviderError::Io {
+                context: "Falha ao atualizar pip no venv do NanoBot".to_string(),
+                source: error,
+            })
+        })?;
 
     if !pip_upgrade.status.success() {
         return Err(AppError::Provider(ProviderError::CommandFailed {
@@ -1495,14 +1513,20 @@ async fn nanobot_install(
         .arg("-e")
         .arg(&repo_dir)
         .output()
-        .map_err(|error| AppError::Provider(ProviderError::Io {
-            context: "Falha ao executar instalacao pip do NanoBot".to_string(),
-            source: error,
-        }))?;
+        .map_err(|error| {
+            AppError::Provider(ProviderError::Io {
+                context: "Falha ao executar instalacao pip do NanoBot".to_string(),
+                source: error,
+            })
+        })?;
 
     if !install_output.status.success() {
         return Err(AppError::Provider(ProviderError::CommandFailed {
-            command: format!("{} -m pip install -e {}", venv_python.display(), repo_dir.display()),
+            command: format!(
+                "{} -m pip install -e {}",
+                venv_python.display(),
+                repo_dir.display()
+            ),
             stderr: decode_command_output(&install_output),
         }));
     }
@@ -1632,9 +1656,11 @@ async fn nanobot_chat(
                     Some(candidate.to_string())
                 }
             })
-            .ok_or_else(|| AppError::Provider(ProviderError::InvalidRequest {
-                details: "modelo local NanoBot nao configurado corretamente".to_string(),
-            }))?;
+            .ok_or_else(|| {
+                AppError::Provider(ProviderError::InvalidRequest {
+                    details: "modelo local NanoBot nao configurado corretamente".to_string(),
+                })
+            })?;
 
         let started = Instant::now();
         let chat_result = state
@@ -1719,12 +1745,13 @@ async fn nanobot_chat(
     let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
     let started = Instant::now();
 
-    let output = run_nanobot_command(&spec, &arg_refs, command_cwd.as_deref()).map_err(|error| {
-        AppError::Provider(ProviderError::Io {
-            context: "Falha ao executar nanobot agent".to_string(),
-            source: error,
-        })
-    })?;
+    let output =
+        run_nanobot_command(&spec, &arg_refs, command_cwd.as_deref()).map_err(|error| {
+            AppError::Provider(ProviderError::Io {
+                context: "Falha ao executar nanobot agent".to_string(),
+                source: error,
+            })
+        })?;
 
     if !output.status.success() {
         return Err(AppError::Provider(ProviderError::CommandFailed {
@@ -1875,15 +1902,19 @@ async fn nanobot_set_model(
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| AppError::Provider(ProviderError::InvalidRequest {
-                details: "local_model_id e obrigatorio para source=local".to_string(),
-            }))?;
+            .ok_or_else(|| {
+                AppError::Provider(ProviderError::InvalidRequest {
+                    details: "local_model_id e obrigatorio para source=local".to_string(),
+                })
+            })?;
 
         let local_models = state.openclaw_local_provider.list_models().await?;
         let selected = local_models
             .into_iter()
             .find(|entry| entry.id == model_id)
-            .ok_or_else(|| AppError::NotFound(format!("modelo local '{model_id}' nao encontrado")))?;
+            .ok_or_else(|| {
+                AppError::NotFound(format!("modelo local '{model_id}' nao encontrado"))
+            })?;
 
         let model_reference = format!("openai/{}", selected.path);
         set_json_string_at_path(
@@ -1931,9 +1962,11 @@ async fn nanobot_set_model(
                     .filter(|value| !value.is_empty())
                     .map(ToString::to_string)
             })
-            .ok_or_else(|| AppError::Provider(ProviderError::InvalidRequest {
-                details: "model_reference e obrigatorio para source=cloud".to_string(),
-            }))?;
+            .ok_or_else(|| {
+                AppError::Provider(ProviderError::InvalidRequest {
+                    details: "model_reference e obrigatorio para source=cloud".to_string(),
+                })
+            })?;
 
         set_json_string_at_path(
             &mut config,
@@ -1985,9 +2018,11 @@ fn resolve_nanobot_repo_dir(cfg: &AppConfig) -> Result<FsPathBuf, AppError> {
         return candidate
             .parent()
             .map(|parent| parent.to_path_buf())
-            .ok_or_else(|| AppError::Provider(ProviderError::Unavailable {
-                details: "Caminho NanoBot .py invalido (sem diretorio pai).".to_string(),
-            }));
+            .ok_or_else(|| {
+                AppError::Provider(ProviderError::Unavailable {
+                    details: "Caminho NanoBot .py invalido (sem diretorio pai).".to_string(),
+                })
+            });
     }
 
     if candidate.exists() {
@@ -1998,9 +2033,11 @@ fn resolve_nanobot_repo_dir(cfg: &AppConfig) -> Result<FsPathBuf, AppError> {
         return candidate
             .parent()
             .map(|parent| parent.to_path_buf())
-            .ok_or_else(|| AppError::Provider(ProviderError::Unavailable {
-                details: "Caminho NanoBot invalido (sem diretorio pai).".to_string(),
-            }));
+            .ok_or_else(|| {
+                AppError::Provider(ProviderError::Unavailable {
+                    details: "Caminho NanoBot invalido (sem diretorio pai).".to_string(),
+                })
+            });
     }
 
     if raw.contains('/') || raw.contains('\\') {
@@ -2011,9 +2048,11 @@ fn resolve_nanobot_repo_dir(cfg: &AppConfig) -> Result<FsPathBuf, AppError> {
         return candidate
             .parent()
             .map(|parent| parent.to_path_buf())
-            .ok_or_else(|| AppError::Provider(ProviderError::Unavailable {
-                details: "Caminho NanoBot invalido (sem diretorio pai).".to_string(),
-            }));
+            .ok_or_else(|| {
+                AppError::Provider(ProviderError::Unavailable {
+                    details: "Caminho NanoBot invalido (sem diretorio pai).".to_string(),
+                })
+            });
     }
 
     Err(AppError::Provider(ProviderError::Unavailable {
@@ -2118,10 +2157,7 @@ fn decode_stderr(output: &Output) -> String {
 }
 
 fn normalize_nanobot_log_stream(stream: Option<&str>) -> String {
-    let normalized = stream
-        .map(str::trim)
-        .unwrap_or("gateway")
-        .to_lowercase();
+    let normalized = stream.map(str::trim).unwrap_or("gateway").to_lowercase();
 
     match normalized.as_str() {
         "gateway" | "error" | "sync" => normalized,
@@ -2164,10 +2200,12 @@ fn read_nanobot_log_chunk(
         });
     }
 
-    let metadata = fs::metadata(path).map_err(|source| AppError::Provider(ProviderError::Io {
-        context: format!("falha lendo metadata do log {}", path.display()),
-        source,
-    }))?;
+    let metadata = fs::metadata(path).map_err(|source| {
+        AppError::Provider(ProviderError::Io {
+            context: format!("falha lendo metadata do log {}", path.display()),
+            source,
+        })
+    })?;
     let file_size = metadata.len();
 
     let mut effective_cursor = cursor.min(file_size);
@@ -2176,23 +2214,27 @@ fn read_nanobot_log_chunk(
         effective_cursor = 0;
     }
 
-    let mut file = fs::File::open(path).map_err(|source| AppError::Provider(ProviderError::Io {
-        context: format!("falha abrindo log {}", path.display()),
-        source,
-    }))?;
-    file.seek(SeekFrom::Start(effective_cursor))
-        .map_err(|source| AppError::Provider(ProviderError::Io {
-            context: format!("falha posicionando cursor no log {}", path.display()),
+    let mut file = fs::File::open(path).map_err(|source| {
+        AppError::Provider(ProviderError::Io {
+            context: format!("falha abrindo log {}", path.display()),
             source,
-        }))?;
+        })
+    })?;
+    file.seek(SeekFrom::Start(effective_cursor))
+        .map_err(|source| {
+            AppError::Provider(ProviderError::Io {
+                context: format!("falha posicionando cursor no log {}", path.display()),
+                source,
+            })
+        })?;
 
     let mut buffer = vec![0_u8; max_bytes];
-    let bytes_read = file
-        .read(&mut buffer)
-        .map_err(|source| AppError::Provider(ProviderError::Io {
+    let bytes_read = file.read(&mut buffer).map_err(|source| {
+        AppError::Provider(ProviderError::Io {
             context: format!("falha lendo log {}", path.display()),
             source,
-        }))?;
+        })
+    })?;
     buffer.truncate(bytes_read);
 
     let content = String::from_utf8_lossy(&buffer).to_string();
@@ -2239,21 +2281,17 @@ fn build_nanobot_runtime_snapshot(
     command_cwd: Option<&FsPath>,
     runtime: &NanoBotRuntimeManager,
 ) -> NanoBotRuntimeStateResponse {
-    let (service_status, service_state, pid, uptime_seconds) = if let Some(process) = runtime.process.as_ref() {
-        (
-            "running".to_string(),
-            "active".to_string(),
-            Some(process.pid as u64),
-            Some(process.started_at.elapsed().as_secs()),
-        )
-    } else {
-        (
-            "stopped".to_string(),
-            "inactive".to_string(),
-            None,
-            None,
-        )
-    };
+    let (service_status, service_state, pid, uptime_seconds) =
+        if let Some(process) = runtime.process.as_ref() {
+            (
+                "running".to_string(),
+                "active".to_string(),
+                Some(process.pid as u64),
+                Some(process.started_at.elapsed().as_secs()),
+            )
+        } else {
+            ("stopped".to_string(), "inactive".to_string(), None, None)
+        };
 
     let mut issues = Vec::new();
     if let Some(last_error) = runtime.last_error.as_deref() {
@@ -2303,14 +2341,12 @@ async fn stop_nanobot_gateway(runtime: &mut NanoBotRuntimeManager) -> Result<(),
         return Ok(());
     };
 
-    process
-        .child
-        .kill()
-        .await
-        .map_err(|source| AppError::Provider(ProviderError::Io {
+    process.child.kill().await.map_err(|source| {
+        AppError::Provider(ProviderError::Io {
             context: "Falha ao finalizar processo gateway do NanoBot".to_string(),
             source,
-        }))?;
+        })
+    })?;
     let _ = process.child.wait().await;
     Ok(())
 }
@@ -2321,10 +2357,15 @@ async fn spawn_nanobot_gateway(
     runtime: &mut NanoBotRuntimeManager,
 ) -> Result<(), AppError> {
     let log_dir = nanobot_data_path().join("logs");
-    fs::create_dir_all(&log_dir).map_err(|source| AppError::Provider(ProviderError::Io {
-        context: format!("Falha ao criar diretorio de logs do NanoBot ({})", log_dir.display()),
-        source,
-    }))?;
+    fs::create_dir_all(&log_dir).map_err(|source| {
+        AppError::Provider(ProviderError::Io {
+            context: format!(
+                "Falha ao criar diretorio de logs do NanoBot ({})",
+                log_dir.display()
+            ),
+            source,
+        })
+    })?;
 
     let gateway_log = nanobot_log_path_for_stream("gateway");
     let gateway_err_log = nanobot_log_path_for_stream("error");
@@ -2333,18 +2374,22 @@ async fn spawn_nanobot_gateway(
         .create(true)
         .append(true)
         .open(&gateway_log)
-        .map_err(|source| AppError::Provider(ProviderError::Io {
-            context: format!("Falha ao abrir log {}", gateway_log.display()),
-            source,
-        }))?;
+        .map_err(|source| {
+            AppError::Provider(ProviderError::Io {
+                context: format!("Falha ao abrir log {}", gateway_log.display()),
+                source,
+            })
+        })?;
     let stderr_file = OpenOptions::new()
         .create(true)
         .append(true)
         .open(&gateway_err_log)
-        .map_err(|source| AppError::Provider(ProviderError::Io {
-            context: format!("Falha ao abrir log {}", gateway_err_log.display()),
-            source,
-        }))?;
+        .map_err(|source| {
+            AppError::Provider(ProviderError::Io {
+                context: format!("Falha ao abrir log {}", gateway_err_log.display()),
+                source,
+            })
+        })?;
 
     let mut command = TokioCommand::new(&spec.program);
     command.args(&spec.args);
@@ -2356,22 +2401,31 @@ async fn spawn_nanobot_gateway(
     command.stdout(Stdio::from(stdout_file));
     command.stderr(Stdio::from(stderr_file));
 
-    let mut child = command
-        .spawn()
-        .map_err(|source| AppError::Provider(ProviderError::Io {
-            context: format!("Falha ao iniciar gateway do NanoBot via '{} gateway'", spec.display()),
+    let mut child = command.spawn().map_err(|source| {
+        AppError::Provider(ProviderError::Io {
+            context: format!(
+                "Falha ao iniciar gateway do NanoBot via '{} gateway'",
+                spec.display()
+            ),
             source,
-        }))?;
+        })
+    })?;
 
     tokio::time::sleep(std::time::Duration::from_millis(350)).await;
-    if let Some(status) = child.try_wait().map_err(|source| AppError::Provider(ProviderError::Io {
-        context: "Falha ao checar processo inicial do NanoBot".to_string(),
-        source,
-    }))? {
-        let tail = read_log_tail(&gateway_err_log, 4096).or_else(|| read_log_tail(&gateway_log, 4096));
-        let details = tail.unwrap_or_else(|| "processo encerrou imediatamente sem detalhes".to_string());
+    if let Some(status) = child.try_wait().map_err(|source| {
+        AppError::Provider(ProviderError::Io {
+            context: "Falha ao checar processo inicial do NanoBot".to_string(),
+            source,
+        })
+    })? {
+        let tail =
+            read_log_tail(&gateway_err_log, 4096).or_else(|| read_log_tail(&gateway_log, 4096));
+        let details =
+            tail.unwrap_or_else(|| "processo encerrou imediatamente sem detalhes".to_string());
         return Err(AppError::Provider(ProviderError::Unavailable {
-            details: format!("gateway do NanoBot encerrou logo apos start (status {status}): {details}"),
+            details: format!(
+                "gateway do NanoBot encerrou logo apos start (status {status}): {details}"
+            ),
         }));
     }
 
@@ -2544,13 +2598,12 @@ fn update_openclaw_environment_file(updates: BTreeMap<String, String>) -> Result
 
     let mut lines = if env_path.exists() {
         fs::read_to_string(&env_path)
-            .map_err(|source| AppError::Provider(ProviderError::Io {
-                context: format!(
-                    "Falha ao ler environment OpenClaw ({})",
-                    env_path.display()
-                ),
-                source,
-            }))?
+            .map_err(|source| {
+                AppError::Provider(ProviderError::Io {
+                    context: format!("Falha ao ler environment OpenClaw ({})", env_path.display()),
+                    source,
+                })
+            })?
             .lines()
             .map(ToString::to_string)
             .collect::<Vec<_>>()
@@ -2575,26 +2628,30 @@ fn update_openclaw_environment_file(updates: BTreeMap<String, String>) -> Result
     }
 
     if let Some(parent) = env_path.parent() {
-        fs::create_dir_all(parent).map_err(|source| AppError::Provider(ProviderError::Io {
-            context: format!(
-                "Falha ao criar diretorio do environment OpenClaw ({})",
-                parent.display()
-            ),
-            source,
-        }))?;
+        fs::create_dir_all(parent).map_err(|source| {
+            AppError::Provider(ProviderError::Io {
+                context: format!(
+                    "Falha ao criar diretorio do environment OpenClaw ({})",
+                    parent.display()
+                ),
+                source,
+            })
+        })?;
     }
 
     let mut next_content = lines.join("\n");
     if !next_content.ends_with('\n') {
         next_content.push('\n');
     }
-    fs::write(&env_path, next_content).map_err(|source| AppError::Provider(ProviderError::Io {
-        context: format!(
-            "Falha ao salvar environment OpenClaw ({})",
-            env_path.display()
-        ),
-        source,
-    }))?;
+    fs::write(&env_path, next_content).map_err(|source| {
+        AppError::Provider(ProviderError::Io {
+            context: format!(
+                "Falha ao salvar environment OpenClaw ({})",
+                env_path.display()
+            ),
+            source,
+        })
+    })?;
 
     Ok(())
 }
@@ -2747,13 +2804,22 @@ fn nanobot_provider_env_binding(provider: &str) -> (String, Vec<String>, Vec<Str
         ),
         "vllm" | "hosted_vllm" => (
             "vllm".to_string(),
-            vec!["HOSTED_VLLM_API_KEY".to_string(), "OPENAI_API_KEY".to_string()],
+            vec![
+                "HOSTED_VLLM_API_KEY".to_string(),
+                "OPENAI_API_KEY".to_string(),
+            ],
             vec!["OPENAI_BASE_URL".to_string()],
         ),
         other => (
             other.to_string(),
-            vec![format!("{}_API_KEY", other.to_ascii_uppercase().replace('-', "_"))],
-            vec![format!("{}_BASE_URL", other.to_ascii_uppercase().replace('-', "_"))],
+            vec![format!(
+                "{}_API_KEY",
+                other.to_ascii_uppercase().replace('-', "_")
+            )],
+            vec![format!(
+                "{}_BASE_URL",
+                other.to_ascii_uppercase().replace('-', "_")
+            )],
         ),
     }
 }
@@ -2804,10 +2870,12 @@ fn read_env_file_assignments_optional(path: &FsPath) -> Result<BTreeMap<String, 
 }
 
 fn read_env_file_assignments(path: &FsPath) -> Result<BTreeMap<String, String>, AppError> {
-    let content = fs::read_to_string(path).map_err(|source| AppError::Provider(ProviderError::Io {
-        context: format!("Falha ao ler arquivo de environment ({})", path.display()),
-        source,
-    }))?;
+    let content = fs::read_to_string(path).map_err(|source| {
+        AppError::Provider(ProviderError::Io {
+            context: format!("Falha ao ler arquivo de environment ({})", path.display()),
+            source,
+        })
+    })?;
     let mut values = BTreeMap::new();
     for line in content.lines() {
         if let Some((key, value)) = parse_env_assignment_line(line) {
@@ -2871,10 +2939,7 @@ fn encode_env_value(value: &str) -> String {
         return value.to_string();
     }
 
-    format!(
-        "\"{}\"",
-        value.replace('\\', "\\\\").replace('"', "\\\"")
-    )
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 fn should_expose_environment_key(key: &str) -> bool {
@@ -2911,11 +2976,18 @@ fn mask_environment_value(value: &str) -> String {
         .into_iter()
         .rev()
         .collect::<String>();
-    let hidden_count = value.chars().count().saturating_sub(visible_prefix.len() + visible_suffix.len());
+    let hidden_count = value
+        .chars()
+        .count()
+        .saturating_sub(visible_prefix.len() + visible_suffix.len());
     if hidden_count == 0 {
         return value.to_string();
     }
-    format!("{visible_prefix}{}{}", "*".repeat(hidden_count), visible_suffix)
+    format!(
+        "{visible_prefix}{}{}",
+        "*".repeat(hidden_count),
+        visible_suffix
+    )
 }
 
 fn resolve_environment_value(values: &BTreeMap<String, String>, key: &str) -> Option<String> {
@@ -2941,39 +3013,50 @@ fn read_nanobot_config_json_optional() -> Result<Option<Value>, AppError> {
         return Ok(None);
     }
 
-    let raw = fs::read_to_string(&path).map_err(|source| AppError::Provider(ProviderError::Io {
-        context: format!("Falha ao ler config NanoBot ({})", path.display()),
-        source,
-    }))?;
-
-    serde_json::from_str::<Value>(&raw).map(Some).map_err(|source| {
+    let raw = fs::read_to_string(&path).map_err(|source| {
         AppError::Provider(ProviderError::Io {
-            context: format!("Falha ao parsear config NanoBot ({})", path.display()),
-            source: io::Error::other(source.to_string()),
+            context: format!("Falha ao ler config NanoBot ({})", path.display()),
+            source,
         })
-    })
+    })?;
+
+    serde_json::from_str::<Value>(&raw)
+        .map(Some)
+        .map_err(|source| {
+            AppError::Provider(ProviderError::Io {
+                context: format!("Falha ao parsear config NanoBot ({})", path.display()),
+                source: io::Error::other(source.to_string()),
+            })
+        })
 }
 
 fn write_nanobot_config_json(config: &Value) -> Result<(), AppError> {
     let path = nanobot_config_path();
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|source| AppError::Provider(ProviderError::Io {
-            context: format!("Falha ao criar diretorio de config NanoBot ({})", parent.display()),
-            source,
-        }))?;
+        fs::create_dir_all(parent).map_err(|source| {
+            AppError::Provider(ProviderError::Io {
+                context: format!(
+                    "Falha ao criar diretorio de config NanoBot ({})",
+                    parent.display()
+                ),
+                source,
+            })
+        })?;
     }
 
-    let body = serde_json::to_string_pretty(config).map_err(|source| AppError::Provider(
-        ProviderError::Io {
+    let body = serde_json::to_string_pretty(config).map_err(|source| {
+        AppError::Provider(ProviderError::Io {
             context: "Falha ao serializar config NanoBot".to_string(),
             source: io::Error::other(source.to_string()),
-        },
-    ))?;
+        })
+    })?;
 
-    fs::write(&path, body).map_err(|source| AppError::Provider(ProviderError::Io {
-        context: format!("Falha ao salvar config NanoBot ({})", path.display()),
-        source,
-    }))?;
+    fs::write(&path, body).map_err(|source| {
+        AppError::Provider(ProviderError::Io {
+            context: format!("Falha ao salvar config NanoBot ({})", path.display()),
+            source,
+        })
+    })?;
 
     Ok(())
 }
@@ -3216,10 +3299,17 @@ fn list_nanobot_skills(workspace: &FsPath) -> Vec<String> {
 }
 
 fn list_nanobot_tools(config: Option<&Value>) -> Vec<String> {
-    let mut tools = vec!["exec".to_string(), "files".to_string(), "memory".to_string()];
+    let mut tools = vec![
+        "exec".to_string(),
+        "files".to_string(),
+        "memory".to_string(),
+    ];
 
     if let Some(config) = config {
-        if let Some(web) = config.pointer("/tools/web/search").and_then(Value::as_object) {
+        if let Some(web) = config
+            .pointer("/tools/web/search")
+            .and_then(Value::as_object)
+        {
             let has_api_key = web
                 .get("apiKey")
                 .or_else(|| web.get("api_key"))
@@ -3234,7 +3324,11 @@ fn list_nanobot_tools(config: Option<&Value>) -> Vec<String> {
         let mcp_servers = config
             .pointer("/tools/mcpServers")
             .and_then(Value::as_object)
-            .or_else(|| config.pointer("/tools/mcp_servers").and_then(Value::as_object));
+            .or_else(|| {
+                config
+                    .pointer("/tools/mcp_servers")
+                    .and_then(Value::as_object)
+            });
         if let Some(mcp_servers) = mcp_servers {
             for server_name in mcp_servers.keys() {
                 let trimmed = server_name.trim();
@@ -3247,7 +3341,11 @@ fn list_nanobot_tools(config: Option<&Value>) -> Vec<String> {
         let restricted = config
             .pointer("/tools/restrictToWorkspace")
             .and_then(Value::as_bool)
-            .or_else(|| config.pointer("/tools/restrict_to_workspace").and_then(Value::as_bool))
+            .or_else(|| {
+                config
+                    .pointer("/tools/restrict_to_workspace")
+                    .and_then(Value::as_bool)
+            })
             .unwrap_or(false);
         if restricted {
             tools.push("workspace.restricted".to_string());

@@ -131,11 +131,9 @@ impl OpenClawRuntime {
     }
 
     pub async fn install(&self) -> Result<String, OpenClawError> {
-        let parent_dir = self
-            .cfg
-            .cli_path
-            .parent()
-            .ok_or_else(|| OpenClawError::BadRequest("caminho openclaw_cli_path invalido".to_string()))?;
+        let parent_dir = self.cfg.cli_path.parent().ok_or_else(|| {
+            OpenClawError::BadRequest("caminho openclaw_cli_path invalido".to_string())
+        })?;
 
         if !parent_dir.exists() {
             tokio::fs::create_dir_all(parent_dir)
@@ -858,13 +856,13 @@ impl OpenClawRuntime {
         Ok(aliases)
     }
 
-fn npm_command_name() -> &'static str {
-    if cfg!(windows) {
-        "npm.cmd"
-    } else {
-        "npm"
+    fn npm_command_name() -> &'static str {
+        if cfg!(windows) {
+            "npm.cmd"
+        } else {
+            "npm"
+        }
     }
-}
     async fn list_configured_cloud_models(
         &self,
         alias_map: &BTreeMap<String, String>,

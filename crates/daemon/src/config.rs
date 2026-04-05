@@ -100,7 +100,8 @@ impl Default for AppConfig {
 impl AppConfig {
     pub fn get_settings_path() -> PathBuf {
         // Use home dir via env instead of the `dirs` crate
-        let base = if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
+        let base = if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"))
+        {
             PathBuf::from(home).join(".config")
         } else if let Ok(app_data) = std::env::var("APPDATA") {
             PathBuf::from(app_data)

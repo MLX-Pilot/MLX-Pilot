@@ -13,10 +13,7 @@ pub enum PolicyDecision {
     /// The action is denied with a reason.
     Deny { reason: String },
     /// The action requires user approval before proceeding.
-    Ask {
-        prompt: String,
-        approval_id: String,
-    },
+    Ask { prompt: String, approval_id: String },
 }
 
 /// Configuration for the policy engine.
@@ -55,16 +52,8 @@ impl Default for PolicyConfig {
                 "git".into(),
                 "curl".into(),
             ],
-            exec_deny_patterns: vec![
-                "rm -rf /".into(),
-                "sudo".into(),
-                "chmod 777".into(),
-            ],
-            file_deny_paths: vec![
-                "~/.ssh/".into(),
-                "~/.aws/".into(),
-                "~/.gnupg/".into(),
-            ],
+            exec_deny_patterns: vec!["rm -rf /".into(), "sudo".into(), "chmod 777".into()],
+            file_deny_paths: vec!["~/.ssh/".into(), "~/.aws/".into(), "~/.gnupg/".into()],
             network_allow_domains: Vec::new(),
             min_trust_level: TrustLevel::Unknown,
             require_capabilities: false,
