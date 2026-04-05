@@ -9,6 +9,7 @@ pub mod approval;
 pub mod audit;
 pub mod events;
 pub mod policy;
+pub mod prompt_builder;
 pub mod registry;
 pub mod runtime;
 pub mod session;
@@ -19,5 +20,9 @@ pub use approval::{ApprovalDecision, ApprovalError, ApprovalRequest, ApprovalSer
 pub use audit::{AuditEventType, AuditLog, AuditLogEntry};
 pub use events::{AgentEvent, EventBus};
 pub use policy::{PolicyConfig, PolicyDecision, PolicyEngine};
+pub use prompt_builder::{
+    select_model_prompt_profile, ModelPromptProfile, ModelPromptProfileKind, PromptBuildInput,
+    PromptBuildOutput, PromptBuilder, VerbosityLevel,
+};
 pub use registry::ToolRegistry;
 pub use session::{SessionMessage, SessionStore};
