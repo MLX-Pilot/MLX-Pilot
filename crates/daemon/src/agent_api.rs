@@ -216,6 +216,11 @@ pub struct AgentToolInfo {
 pub struct AuditQuery {
     #[serde(default)]
     pub limit: Option<usize>,
+    pub since: Option<String>,
+    pub session_id: Option<String>,
+    pub event_type: Option<String>,
+    pub tool_name: Option<String>,
+    pub status: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1218,15 +1223,16 @@ pub async fn agent_providers(
 /// GET /agent/config
 pub async fn agent_get_config() -> Result<Json<super::config::AgentUiConfig>, AgentApiError> {
     let mut cfg = super::config::AppConfig::load_settings().apply_env();
-    if cfg.agent.security.use_secrets_vault && cfg.agent.api_key.trim().is_empty() {
-        if cfg
+    if cfg.agent.security.use_secrets_vault
+        && cfg.agent.api_key.trim().is_empty()
+        && cfg
             .agent
             .api_key_ref
             .as_deref()
             .map(str::trim)
             .filter(|v| !v.is_empty())
             .is_some()
-        {
+    {
             let vault = open_secrets_vault()?;
             if let Some(secret) = vault
                 .get_secret(AGENT_API_KEY_SECRET_KEY)
@@ -1241,7 +1247,6 @@ pub async fn agent_get_config() -> Result<Json<super::config::AgentUiConfig>, Ag
                 cfg.agent.api_key = secret;
             }
         }
-    }
     Ok(Json(cfg.agent))
 }
 
@@ -1404,8 +1409,8 @@ pub async fn agent_audit(
     Query(query): Query<AuditQuery>,
 ) -> Result<Json<AgentAuditResponse>, AgentApiError> {
     let limit = query.limit.unwrap_or(50).clamp(1, 500);
-    let mut entries =
-        read_recent_audit_entries(&state.agent_state.audit.log_dir, limit).map_err(|e| {
+    let mut entries = read_recent_audit_entries(&state.agent_state.audit.log_dir, limit, &query)
+        .map_err(|e| {
             AgentApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "audit_read_failed",
@@ -1413,9 +1418,90 @@ pub async fn agent_audit(
             )
         })?;
 
-    entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-    entries.truncate(limit);
+    entries.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
     Ok(Json(AgentAuditResponse { entries }))
+}
+
+/// GET /agent/audit/:id
+pub async fn agent_audit_get_id(
+    State(state): State<super::AppState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<Json<AuditLogEntry>, AgentApiError> {
+    let limit = 500;
+    let query = AuditQuery {
+        limit: Some(limit),
+        since: None,
+        session_id: None,
+        event_type: None,
+        tool_name: None,
+        status: None,
+    };
+    
+    let entries = read_recent_audit_entries(&state.agent_state.audit.log_dir, limit, &query)
+        .map_err(|e| {
+            AgentApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "audit_read_failed",
+                Some(e.to_string()),
+            )
+        })?;
+
+    for entry in entries {
+        if entry.id == id {
+            return Ok(Json(entry));
+        }
+    }
+    
+    Err(AgentApiError::new(
+        StatusCode::NOT_FOUND,
+        "entry_not_found",
+        Some(format!("audit entry with id {} not found", id)),
+    ))
+}
+
+/// GET /agent/audit/export
+pub async fn agent_audit_export(
+    State(state): State<super::AppState>,
+    Query(query): Query<AuditQuery>,
+) -> Result<axum::response::Response, AgentApiError> {
+    let limit = query.limit.unwrap_or(10000).clamp(1, 10000); // Allow bigger limit for exports
+    let entries = read_recent_audit_entries(&state.agent_state.audit.log_dir, limit, &query)
+        .map_err(|e| {
+            AgentApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "audit_read_failed",
+                Some(e.to_string()),
+            )
+        })?;
+
+    let json_bytes = serde_json::to_vec_pretty(&entries).map_err(|e| {
+        AgentApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "json_serialize_error",
+            Some(e.to_string()),
+        )
+    })?;
+
+    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+    let filename = format!("agent_audit_export_{}.json", timestamp);
+
+    let response = axum::response::Response::builder()
+        .status(StatusCode::OK)
+        .header(axum::http::header::CONTENT_TYPE, "application/json")
+        .header(
+            axum::http::header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{}\"", filename),
+        )
+        .body(axum::body::Body::from(json_bytes))
+        .map_err(|e| {
+            AgentApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "response_build_error",
+                Some(e.to_string()),
+            )
+        })?;
+
+    Ok(response)
 }
 
 // ── Session API Handlers ─────────────────────────────────────────
@@ -1565,6 +1651,7 @@ pub async fn agent_approve(
 fn read_recent_audit_entries(
     log_dir: &std::path::Path,
     limit: usize,
+    query: &AuditQuery,
 ) -> Result<Vec<AuditLogEntry>, std::io::Error> {
     if !log_dir.exists() {
         return Ok(Vec::new());
@@ -1577,6 +1664,16 @@ fn read_recent_audit_entries(
         .collect::<Vec<_>>();
     files.sort();
 
+    let since_ts = query.since.as_deref().and_then(|s| {
+        chrono::DateTime::parse_from_rfc3339(s)
+            .map(|dt| dt.with_timezone(&chrono::Utc))
+            .ok()
+    });
+
+    let filter_session = query.session_id.as_deref().filter(|s| !s.is_empty());
+    let filter_event = query.event_type.as_deref().filter(|s| !s.is_empty());
+    let filter_tool = query.tool_name.as_deref().filter(|s| !s.is_empty());
+
     let mut entries = Vec::new();
     for path in files.into_iter().rev() {
         let content = std::fs::read_to_string(path)?;
@@ -1585,6 +1682,42 @@ fn read_recent_audit_entries(
                 continue;
             }
             if let Ok(entry) = serde_json::from_str::<AuditLogEntry>(line) {
+                // Apply filters
+                if let Some(ts) = since_ts {
+                    if entry.timestamp < ts {
+                        continue;
+                    }
+                }
+                if let Some(sess) = filter_session {
+                    if entry.session_id != sess {
+                        continue;
+                    }
+                }
+                if let Some(ev) = filter_event {
+                    let event_str = serde_json::to_string(&entry.event_type)
+                        .unwrap_or_default()
+                        .replace('"', "");
+                    if event_str != ev {
+                        continue;
+                    }
+                }
+                if let Some(tool) = filter_tool {
+                    if entry.tool_name.as_deref() != Some(tool) {
+                        continue;
+                    }
+                }
+                if let Some(status) = query.status.as_deref().filter(|s| !s.is_empty()) {
+                    let has_error = entry.error.is_some() || entry.error_summary.is_some();
+                    let is_denied = entry.decision.as_deref() == Some("deny");
+                    
+                    match status {
+                        "error" if !has_error => continue,
+                        "success" if has_error || is_denied => continue,
+                        "denied" if !is_denied => continue,
+                        _ => {}
+                    }
+                }
+
                 entries.push(entry);
                 if entries.len() >= limit {
                     return Ok(entries);

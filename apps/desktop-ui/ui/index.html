@@ -447,21 +447,90 @@
               <span>Paths sensiveis bloqueados (glob, separados por virgula)</span>
               <input id="agent-sensitive-paths-input" class="input" placeholder="~/.ssh/*,**/.env" />
             </label>
-            <p class="meta-note">Ultimos eventos de auditoria:</p>
-            <ul id="agent-audit-list" class="agent-audit-list"></ul>
+            <p class="meta-note" style="margin-top: 16px;">Note: the full audit feed is available in the Console.</p>
           </article>
         </section>
 
-        <section class="agent-chat-panel glass">
+        <section class="agent-console-panel glass" style="margin-top: 16px;">
+          <header style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
+            <div>
+              <p class="chat-eyebrow">Observability Console</p>
+              <h3>Agent Audit Feed</h3>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <select id="audit-filter-session" class="input compact-input" style="min-width: 140px; margin-bottom: 0;">
+                <option value="">Todas Sessoes</option>
+              </select>
+              <select id="audit-filter-event" class="input compact-input" style="min-width: 140px; margin-bottom: 0;">
+                <option value="">Todos Eventos</option>
+                <option value="PromptBuilt">PromptBuilt</option>
+                <option value="ProviderCall">ProviderCall</option>
+                <option value="ToolRequested">ToolRequested</option>
+                <option value="ToolExecuted">ToolExecuted</option>
+                <option value="ToolFailed">ToolFailed</option>
+                <option value="ApprovalPending">ApprovalPending</option>
+                <option value="ApprovalDecision">ApprovalDecision</option>
+                <option value="ResponseFinal">ResponseFinal</option>
+                <option value="Error">Error</option>
+              </select>
+              <select id="audit-filter-status" class="input compact-input" style="min-width: 110px; margin-bottom: 0;">
+                <option value="">Todo Status</option>
+                <option value="success">Success</option>
+                <option value="error">Error</option>
+                <option value="denied">Denied</option>
+              </select>
+              <input id="audit-filter-tool" class="input compact-input" placeholder="Tool name..."
+                style="max-width: 120px; margin-bottom: 0;" />
+
+              <label class="agent-toggle-row" style="margin: 0 0 0 8px; font-size: 0.85rem;">
+                <input id="audit-follow-toggle" type="checkbox" checked />
+                <span>Follow current session</span>
+              </label>
+
+              <button id="audit-export-btn" class="ghost-btn text-sm" style="margin-left: 8px;">Exportar</button>
+            </div>
+          </header>
+
+          <div style="display: flex; gap: 16px; height: 400px;">
+            <div
+              style="flex: 1; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; overflow-y: auto; background: rgba(0,0,0,0.1);">
+              <ul id="agent-observability-list" class="agent-audit-list"
+                style="padding: 0; margin: 0; list-style: none;">
+                <!-- Audit items injected via JS -->
+                <li style="padding: 16px; text-align: center; color: var(--muted); font-size: 0.9rem;">
+                  Carregando feed...
+                </li>
+              </ul>
+            </div>
+
+            <div id="audit-detail-panel"
+              style="width: 350px; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; background: rgba(0,0,0,0.2); padding: 16px; overflow-y: auto; display: none; flex-direction: column;">
+              <div
+                style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px;">
+                <h4 style="margin: 0; font-size: 0.95rem;">Detalhes do Evento</h4>
+                <button id="audit-detail-close" class="ghost-btn text-sm"
+                  style="padding: 2px 8px; min-width: auto;">✕</button>
+              </div>
+              <div id="audit-detail-content"
+                style="flex: 1; font-size: 0.85rem; word-break: break-all; white-space: pre-wrap; color: var(--text);">
+                <!-- Details injected via JS -->
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="agent-chat-panel glass" style="margin-top: 16px;">
           <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 12px;">
             <div style="flex: 1;">
               <p class="chat-eyebrow">Sessoes do Agent</p>
               <div style="display: flex; gap: 8px; margin-bottom: 12px; margin-top: 8px; align-items: center;">
                 <button id="agent-new-session-btn" type="button" class="ghost-btn text-sm">Nova Sessao</button>
-                <select id="agent-session-select" class="input compact-input" style="max-width: 300px; margin-bottom: 0;"></select>
+                <select id="agent-session-select" class="input compact-input"
+                  style="max-width: 300px; margin-bottom: 0;"></select>
                 <button id="agent-rename-session-btn" type="button" class="ghost-btn text-sm" disabled>Renomear</button>
                 <button id="agent-export-session-btn" type="button" class="ghost-btn text-sm" disabled>Exportar</button>
-                <button id="agent-delete-session-btn" type="button" class="ghost-btn danger text-sm" disabled style="color: var(--danger);">Deletar</button>
+                <button id="agent-delete-session-btn" type="button" class="ghost-btn danger text-sm" disabled
+                  style="color: var(--danger);">Deletar</button>
               </div>
             </div>
             <span id="agent-chat-status" class="meta-note" style="margin-bottom: 8px;">pronto</span>
@@ -574,7 +643,8 @@
                 <button id="check-openclaw-status-btn" type="button" class="ghost-btn">Checar status OpenClaw</button>
               </div>
               <p id="openclaw-install-status-feedback" class="meta-note mt-2" style="margin-top: 8px;">-</p>
-              <pre id="openclaw-install-status-output" class="openclaw-log-viewer" style="max-height: 220px; margin-top: 8px;">-</pre>
+              <pre id="openclaw-install-status-output" class="openclaw-log-viewer"
+                style="max-height: 220px; margin-top: 8px;">-</pre>
             </section>
           </div>
 
@@ -591,8 +661,7 @@
 
               <label class="field-group">
                 <span>NanoBot CLI (comando, binario ou pasta do repo)</span>
-                <input id="setting-nanobot-cli" class="input"
-                  placeholder="Ex: nanobot ou /Users/kaike/prod/nanobot" />
+                <input id="setting-nanobot-cli" class="input" placeholder="Ex: nanobot ou /Users/kaike/prod/nanobot" />
               </label>
             </section>
 
@@ -613,7 +682,8 @@
                 <button id="init-nanobot-btn" type="button" class="ghost-btn">Inicializar (onboard)</button>
               </div>
               <p id="nanobot-status-feedback" class="meta-note mt-2" style="margin-top: 8px;">-</p>
-              <pre id="nanobot-status-output" class="openclaw-log-viewer" style="max-height: 220px; margin-top: 8px;">-</pre>
+              <pre id="nanobot-status-output" class="openclaw-log-viewer"
+                style="max-height: 220px; margin-top: 8px;">-</pre>
             </section>
           </div>
 

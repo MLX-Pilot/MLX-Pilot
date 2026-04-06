@@ -8,9 +8,12 @@ use tokio::io::AsyncWriteExt;
 /// A single audit log entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditLogEntry {
+    pub id: String,
     pub timestamp: DateTime<Utc>,
     pub session_id: String,
     pub event_type: AuditEventType,
+    pub provider: Option<String>,
+    pub model: Option<String>,
     pub tool_name: Option<String>,
     pub skill_name: Option<String>,
     pub params_hash: Option<String>,
@@ -18,19 +21,27 @@ pub struct AuditLogEntry {
     pub result_summary: Option<String>,
     pub duration_ms: Option<u64>,
     pub decision: Option<String>,
+    pub reason: Option<String>,
     pub error: Option<String>,
+    pub error_summary: Option<String>,
 }
 
 /// The type of auditable event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuditEventType {
-    ToolCallExecuted,
-    ToolCallDenied,
-    ToolCallFailed,
-    ApprovalRequested,
-    ApprovalGranted,
-    ApprovalDenied,
+    PromptBuilt,
+    ProviderCall,
+    ToolRequested,
+    ToolAllowed,
+    ToolDenied,
+    ToolExecuted,
+    ToolFailed,
+    ApprovalPending,
+    ApprovalDecision,
+    ResponseFinal,
+    Error,
+    // Keep backwards compatibility for manually tested stuff
     SkillLoaded,
     SkillRejected,
     SessionStarted,
@@ -85,9 +96,12 @@ mod tests {
     #[test]
     fn audit_entry_serializes() {
         let entry = AuditLogEntry {
+            id: uuid::Uuid::new_v4().to_string(),
             timestamp: Utc::now(),
             session_id: "sess-1".into(),
-            event_type: AuditEventType::ToolCallExecuted,
+            event_type: AuditEventType::ToolExecuted,
+            provider: None,
+            model: None,
             tool_name: Some("read_file".into()),
             skill_name: None,
             params_hash: Some("abc".into()),
@@ -95,19 +109,24 @@ mod tests {
             result_summary: Some("ok".into()),
             duration_ms: Some(12),
             decision: None,
+            reason: None,
             error: None,
+            error_summary: None,
         };
         let json = serde_json::to_string(&entry).unwrap();
-        assert!(json.contains("tool_call_executed"));
+        assert!(json.contains("tool_executed"));
     }
 
     #[tokio::test]
     async fn audit_log_write_stub_ok() {
         let log = AuditLog::new(PathBuf::from("/tmp/audit"));
         let entry = AuditLogEntry {
+            id: uuid::Uuid::new_v4().to_string(),
             timestamp: Utc::now(),
             session_id: "sess-1".into(),
             event_type: AuditEventType::SessionStarted,
+            provider: None,
+            model: None,
             tool_name: None,
             skill_name: None,
             params_hash: None,
@@ -115,7 +134,9 @@ mod tests {
             result_summary: None,
             duration_ms: None,
             decision: None,
+            reason: None,
             error: None,
+            error_summary: None,
         };
         // Should succeed (stub does nothing).
         log.write(&entry).await.unwrap();
