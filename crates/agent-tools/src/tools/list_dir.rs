@@ -47,7 +47,7 @@ impl crate::Tool for ListDirTool {
         &self.schema
     }
 
-    async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+    async fn execute(&self, params: &Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
         if ctx.mode == ExecutionMode::Locked {
             return Err(ToolError::ModeRestriction { mode: ctx.mode });
         }
@@ -123,7 +123,7 @@ mod tests {
             mode: ExecutionMode::Full,
         };
 
-        let result = tool.execute(serde_json::json!({}), &ctx).await.unwrap();
+        let result = tool.execute(&serde_json::json!({}), &ctx).await.unwrap();
         assert!(result.output.contains("a.txt"));
         assert!(result.output.contains("b.txt"));
         assert!(result.output.contains("subdir"));
@@ -145,7 +145,7 @@ mod tests {
         };
 
         let result = tool
-            .execute(serde_json::json!({"path": "../../.."}), &ctx)
+            .execute(&serde_json::json!({"path": "../../.."}), &ctx)
             .await;
         assert!(result.is_err());
 

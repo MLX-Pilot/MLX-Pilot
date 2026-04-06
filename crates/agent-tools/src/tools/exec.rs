@@ -4,6 +4,7 @@ use crate::types::{ExecutionMode, ParamSchema, ToolContext, ToolError, ToolResul
 use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
+use tokio::io::AsyncReadExt;
 
 /// Default timeout for command execution (30 seconds).
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
@@ -25,6 +26,7 @@ const DENY_PATTERNS: &[&str] = &[
 
 /// Maximum output size in bytes.
 const MAX_OUTPUT_BYTES: usize = 256 * 1024; // 256 KB
+const STREAM_CHUNK_BYTES: usize = 8 * 1024;
 
 /// Executes a shell command within the workspace.
 pub struct ExecTool {
@@ -81,7 +83,7 @@ impl crate::Tool for ExecTool {
         &self.schema
     }
 
-    async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+    async fn execute(&self, params: &Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
         match ctx.mode {
             ExecutionMode::Locked | ExecutionMode::ReadOnly => {
                 return Err(ToolError::ModeRestriction { mode: ctx.mode });
@@ -155,25 +157,25 @@ impl crate::Tool for ExecTool {
                 }
             };
 
-        // Read captured output.
-        let mut stdout_bytes = Vec::new();
-        let mut stderr_bytes = Vec::new();
-        if let Some(mut h) = stdout_handle {
-            use tokio::io::AsyncReadExt;
-            let _ = h.read_to_end(&mut stdout_bytes).await;
-        }
-        if let Some(mut h) = stderr_handle {
-            use tokio::io::AsyncReadExt;
-            let _ = h.read_to_end(&mut stderr_bytes).await;
-        }
+        // Read captured output incrementally, avoiding unbounded buffering.
+        let (stdout_bytes, stdout_truncated) = if let Some(mut handle) = stdout_handle {
+            read_limited_output(&mut handle, MAX_OUTPUT_BYTES).await
+        } else {
+            (Vec::new(), false)
+        };
+        let (stderr_bytes, stderr_truncated) = if let Some(mut handle) = stderr_handle {
+            read_limited_output(&mut handle, MAX_OUTPUT_BYTES).await
+        } else {
+            (Vec::new(), false)
+        };
 
-        let mut stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
-        let stderr = String::from_utf8_lossy(&stderr_bytes).to_string();
-
-        // Truncate if too large.
-        if stdout.len() > MAX_OUTPUT_BYTES {
-            stdout.truncate(MAX_OUTPUT_BYTES);
-            stdout.push_str("\n... (output truncated)");
+        let mut stdout = String::from_utf8_lossy(&stdout_bytes).into_owned();
+        let mut stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
+        if stdout_truncated {
+            stdout.push_str("\n... (stdout truncated)");
+        }
+        if stderr_truncated {
+            stderr.push_str("\n... (stderr truncated)");
         }
 
         let exit_code = status.code().unwrap_or(-1);
@@ -195,6 +197,36 @@ impl crate::Tool for ExecTool {
             },
         })
     }
+}
+
+async fn read_limited_output(
+    reader: &mut (impl tokio::io::AsyncRead + Unpin),
+    max_bytes: usize,
+) -> (Vec<u8>, bool) {
+    let mut output = Vec::with_capacity(max_bytes.min(STREAM_CHUNK_BYTES * 2));
+    let mut buffer = [0_u8; STREAM_CHUNK_BYTES];
+    let mut truncated = false;
+
+    loop {
+        let bytes_read = match reader.read(&mut buffer).await {
+            Ok(0) => break,
+            Ok(size) => size,
+            Err(_) => break,
+        };
+
+        if output.len() < max_bytes {
+            let remaining = max_bytes - output.len();
+            let keep = remaining.min(bytes_read);
+            output.extend_from_slice(&buffer[..keep]);
+            if keep < bytes_read {
+                truncated = true;
+            }
+        } else {
+            truncated = true;
+        }
+    }
+
+    (output, truncated)
 }
 
 #[cfg(test)]
@@ -226,7 +258,7 @@ mod tests {
 
         let cmd = "echo hello";
         let result = tool
-            .execute(serde_json::json!({"command": cmd}), &ctx)
+            .execute(&serde_json::json!({"command": cmd}), &ctx)
             .await
             .unwrap();
         assert!(result.output.contains("hello"));
@@ -249,7 +281,7 @@ mod tests {
         };
 
         let result = tool
-            .execute(serde_json::json!({"command": "sudo rm -rf /"}), &ctx)
+            .execute(&serde_json::json!({"command": "sudo rm -rf /"}), &ctx)
             .await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -278,7 +310,10 @@ mod tests {
             "sleep 10"
         };
         let result = tool
-            .execute(serde_json::json!({"command": cmd, "timeout_secs": 1}), &ctx)
+            .execute(
+                &serde_json::json!({"command": cmd, "timeout_secs": 1}),
+                &ctx,
+            )
             .await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -303,7 +338,7 @@ mod tests {
         };
 
         let result = tool
-            .execute(serde_json::json!({"command": "echo hi"}), &ctx)
+            .execute(&serde_json::json!({"command": "echo hi"}), &ctx)
             .await;
         assert!(result.is_err());
 

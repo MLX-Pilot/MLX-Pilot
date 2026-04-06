@@ -4,3 +4,9 @@
 .env
 node_modules
 apps/desktop-ui/src-tauri/target
+SourceCode_OpenClaw_NanoBot_And_Plan/
+AI_FOR_MLX_PILOT/
+bench_agent_fixture.txt
+*_output.txt
+*_err.txt
+clippy.txt

@@ -47,7 +47,7 @@ impl crate::Tool for ReadFileTool {
         &self.schema
     }
 
-    async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+    async fn execute(&self, params: &Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
         if ctx.mode == ExecutionMode::Locked {
             return Err(ToolError::ModeRestriction { mode: ctx.mode });
         }
@@ -95,7 +95,7 @@ mod tests {
         };
 
         let result = tool
-            .execute(serde_json::json!({"path": "test.txt"}), &ctx)
+            .execute(&serde_json::json!({"path": "test.txt"}), &ctx)
             .await
             .unwrap();
         assert_eq!(result.output, "hello world");
@@ -118,7 +118,7 @@ mod tests {
         };
 
         let result = tool
-            .execute(serde_json::json!({"path": "../../../etc/passwd"}), &ctx)
+            .execute(&serde_json::json!({"path": "../../../etc/passwd"}), &ctx)
             .await;
         assert!(result.is_err());
 

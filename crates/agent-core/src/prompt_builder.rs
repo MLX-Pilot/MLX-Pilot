@@ -133,13 +133,13 @@ pub fn select_model_prompt_profile(provider_id: &str, model_id: &str) -> ModelPr
 }
 
 #[derive(Debug, Clone)]
-pub struct PromptBuildInput {
-    pub system_prompt_override: Option<String>,
+pub struct PromptBuildInput<'a> {
+    pub system_prompt_override: Option<&'a str>,
     pub execution_mode: ExecutionMode,
-    pub profile: ModelPromptProfile,
-    pub conversation: Vec<ChatMessage>,
-    pub skill_summaries: Vec<String>,
-    pub tools: Vec<FunctionDef>,
+    pub profile: &'a ModelPromptProfile,
+    pub conversation: &'a [ChatMessage],
+    pub skill_summaries: &'a [String],
+    pub tools: &'a [FunctionDef],
     pub aggressive_tool_filtering: bool,
 }
 
@@ -154,26 +154,21 @@ pub struct PromptBuildOutput {
 pub struct PromptBuilder;
 
 impl PromptBuilder {
-    pub fn build(&self, input: PromptBuildInput) -> PromptBuildOutput {
-        let last_user_text = input
-            .conversation
-            .last()
-            .map(|m| m.content.as_str())
-            .unwrap_or_default()
-            .to_string();
+    pub fn build(&self, input: PromptBuildInput<'_>) -> PromptBuildOutput {
+        let last_user_text = latest_user_text(input.conversation);
 
         let system_prompt = build_system_prompt(
             input.execution_mode,
             input.profile.verbosity_level,
-            input.system_prompt_override.as_deref(),
-            &input.skill_summaries,
+            input.system_prompt_override,
+            input.skill_summaries,
             input.profile.max_skill_summaries,
             input.profile.max_skill_summary_chars,
         );
 
         let mut messages = Vec::with_capacity(input.conversation.len() + 1);
         messages.push(ChatMessage::text(MessageRole::System, system_prompt));
-        messages.extend(input.conversation);
+        messages.extend_from_slice(input.conversation);
         messages = apply_sliding_window(messages, input.profile.max_history_messages);
 
         let aggressive = input.aggressive_tool_filtering
@@ -181,7 +176,7 @@ impl PromptBuilder {
         let mut tools = filter_tools(
             input.tools,
             input.execution_mode,
-            &last_user_text,
+            last_user_text,
             input.profile.max_tools_in_prompt,
             input.profile.max_tool_description_chars,
             aggressive,
@@ -243,6 +238,15 @@ impl PromptBuilder {
     }
 }
 
+fn latest_user_text(conversation: &[ChatMessage]) -> &str {
+    conversation
+        .iter()
+        .rev()
+        .find(|message| matches!(message.role, MessageRole::User))
+        .map(|message| message.content.as_str())
+        .unwrap_or_default()
+}
+
 pub fn estimate_prompt_tokens(messages: &[ChatMessage], tools: &[FunctionDef]) -> usize {
     let msg_tokens = messages
         .iter()
@@ -282,9 +286,23 @@ fn estimate_text_tokens(text: &str) -> usize {
 }
 
 fn estimate_json_tokens(v: &Value) -> usize {
-    serde_json::to_string(v)
-        .map(|json| estimate_text_tokens(&json))
-        .unwrap_or(8)
+    match v {
+        Value::Null => 1,
+        Value::Bool(_) => 1,
+        Value::Number(number) => estimate_text_tokens(&number.to_string()),
+        Value::String(text) => estimate_text_tokens(text),
+        Value::Array(items) => {
+            let items_tokens = items.iter().map(estimate_json_tokens).sum::<usize>();
+            items_tokens.saturating_add(items.len() + 1)
+        }
+        Value::Object(map) => {
+            let fields_tokens = map
+                .iter()
+                .map(|(key, value)| estimate_text_tokens(key) + estimate_json_tokens(value) + 1)
+                .sum::<usize>();
+            fields_tokens.saturating_add(1)
+        }
+    }
 }
 
 fn build_system_prompt(
@@ -450,7 +468,7 @@ fn truncate_messages_in_place(
 }
 
 fn filter_tools(
-    tools: Vec<FunctionDef>,
+    tools: &[FunctionDef],
     mode: ExecutionMode,
     user_text: &str,
     max_tools: usize,
@@ -480,7 +498,7 @@ fn filter_tools(
         }
 
         filtered.push(FunctionDef {
-            name: tool.name,
+            name: tool.name.clone(),
             description: compact_description(&tool.description, max_desc_chars),
             parameters: compact_schema(&tool.parameters),
         });
@@ -729,21 +747,23 @@ mod tests {
             mk_msg(MessageRole::Assistant, &"a ".repeat(900)),
             mk_msg(MessageRole::User, &"u2 ".repeat(900)),
         ];
+        let skill_summaries = vec![
+            "skill-a: very long summary".to_string(),
+            "skill-b: very long summary".to_string(),
+        ];
+        let tools = vec![
+            mk_tool("read_file", "Read file. Read file. Read file."),
+            mk_tool("write_file", "Write file. Write file. Write file."),
+            mk_tool("edit_file", "Edit file. Edit file. Edit file."),
+        ];
 
         let output = builder.build(PromptBuildInput {
-            system_prompt_override: Some("system override".to_string()),
+            system_prompt_override: Some("system override"),
             execution_mode: ExecutionMode::Full,
-            profile: profile.clone(),
-            conversation,
-            skill_summaries: vec![
-                "skill-a: very long summary".to_string(),
-                "skill-b: very long summary".to_string(),
-            ],
-            tools: vec![
-                mk_tool("read_file", "Read file. Read file. Read file."),
-                mk_tool("write_file", "Write file. Write file. Write file."),
-                mk_tool("edit_file", "Edit file. Edit file. Edit file."),
-            ],
+            profile: &profile,
+            conversation: &conversation,
+            skill_summaries: &skill_summaries,
+            tools: &tools,
             aggressive_tool_filtering: true,
         });
 
@@ -768,14 +788,15 @@ mod tests {
             mk_msg(MessageRole::User, "u3"),
             mk_msg(MessageRole::Assistant, "a3"),
         ];
+        let tools = vec![mk_tool("read_file", "Read files.")];
 
         let output = builder.build(PromptBuildInput {
             system_prompt_override: None,
             execution_mode: ExecutionMode::Full,
-            profile,
-            conversation,
-            skill_summaries: Vec::new(),
-            tools: vec![mk_tool("read_file", "Read files.")],
+            profile: &profile,
+            conversation: &conversation,
+            skill_summaries: &[],
+            tools: &tools,
             aggressive_tool_filtering: false,
         });
 
@@ -794,21 +815,23 @@ mod tests {
         let profile = ModelPromptProfile::for_kind(ModelPromptProfileKind::SmallLocal)
             .apply_overrides(Some(1500), Some(10), Some(2));
         let builder = PromptBuilder;
+        let conversation = vec![mk_msg(
+            MessageRole::User,
+            "read the file and list the directory",
+        )];
+        let tools = vec![
+            mk_tool("read_file", "Read file."),
+            mk_tool("list_dir", "List folder."),
+            mk_tool("write_file", "Write file."),
+            mk_tool("exec", "Execute shell command."),
+        ];
         let output = builder.build(PromptBuildInput {
             system_prompt_override: None,
             execution_mode: ExecutionMode::ReadOnly,
-            profile,
-            conversation: vec![mk_msg(
-                MessageRole::User,
-                "read the file and list the directory",
-            )],
-            skill_summaries: Vec::new(),
-            tools: vec![
-                mk_tool("read_file", "Read file."),
-                mk_tool("list_dir", "List folder."),
-                mk_tool("write_file", "Write file."),
-                mk_tool("exec", "Execute shell command."),
-            ],
+            profile: &profile,
+            conversation: &conversation,
+            skill_summaries: &[],
+            tools: &tools,
             aggressive_tool_filtering: true,
         });
 
