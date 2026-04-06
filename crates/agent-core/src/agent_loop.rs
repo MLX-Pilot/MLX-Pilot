@@ -15,6 +15,7 @@ use mlx_ollama_core::{
     ProviderError, RuntimeProviderConfig, TokenUsage, ToolCallRequest,
 };
 use sha2::{Digest, Sha256};
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info, warn};
@@ -191,10 +192,7 @@ impl AgentLoop {
         let all_tool_defs = self.build_tool_definitions();
 
         let mut conversation: Vec<ChatMessage> = self.history.clone();
-        conversation.push(ChatMessage::text(
-            MessageRole::User,
-            user_message.to_string(),
-        ));
+        conversation.push(ChatMessage::text(MessageRole::User, user_message));
         let mut fallback_attempted = false;
 
         let mut iterations = 0;
@@ -238,13 +236,25 @@ impl AgentLoop {
             );
 
             // Call provider with tools.
+            let should_force_reprompt = self.config.enable_tool_call_fallback
+                && !fallback_attempted
+                && total_tool_calls == 0
+                && PromptBuilder::should_force_tool_call(user_message, &prompt.tools);
+            let tool_names_for_reprompt = should_force_reprompt.then(|| {
+                prompt
+                    .tools
+                    .iter()
+                    .map(|tool| tool.name.clone())
+                    .collect::<Vec<_>>()
+            });
+
             let response = self
                 .provider
                 .chat_with_tools_with_runtime(
                     ChatToolsRequest {
                         model_id: self.config.model_id.clone(),
-                        messages: prompt.messages.clone(),
-                        tools: prompt.tools.clone(),
+                        messages: prompt.messages,
+                        tools: prompt.tools,
                         options: GenerationOptions {
                             temperature: Some(
                                 self.config
@@ -268,18 +278,9 @@ impl AgentLoop {
 
             // Check if there are tool calls.
             if assistant_msg.tool_calls.is_empty() {
-                if self.config.enable_tool_call_fallback
-                    && !fallback_attempted
-                    && total_tool_calls == 0
-                    && PromptBuilder::should_force_tool_call(user_message, &prompt.tools)
-                {
+                if let Some(tool_names) = tool_names_for_reprompt {
                     fallback_attempted = true;
                     conversation.push(assistant_msg.clone());
-                    let tool_names = prompt
-                        .tools
-                        .iter()
-                        .map(|t| t.name.clone())
-                        .collect::<Vec<_>>();
                     conversation.push(ChatMessage::text(
                         MessageRole::User,
                         PromptBuilder::tool_call_reprompt(&tool_names),
@@ -292,15 +293,13 @@ impl AgentLoop {
                     session = %session_id,
                     iterations,
                     tool_calls = total_tool_calls,
-                    latency_ms = started.elapsed().as_millis() as u64,
+                    latency_ms = elapsed_ms_u64(started),
                     "agent loop completed"
                 );
 
                 // Save to history.
-                self.history.push(ChatMessage::text(
-                    MessageRole::User,
-                    user_message.to_string(),
-                ));
+                self.history
+                    .push(ChatMessage::text(MessageRole::User, user_message));
                 self.history.push(assistant_msg.clone());
 
                 self.log_audit(AuditLogEntry {
@@ -312,7 +311,7 @@ impl AgentLoop {
                     params_hash: None,
                     params_summary: None,
                     result_summary: None,
-                    duration_ms: Some(started.elapsed().as_millis() as u64),
+                    duration_ms: Some(elapsed_ms_u64(started)),
                     decision: None,
                     error: None,
                 })
@@ -324,7 +323,7 @@ impl AgentLoop {
                     iterations,
                     tool_calls_made: total_tool_calls,
                     usage: total_usage,
-                    latency_ms: started.elapsed().as_millis() as u64,
+                    latency_ms: elapsed_ms_u64(started),
                 });
             }
 
@@ -362,12 +361,12 @@ impl AgentLoop {
         skill_summaries: &[String],
     ) -> crate::prompt_builder::PromptBuildOutput {
         self.prompt_builder.build(PromptBuildInput {
-            system_prompt_override: self.config.system_prompt.clone(),
+            system_prompt_override: self.config.system_prompt.as_deref(),
             execution_mode: self.config.mode,
-            profile: profile.clone(),
-            conversation: conversation.to_vec(),
-            skill_summaries: skill_summaries.to_vec(),
-            tools: all_tool_defs.to_vec(),
+            profile,
+            conversation,
+            skill_summaries,
+            tools: all_tool_defs,
             aggressive_tool_filtering: self.config.aggressive_tool_filtering,
         })
     }
@@ -385,14 +384,21 @@ impl AgentLoop {
                 tool: tool_call.name.clone(),
                 message: format!("invalid JSON arguments: {e}"),
             })?;
-        let params_summary = params.to_string();
-        let params_hash = hash_sha256_hex(&params_summary);
+        let params_summary = sanitize_params_for_audit(&params);
+        let params_hash = hash_sha256_hex(&tool_call.arguments);
         let tool_started = Instant::now();
+        let inferred_active_skill = self.config.skill_filter.as_ref().and_then(|skills| {
+            if skills.len() == 1 {
+                skills.first().cloned()
+            } else {
+                None
+            }
+        });
 
         let ctx = mlx_agent_tools::ToolContext {
             workspace_root: self.config.workspace_root.clone(),
             session_id: session_id.into(),
-            active_skill: None,
+            active_skill: inferred_active_skill,
             mode: self.config.mode,
         };
 
@@ -551,7 +557,7 @@ impl AgentLoop {
 
         let result = match self
             .tool_registry
-            .dispatch(&tool_call.name, params.clone(), &ctx)
+            .dispatch(&tool_call.name, &params, &ctx)
             .await
         {
             Ok(res) => {
@@ -617,6 +623,12 @@ impl AgentLoop {
     }
 }
 
+fn elapsed_ms_u64(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis())
+        .unwrap_or(u64::MAX)
+        .max(1)
+}
+
 fn hash_sha256_hex(input: &str) -> String {
     let digest = Sha256::digest(input.as_bytes());
     let mut out = String::with_capacity(digest.len() * 2);
@@ -627,20 +639,87 @@ fn hash_sha256_hex(input: &str) -> String {
     out
 }
 
+fn sanitize_params_for_audit(params: &serde_json::Value) -> String {
+    fn redact(value: &serde_json::Value) -> serde_json::Value {
+        match value {
+            serde_json::Value::Object(map) => {
+                let mut out = serde_json::Map::with_capacity(map.len());
+                for (key, inner) in map {
+                    if is_sensitive_key(key) {
+                        out.insert(
+                            key.clone(),
+                            serde_json::Value::String("<redacted>".to_string()),
+                        );
+                    } else {
+                        out.insert(key.clone(), redact(inner));
+                    }
+                }
+                serde_json::Value::Object(out)
+            }
+            serde_json::Value::Array(items) => {
+                serde_json::Value::Array(items.iter().map(redact).collect())
+            }
+            _ => value.clone(),
+        }
+    }
+
+    serde_json::to_string(&redact(params)).unwrap_or_else(|_| "{}".to_string())
+}
+
+fn is_sensitive_key(key: &str) -> bool {
+    let lowered = key.to_ascii_lowercase();
+    const NEEDLES: [&str; 7] = [
+        "api_key",
+        "token",
+        "secret",
+        "password",
+        "authorization",
+        "bearer",
+        "credential",
+    ];
+    NEEDLES.iter().any(|needle| lowered.contains(needle))
+}
+
 fn summarize_result(output: &str, is_error: bool) -> String {
-    let normalized = output.split_whitespace().collect::<Vec<_>>().join(" ");
-    let short = if normalized.chars().count() > 160 {
-        let mut s = normalized.chars().take(157).collect::<String>();
-        s.push_str("...");
-        s
-    } else {
-        normalized
-    };
+    let short = compact_whitespace_preview(output, 160);
     if is_error {
         format!("error: {short}")
     } else {
-        short
+        short.into_owned()
     }
+}
+
+fn compact_whitespace_preview(input: &str, max_chars: usize) -> Cow<'_, str> {
+    if input.is_empty() || max_chars == 0 {
+        return Cow::Borrowed("");
+    }
+
+    let mut preview = String::with_capacity(max_chars.saturating_add(3));
+    let mut current_len = 0_usize;
+    let mut truncated = false;
+
+    for token in input.split_whitespace() {
+        let token_len = token.chars().count();
+        let sep_len = usize::from(!preview.is_empty());
+        if current_len + sep_len + token_len > max_chars {
+            truncated = true;
+            break;
+        }
+        if sep_len == 1 {
+            preview.push(' ');
+            current_len += 1;
+        }
+        preview.push_str(token);
+        current_len += token_len;
+    }
+
+    if preview.is_empty() {
+        return Cow::Borrowed("");
+    }
+    if truncated {
+        preview.push_str("...");
+    }
+    Cow::Owned(preview)
 }
 
 #[cfg(test)]

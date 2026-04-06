@@ -348,7 +348,10 @@ description: "Needs capabilities"
 metadata:
   openclaw:
     capabilities:
+      fs_read: true
+      fs_write: true
       exec: true
+      secrets_access: true
       exec_commands: ["ls", "cat"]
       filesystem: "workspace"
       network: "read"
@@ -424,12 +427,15 @@ metadata:
     fn parse_capabilities() {
         let parsed = parse_frontmatter(CAPABILITIES_SKILL).unwrap();
         let caps = parsed.compat.capabilities.as_ref().unwrap();
+        assert!(caps.allows_fs_read());
+        assert!(caps.allows_fs_write());
+        assert!(caps.allows_network());
         assert!(caps.exec);
+        assert!(caps.allows_secrets_access());
         assert_eq!(
             caps.exec_commands,
             vec!["ls".to_string(), "cat".to_string()]
         );
-        // Note: filesystem serialization might be tricky if it expects "read_write" vs "readwrite", let's just check exec for now.
     }
 
     #[test]

@@ -9,6 +9,16 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentSecurityConfig {
+    #[serde(default = "default_security_mode")]
+    pub security_mode: String,
+    #[serde(default)]
+    pub require_capabilities: bool,
+    #[serde(default)]
+    pub airgapped: bool,
+    #[serde(default)]
+    pub owner_only: bool,
+    #[serde(default = "default_true")]
+    pub block_direct_ip_egress: bool,
     #[serde(default)]
     pub tool_allowlist: Vec<String>,
     #[serde(default)]
@@ -21,11 +31,20 @@ pub struct AgentSecurityConfig {
     pub sensitive_paths: Vec<String>,
     #[serde(default)]
     pub egress_allow_domains: Vec<String>,
+    #[serde(default)]
+    pub skill_sha256_pins: BTreeMap<String, String>,
+    #[serde(default = "default_true")]
+    pub use_secrets_vault: bool,
 }
 
 impl Default for AgentSecurityConfig {
     fn default() -> Self {
         Self {
+            security_mode: default_security_mode(),
+            require_capabilities: false,
+            airgapped: false,
+            owner_only: false,
+            block_direct_ip_egress: true,
             tool_allowlist: Vec::new(),
             tool_denylist: Vec::new(),
             exec_safe_bins: vec![
@@ -50,6 +69,8 @@ impl Default for AgentSecurityConfig {
                 "**/.env.*".to_string(),
             ],
             egress_allow_domains: Vec::new(),
+            skill_sha256_pins: BTreeMap::new(),
+            use_secrets_vault: true,
         }
     }
 }
@@ -64,6 +85,8 @@ pub struct AgentUiConfig {
     pub base_url: String,
     #[serde(default)]
     pub api_key: String,
+    #[serde(default)]
+    pub api_key_ref: Option<String>,
     #[serde(default)]
     pub custom_headers: BTreeMap<String, String>,
     #[serde(default = "default_agent_execution_mode")]
@@ -107,6 +130,7 @@ impl Default for AgentUiConfig {
             model_id: default_agent_model(),
             base_url: String::new(),
             api_key: String::new(),
+            api_key_ref: None,
             custom_headers: BTreeMap::new(),
             execution_mode: default_agent_execution_mode(),
             approval_mode: default_agent_approval_mode(),
@@ -549,6 +573,7 @@ impl AppConfig {
 
         if let Ok(value) = env::var("APP_AGENT_API_KEY") {
             self.agent.api_key = value.trim().to_string();
+            self.agent.api_key_ref = None;
         }
 
         if let Ok(value) = env::var("APP_AGENT_APPROVAL_MODE") {
@@ -556,6 +581,21 @@ impl AppConfig {
             if matches!(mode.as_str(), "auto" | "ask" | "deny") {
                 self.agent.approval_mode = mode;
             }
+        }
+
+        if let Ok(value) = env::var("APP_AGENT_SECURITY_MODE") {
+            let mode = value.trim().to_ascii_lowercase();
+            if matches!(mode.as_str(), "standard" | "enterprise" | "paranoid") {
+                self.agent.security.security_mode = mode;
+            }
+        }
+
+        if let Ok(value) = env::var("APP_AGENT_AIRGAPPED") {
+            self.agent.security.airgapped = parse_bool(&value, self.agent.security.airgapped);
+        }
+
+        if let Ok(value) = env::var("APP_AGENT_OWNER_ONLY") {
+            self.agent.security.owner_only = parse_bool(&value, self.agent.security.owner_only);
         }
 
         normalize_mlx_command(&mut self);
@@ -638,6 +678,10 @@ fn parse_bool(value: &str, fallback: bool) -> bool {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_security_mode() -> String {
+    "standard".to_string()
 }
 
 fn default_agent_provider() -> String {
