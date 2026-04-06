@@ -183,6 +183,12 @@ const agentChatLog = document.getElementById("agent-chat-log");
 const agentChatForm = document.getElementById("agent-chat-form");
 const agentMessageInput = document.getElementById("agent-message-input");
 
+const agentSessionSelect = document.getElementById("agent-session-select");
+const agentNewSessionBtn = document.getElementById("agent-new-session-btn");
+const agentRenameSessionBtn = document.getElementById("agent-rename-session-btn");
+const agentExportSessionBtn = document.getElementById("agent-export-session-btn");
+const agentDeleteSessionBtn = document.getElementById("agent-delete-session-btn");
+
 let daemonBaseUrl = localStorage.getItem(STORAGE_DAEMON_URL) || "http://127.0.0.1:11435";
 let selectedModelId = null;
 let localModels = [];
@@ -198,6 +204,9 @@ let isGenerating = false;
 let activeStreamController = null;
 let streamFallbackNotified = false;
 let pendingEditMessageIndex = null;
+
+let agentSessions = [];
+let activeAgentSessionId = null;
 
 let lastDownloadsFingerprint = "";
 let downloadsTimer = null;
@@ -4318,6 +4327,153 @@ function appendAgentMessage(role, text) {
   agentChatLog.scrollTop = agentChatLog.scrollHeight;
 }
 
+async function loadAgentSessions() {
+  try {
+    const sessions = await fetchJson("/agent/sessions");
+    agentSessions = Array.isArray(sessions) ? sessions : [];
+    agentSessions.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+
+    renderAgentSessionSelect();
+  } catch (err) {
+    console.error("Failed to load agent sessions", err);
+  }
+}
+
+function renderAgentSessionSelect() {
+  if (!agentSessionSelect) return;
+  agentSessionSelect.innerHTML = "";
+
+  if (agentSessions.length === 0) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "Sem sessoes salvas";
+    agentSessionSelect.appendChild(opt);
+    agentSessionSelect.disabled = true;
+    if (agentRenameSessionBtn) agentRenameSessionBtn.disabled = true;
+    if (agentExportSessionBtn) agentExportSessionBtn.disabled = true;
+    if (agentDeleteSessionBtn) agentDeleteSessionBtn.disabled = true;
+    if (agentChatTitle) agentChatTitle.textContent = "Nova Sessao";
+    return;
+  }
+
+  agentSessionSelect.disabled = false;
+  agentSessions.forEach(s => {
+    const opt = document.createElement("option");
+    opt.value = s.id;
+    opt.textContent = `${s.name || s.id} (${s.message_count} msgs)`;
+    agentSessionSelect.appendChild(opt);
+  });
+
+  if (activeAgentSessionId && agentSessions.some(s => s.id === activeAgentSessionId)) {
+    agentSessionSelect.value = activeAgentSessionId;
+  } else {
+    activeAgentSessionId = agentSessions[0].id;
+    agentSessionSelect.value = activeAgentSessionId;
+  }
+
+  if (agentRenameSessionBtn) agentRenameSessionBtn.disabled = false;
+  if (agentExportSessionBtn) agentExportSessionBtn.disabled = false;
+  if (agentDeleteSessionBtn) agentDeleteSessionBtn.disabled = false;
+
+  const activeSessionMeta = agentSessions.find(s => s.id === activeAgentSessionId);
+  if (activeSessionMeta && agentChatTitle) {
+    agentChatTitle.textContent = activeSessionMeta.name || activeSessionMeta.id;
+  }
+}
+
+async function fetchAgentSessionMessages(sessionId) {
+  try {
+    if (agentChatLog) clearElement(agentChatLog);
+    if (!sessionId) return;
+    const messages = await fetchJson(`/agent/sessions/${sessionId}`);
+    if (Array.isArray(messages)) {
+      messages.forEach(msg => {
+        const role = msg.role;
+        let content = msg.content || "";
+        if (msg.tool_name) {
+          content = `[Tool: ${msg.tool_name}]\n${content}`;
+        }
+        appendAgentMessage(role, content);
+      });
+    }
+  } catch (err) {
+    console.error("Failed to fetch messages for session", err);
+  }
+}
+
+async function handleAgentSessionSelectChange() {
+  if (!agentSessionSelect || !agentSessionSelect.value) return;
+  const newSessionId = agentSessionSelect.value;
+  if (newSessionId !== activeAgentSessionId) {
+    activeAgentSessionId = newSessionId;
+    renderAgentSessionSelect();
+    await fetchAgentSessionMessages(newSessionId);
+  }
+}
+
+async function handleAgentNewSession() {
+  try {
+    const body = { name: "Nova conversa" };
+    const meta = await fetchJson("/agent/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    activeAgentSessionId = meta.id;
+    await loadAgentSessions();
+    if (agentChatLog) clearElement(agentChatLog);
+  } catch (err) {
+    console.error("Failed to create session", err);
+  }
+}
+
+async function handleAgentRenameSession() {
+  if (!activeAgentSessionId) return;
+  const activeSessionMeta = agentSessions.find(s => s.id === activeAgentSessionId);
+  const currentName = activeSessionMeta ? activeSessionMeta.name : "";
+  const newName = prompt("Novo nome da sessao:", currentName);
+
+  if (newName === null || newName.trim() === "") return;
+
+  try {
+    await fetchJson(`/agent/sessions/${activeAgentSessionId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newName.trim() })
+    });
+    await loadAgentSessions();
+  } catch (err) {
+    console.error("Failed to rename session", err);
+  }
+}
+
+async function handleAgentDeleteSession() {
+  if (!activeAgentSessionId) return;
+  const activeSessionMeta = agentSessions.find(s => s.id === activeAgentSessionId);
+  const currentName = activeSessionMeta ? activeSessionMeta.name : "";
+  if (!confirm(`Tem certeza que deseja apagar a sessao "${currentName}"?`)) return;
+
+  try {
+    await fetchJson(`/agent/sessions/${activeAgentSessionId}`, {
+      method: "DELETE"
+    });
+    activeAgentSessionId = null;
+    await loadAgentSessions();
+    if (activeAgentSessionId) {
+      await fetchAgentSessionMessages(activeAgentSessionId);
+    } else {
+      if (agentChatLog) clearElement(agentChatLog);
+    }
+  } catch (err) {
+    console.error("Failed to delete session", err);
+  }
+}
+
+function handleAgentExportSession() {
+  if (!activeAgentSessionId || !daemonBaseUrl) return;
+  window.open(`${daemonBaseUrl}/agent/sessions/${activeAgentSessionId}/export`, "_blank");
+}
+
 function renderAgentToggleList(container, items, checkedSet) {
   if (!container) {
     return;
@@ -4579,9 +4735,8 @@ async function loadAgentAudit() {
     const li = document.createElement("li");
     li.className = "agent-audit-item";
     const ts = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : "-";
-    li.textContent = `${ts} • ${entry.event_type || "-"} • ${entry.tool_name || "session"}${
-      entry.duration_ms ? ` • ${entry.duration_ms}ms` : ""
-    }`;
+    li.textContent = `${ts} • ${entry.event_type || "-"} • ${entry.tool_name || "session"}${entry.duration_ms ? ` • ${entry.duration_ms}ms` : ""
+      }`;
     agentAuditList.appendChild(li);
   });
 }
@@ -4597,6 +4752,10 @@ async function onAgentTabSelected() {
     await loadAgentSkills();
     await loadAgentTools();
     await loadAgentAudit();
+    await loadAgentSessions();
+    if (activeAgentSessionId) {
+      await fetchAgentSessionMessages(activeAgentSessionId);
+    }
     if (agentMeta) {
       agentMeta.textContent = "Configuracao carregada.";
     }
@@ -4625,6 +4784,7 @@ async function sendAgentMessage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        session_id: activeAgentSessionId || null,
         message: text,
         provider: payload.provider,
         model_id: payload.model_id,
@@ -4650,6 +4810,13 @@ async function sendAgentMessage() {
     appendAgentMessage("assistant", response.final_response || response.content || "(sem resposta)");
     setAgentStatus(`ok • ${response.provider || "-"} • ${response.model_id || "-"}`);
     await loadAgentAudit();
+
+    if (response.session_id && response.session_id !== activeAgentSessionId) {
+      activeAgentSessionId = response.session_id;
+      await loadAgentSessions();
+    } else {
+      await loadAgentSessions();
+    }
   } catch (error) {
     appendAgentMessage("assistant", `Erro: ${error.message}`);
     setAgentStatus("falha");
@@ -4712,6 +4879,22 @@ if (agentChatForm) {
 
 if (agentMessageInput) {
   agentMessageInput.addEventListener("input", () => autoResizeTextarea(agentMessageInput));
+}
+
+if (agentSessionSelect) {
+  agentSessionSelect.addEventListener("change", handleAgentSessionSelectChange);
+}
+if (agentNewSessionBtn) {
+  agentNewSessionBtn.addEventListener("click", handleAgentNewSession);
+}
+if (agentRenameSessionBtn) {
+  agentRenameSessionBtn.addEventListener("click", handleAgentRenameSession);
+}
+if (agentExportSessionBtn) {
+  agentExportSessionBtn.addEventListener("click", handleAgentExportSession);
+}
+if (agentDeleteSessionBtn) {
+  agentDeleteSessionBtn.addEventListener("click", handleAgentDeleteSession);
 }
 
 async function bootstrap() {

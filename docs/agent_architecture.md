@@ -134,7 +134,15 @@ Configuracao e persistida localmente e aplicada no backend a cada run.
 - politica efetiva por tool (`GET /agent/tools`)
 - configuracao do agente (`GET/POST /agent/config`)
 
-## 10. Limites atuais (preview)
+## 10. Session Management
+
+Para manter um historico rico e local da atividade do agente:
+- **SessionStore**: persiste as mensagens em arquivos JSONL no diretorio base do sistema.
+- Gerenciamento via UI: endpoints `GET/POST/PATCH/DELETE /agent/sessions` gerenciam as sessoes ativas.
+- As mensagens (`User`, `ToolCall` e `Assistant`) originadas de chamadas `/agent/run` sao automaticamente anexadas a sessao fornecida (`session_id`).
+- Opcao nativa de exportacao via `GET /agent/sessions/:id/export` para revisar as traces completas em JSON normalizado.
+
+## 11. Limites atuais (preview)
 
 - `POST /agent/stream` ainda em modo stub para stream full de eventos.
 - coverage de ferramentas e policy deve continuar evoluindo para cenario production-grade.

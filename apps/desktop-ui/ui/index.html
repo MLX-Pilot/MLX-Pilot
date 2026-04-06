@@ -453,9 +453,21 @@
         </section>
 
         <section class="agent-chat-panel glass">
+          <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 12px;">
+            <div style="flex: 1;">
+              <p class="chat-eyebrow">Sessoes do Agent</p>
+              <div style="display: flex; gap: 8px; margin-bottom: 12px; margin-top: 8px; align-items: center;">
+                <button id="agent-new-session-btn" type="button" class="ghost-btn text-sm">Nova Sessao</button>
+                <select id="agent-session-select" class="input compact-input" style="max-width: 300px; margin-bottom: 0;"></select>
+                <button id="agent-rename-session-btn" type="button" class="ghost-btn text-sm" disabled>Renomear</button>
+                <button id="agent-export-session-btn" type="button" class="ghost-btn text-sm" disabled>Exportar</button>
+                <button id="agent-delete-session-btn" type="button" class="ghost-btn danger text-sm" disabled style="color: var(--danger);">Deletar</button>
+              </div>
+            </div>
+            <span id="agent-chat-status" class="meta-note" style="margin-bottom: 8px;">pronto</span>
+          </div>
           <div class="panel-title-row">
-            <h3>Chat do agente</h3>
-            <span id="agent-chat-status" class="meta-note">pronto</span>
+            <h3 id="agent-chat-title">Chat do agente</h3>
           </div>
           <div id="agent-chat-log" class="agent-chat-log"></div>
           <form id="agent-chat-form" class="chat-form">
