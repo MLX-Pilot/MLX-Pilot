@@ -57,6 +57,50 @@ O repositorio e um workspace Rust com multiplas crates (core, providers e daemon
 
 ---
 
+## Agent
+
+### Recursos
+
+- Agent loop completo em Rust com iteracao multi-turn e tool-calling.
+- Loader de skills compativel com `SKILL.md` (sem injetar corpo integral no prompt).
+- Prompt engineering adaptativo para modelos locais/remotos.
+- API dedicada do agente:
+- `POST /agent/run`
+- `POST /agent/stream` (stub para streaming de eventos)
+- `GET /agent/providers`
+- `GET/POST /agent/config`
+- `GET /agent/skills`
+- `POST /agent/skills/reload`
+- `GET /agent/tools`
+- `GET /agent/audit`
+- `POST /agent/approve`
+
+### Multi-provider
+
+- Providers locais: `mlx`, `llamacpp`, `ollama`.
+- Providers remotos: `openai`, `anthropic`, `groq`, `openrouter`, `deepseek`.
+- Endpoint customizavel (`custom`) com `base_url` e headers.
+- Fallback opcional entre provider primario e secundario por configuracao.
+
+### Seguranca
+
+- `PolicyEngine` com allow/deny por glob, bloqueio de paths sensiveis e controle de egress.
+- `ApprovalService` com modos `auto`, `ask` e `deny`.
+- `AuditLog` estruturado em JSONL para trilha de execucao.
+- Modo enterprise/paranoid com:
+- capabilities declarativas por skill (`fs_read`, `fs_write`, `network`, `exec`, `secrets_access`)
+- integridade de skill (SHA256 + pin opcional)
+- cofre local criptografado para API keys
+- airgapped mode e owner-only mode
+
+### UI
+
+- Aba **Agent** no desktop com configuracao de provider, modelo, execucao e seguranca.
+- Controle de skills/tools ativos direto na UI.
+- Chat do agente integrado ao fluxo principal do MLX-Pilot.
+
+---
+
 ## Estrutura do repositorio
 
 ```text
@@ -64,10 +108,15 @@ mlx-ollama-pilot/
 |-- Cargo.toml
 |-- crates/
 |   |-- core/
+|   |-- agent-core/
+|   |-- agent-tools/
+|   |-- agent-skills/
 |   |-- providers/
 |   |   |-- mlx/
 |   |   |-- llamacpp/
-|   |   '-- ollama/
+|   |   |-- ollama/
+|   |   '-- http_llm_provider/
+|   |-- bench_agent/
 |   '-- daemon/
 |-- apps/
 |   '-- desktop-ui/
@@ -79,9 +128,14 @@ mlx-ollama-pilot/
 | Pasta | Papel |
 |---|---|
 | `crates/core` | Contratos de dominio (tipos, erros, trait `ModelProvider`). |
+| `crates/agent-core` | Agent loop, prompt builder, policy/approval/audit e runtime de skills. |
+| `crates/agent-tools` | Ferramentas (read/write/edit/list/exec) e sandbox de IO. |
+| `crates/agent-skills` | Parser/loader de skills e metadados de compatibilidade. |
 | `crates/providers/mlx` | Provider MLX. |
 | `crates/providers/llamacpp` | Provider llama.cpp embutido. |
 | `crates/providers/ollama` | Provider Ollama. |
+| `crates/providers/http_llm_provider` | Provider HTTP generico (OpenAI-compatible/Anthropic). |
+| `crates/bench_agent` | Benchmark comparativo automatizado entre OpenClaw/NanoBot/Rust Agent. |
 | `crates/daemon` | Servidor HTTP principal. |
 | `apps/desktop-ui` | App desktop Tauri e frontend. |
 | `scripts` | Scripts de conveniencia (`run-desktop.sh`, `stop-daemon.sh`) para macOS/Linux. |
