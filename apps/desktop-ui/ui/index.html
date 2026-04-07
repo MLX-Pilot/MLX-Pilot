@@ -157,52 +157,67 @@
           </div>
         </header>
 
-        <section class="discover-controls glass">
-          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-            <label class="field-group">
-              <span>Fonte</span>
-              <select id="catalog-source" class="input"></select>
-            </label>
-
-            <label class="field-group field-grow">
-              <span>Busca</span>
-              <input id="catalog-query" class="input" placeholder="Ex: mlx-community qwen coder" />
-            </label>
-
-            <button id="catalog-search-btn" class="primary-btn">Buscar</button>
-          </div>
-
-          <div style="margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px;">
-            <label class="field-group">
-              <span style="display: flex; justify-content: space-between;">
-                Diretorio de Instalacao (Models Path)
-                <span id="discover-models-feedback" class="meta-note"
-                  style="color: var(--ok); opacity: 0; transition: opacity 0.3s;">Salvo!</span>
-              </span>
-              <input id="discover-models-dir" class="input" placeholder="Ex: /Users/kaike/models" />
-            </label>
-          </div>
+        <section class="discover-subtabs">
+          <button id="discover-subtab-catalog" type="button" class="tab-btn active" data-discover-subtab="catalog"
+            role="tab" aria-selected="true">
+            Catalogo e Downloads
+          </button>
+          <button id="discover-subtab-installed" type="button" class="tab-btn" data-discover-subtab="installed"
+            role="tab" aria-selected="false">
+            Modelos Instalados
+          </button>
         </section>
 
-        <p id="catalog-meta" class="meta-note">Carregando catalogo...</p>
-        <section id="remote-results" class="remote-grid"></section>
+        <div id="discover-view-catalog" class="discover-subtab-view active">
+          <section class="discover-controls glass">
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <label class="field-group">
+                <span>Fonte</span>
+                <select id="catalog-source" class="input"></select>
+              </label>
 
-        <section id="installed-models-panel" class="downloads-panel glass">
-          <div class="panel-title-row">
-            <h3>Modelos instalados</h3>
-            <button id="refresh-installed-models" class="ghost-btn">Atualizar lista</button>
-          </div>
-          <p id="installed-models-meta" class="meta-note">-</p>
-          <ul id="installed-models-list" class="download-list"></ul>
-        </section>
+              <label class="field-group field-grow">
+                <span>Busca</span>
+                <input id="catalog-query" class="input" placeholder="Ex: mlx-community qwen coder" />
+              </label>
 
-        <section class="downloads-panel glass">
-          <div class="panel-title-row">
-            <h3>Downloads</h3>
-            <button id="refresh-downloads" class="ghost-btn">Atualizar</button>
-          </div>
-          <ul id="download-list" class="download-list"></ul>
-        </section>
+              <button id="catalog-search-btn" class="primary-btn">Buscar</button>
+            </div>
+
+            <div style="margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px;">
+              <label class="field-group">
+                <span style="display: flex; justify-content: space-between;">
+                  Diretorio de Instalacao (Models Path)
+                  <span id="discover-models-feedback" class="meta-note"
+                    style="color: var(--ok); opacity: 0; transition: opacity 0.3s;">Salvo!</span>
+                </span>
+                <input id="discover-models-dir" class="input" placeholder="Ex: /Users/kaike/models" />
+              </label>
+            </div>
+          </section>
+
+          <p id="catalog-meta" class="meta-note">Carregando catalogo...</p>
+          <section id="remote-results" class="remote-grid"></section>
+
+          <section class="downloads-panel glass">
+            <div class="panel-title-row">
+              <h3>Downloads</h3>
+              <button id="refresh-downloads" class="ghost-btn">Atualizar</button>
+            </div>
+            <ul id="download-list" class="download-list"></ul>
+          </section>
+        </div>
+
+        <div id="discover-view-installed" class="discover-subtab-view">
+          <section id="installed-models-panel" class="downloads-panel glass">
+            <div class="panel-title-row">
+              <h3>Modelos instalados</h3>
+              <button id="refresh-installed-models" class="ghost-btn">Atualizar lista</button>
+            </div>
+            <p id="installed-models-meta" class="meta-note">-</p>
+            <ul id="installed-models-list" class="download-list"></ul>
+          </section>
+        </div>
       </section>
 
       <section id="panel-openclaw" class="main-panel" role="tabpanel">

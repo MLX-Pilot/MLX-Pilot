@@ -866,7 +866,7 @@ textarea:focus {
 }
 
 #panel-discover {
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr);
 }
 
 #panel-openclaw {
@@ -877,6 +877,26 @@ textarea:focus {
   grid-template-rows: auto minmax(0, 1fr);
   align-items: start;
   overflow-y: auto;
+}
+
+.discover-subtabs {
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(18, 24, 32, 0.72);
+  width: fit-content;
+}
+
+.discover-subtab-view {
+  display: none;
+  min-height: 0;
+  gap: 10px;
+}
+
+.discover-subtab-view.active {
+  display: grid;
 }
 
 .settings-wrapper {
