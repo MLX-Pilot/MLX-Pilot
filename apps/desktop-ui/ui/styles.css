@@ -1852,6 +1852,49 @@ textarea:focus {
   display: none !important;
 }
 
+.app-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  background: rgba(2, 6, 14, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.app-dialog-card {
+  width: min(460px, 100%);
+  border-radius: 14px;
+  border: 1px solid rgba(155, 188, 236, 0.24);
+  background: rgba(15, 22, 34, 0.94);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.44);
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.app-dialog-title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.app-dialog-message {
+  margin: 0;
+  color: #adc2de;
+  font-size: 0.88rem;
+}
+
+.app-dialog-input {
+  min-height: 40px;
+}
+
+.app-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 @media (max-width: 1320px) {
   .app-shell.chat-mode {
     grid-template-columns: 270px minmax(0, 1fr);
