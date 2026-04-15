@@ -1,1205 +1,632 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MLX Pilot</title>
-  <link rel="stylesheet" href="./styles.css" />
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-      }
-    }
-  </script>
+  <title>MLX Pilot — Orbital Command</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@200;300;400;500;600;700;800&family=Manrope:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
 </head>
-
 <body>
-  <div id="splash-screen" class="splash-screen">
-    <img src="./assets/mlxpilot-mark.png" alt="MLX Pilot Logo" class="splash-logo" />
+  <!-- Atmospheric canvas -->
+  <canvas id="atmosphere"></canvas>
+  <div class="gradient-orbs">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
   </div>
 
-  <div class="bg-layer bg-a"></div>
-  <div class="bg-layer bg-b"></div>
+  <!-- Splash -->
+  <div id="splash" class="splash">
+    <div class="splash-inner">
+      <div class="splash-icon">
+        <svg viewBox="0 0 64 64" width="64" height="64">
+          <defs>
+            <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" style="stop-color:#00d4ff;stop-opacity:1" />
+              <stop offset="100%" style="stop-color:#7b61ff;stop-opacity:1" />
+            </linearGradient>
+          </defs>
+          <path d="M32 4 L58 18 L58 46 L32 60 L6 46 L6 18 Z" fill="none" stroke="url(#logoGrad)" stroke-width="2.5" />
+          <circle cx="32" cy="32" r="10" fill="url(#logoGrad)" opacity="0.8" />
+          <circle cx="32" cy="32" r="4" fill="#06090f" />
+          <line x1="32" y1="18" x2="32" y2="22" stroke="#00d4ff" stroke-width="1.5" opacity="0.5" />
+          <line x1="32" y1="42" x2="32" y2="46" stroke="#00d4ff" stroke-width="1.5" opacity="0.5" />
+        </svg>
+      </div>
+      <h1 class="splash-title">MLX PILOT</h1>
+      <p class="splash-sub">Initializing orbital systems...</p>
+      <div class="splash-bar"><div class="splash-bar-fill"></div></div>
+    </div>
+  </div>
 
-  <div id="app-shell" class="app-shell chat-mode">
-    <aside id="chat-sidebar" class="chat-sidebar">
-      <div class="sidebar-head">
-        <div class="brand-row">
-          <img class="brand-wordmark" src="./assets/mlxpilot-wordmark.png" alt="MLX Pilot" />
-        </div>
+  <!-- App Shell -->
+  <div id="app" class="app hidden">
 
-        <button id="new-chat-thread" class="sidebar-primary-btn" data-action="new-chat">
-          + Nova conversa
-        </button>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <svg viewBox="0 0 32 32" width="28" height="28" class="brand-icon">
+          <path d="M16 2 L29 9 L29 23 L16 30 L3 23 L3 9 Z" fill="none" stroke="var(--cyan)" stroke-width="1.5" />
+          <circle cx="16" cy="16" r="5" fill="var(--cyan)" opacity="0.7" />
+          <circle cx="16" cy="16" r="2" fill="var(--bg-deep)" />
+        </svg>
+        <span class="brand-text">MLX Pilot</span>
       </div>
 
-      <section class="sidebar-section history-section">
-        <div class="panel-title-row">
-          <h2>Seus chats</h2>
-        </div>
-        <p id="chat-history-meta" class="meta-note">-</p>
-        <ul id="chat-history-list" class="history-list"></ul>
-      </section>
+      <button class="new-chat-btn" id="btn-new-chat">
+        <span class="btn-icon">+</span> Nova Conversa
+      </button>
 
-      <details class="sidebar-section settings-section">
-        <summary>Conexao</summary>
-        <label class="field-label" for="daemon-url">Daemon URL</label>
-        <input id="daemon-url" class="input" value="http://127.0.0.1:11435" />
-        <p class="meta-note" style="margin-top: 8px;">APIs em Configuracoes > Environment.</p>
-        <button id="save-url" class="ghost-btn">Salvar</button>
-      </details>
+      <div class="sidebar-section">
+        <h3 class="sidebar-heading">Sess&otilde;es</h3>
+        <div id="chat-history" class="chat-history">
+          <div style="padding:8px 12px;font-size:12px;color:var(--text-tertiary)">Carregando sess&otilde;es...</div>
+        </div>
+      </div>
+
+      <div class="sidebar-section sidebar-bottom">
+        <div class="connection-status">
+          <span class="status-dot online"></span>
+          <span class="status-text" id="sidebar-daemon-url">Daemon 127.0.0.1:11435</span>
+        </div>
+      </div>
     </aside>
 
-    <main class="main-area">
-      <header class="topbar">
-        <div class="topbar-left">
-          <button id="mobile-menu-btn" class="ghost-btn mobile-menu-btn" aria-label="Menu" type="button">
-            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"
-              stroke-linecap="round" stroke-linejoin="round">
-              <line x1="3" y1="12" x2="21" y2="12"></line>
-              <line x1="3" y1="6" x2="21" y2="6"></line>
-              <line x1="3" y1="18" x2="21" y2="18"></line>
-            </svg>
-          </button>
-          <div class="tab-list" role="tablist" aria-label="Modo">
-            <button class="tab-btn active" data-tab="chat" role="tab" aria-selected="true">
-              Chat
-            </button>
-            <button class="tab-btn" data-tab="discover" role="tab" aria-selected="false">
-              Descobrir Modelos
-            </button>
-            <button class="tab-btn" data-tab="openclaw" role="tab" aria-selected="false">
-              <span id="agent-tab-label">OpenClaw</span>
-            </button>
-            <button class="tab-btn" data-tab="agent" role="tab" aria-selected="false">
-              Agent
-            </button>
-            <button class="tab-btn" data-tab="ai-interaction" role="tab" aria-selected="false">
-              Interacao IA
-            </button>
-            <button class="tab-btn" data-tab="settings" role="tab" aria-selected="false">
-              Configuracoes
-            </button>
-          </div>
+    <!-- Main Area -->
+    <main class="main">
 
-          <button id="new-chat-thread-top" class="ghost-btn topbar-new-chat-btn" type="button" data-action="new-chat">
-            + Novo chat
+      <!-- Topbar -->
+      <header class="topbar">
+        <nav class="tab-bar" role="tablist">
+          <button class="tab active" data-panel="chat" role="tab" aria-selected="true">
+            <span class="tab-icon">
+              <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M3 4h14v9H7l-4 3V4z" />
+              </svg>
+            </span>
+            Chat
           </button>
-        </div>
+          <button class="tab" data-panel="discover" role="tab">
+            <span class="tab-icon">
+              <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
+                <circle cx="10" cy="10" r="7" /><path d="M10 3a7 7 0 0 1 0 14" /><path d="M3 10h14" />
+              </svg>
+            </span>
+            Modelos
+          </button>
+          <button class="tab" data-panel="openclaw" role="tab">
+            <span class="tab-icon">
+              <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M10 2v4m0 8v4M2 10h4m8 0h4M4.93 4.93l2.83 2.83m6.48 6.48l2.83 2.83M4.93 15.07l2.83-2.83m6.48-6.48l2.83-2.83" />
+              </svg>
+            </span>
+            OpenClaw
+          </button>
+          <button class="tab" data-panel="agent" role="tab">
+            <span class="tab-icon">
+              <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
+                <rect x="3" y="3" width="14" height="14" rx="2" /><path d="M7 7h6M7 10h6M7 13h4" />
+              </svg>
+            </span>
+            Agent
+          </button>
+          <button class="tab" data-panel="ai-interaction" role="tab">
+            <span class="tab-icon">
+              <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M10 2l2.5 5 5.5.8-4 3.9.9 5.5L10 15l-4.9 2.2.9-5.5-4-3.9 5.5-.8z" />
+              </svg>
+            </span>
+            IA Visual
+          </button>
+          <button class="tab" data-panel="settings" role="tab">
+            <span class="tab-icon">
+              <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
+                <circle cx="10" cy="10" r="3" /><path d="M10 1v3m0 12v3M1 10h3m12 0h3M3.5 3.5l2.1 2.1m8.8 8.8l2.1 2.1M3.5 16.5l2.1-2.1m8.8-8.8l2.1-2.1" />
+              </svg>
+            </span>
+            Config
+          </button>
+        </nav>
 
         <div class="topbar-right">
-          <div id="chat-model-switcher" class="chat-model-switcher">
-            <button id="chat-model-trigger" type="button" class="model-picker-trigger" aria-haspopup="listbox"
-              aria-expanded="false">
-              <span id="chat-model-current" class="model-picker-current">Selecionar modelo</span>
-              <span class="model-picker-caret">▾</span>
+          <div class="model-picker" id="model-picker">
+            <button class="model-trigger" id="model-trigger">
+              <span class="model-dot"></span>
+              <span class="model-name" id="current-model">llama-3.3-70b</span>
+              <span class="model-caret">&#x25BE;</span>
             </button>
-
-            <div id="chat-model-menu" class="model-picker-menu hidden" role="listbox"></div>
-
-            <select id="chat-model-select" class="input compact-input hidden" tabindex="-1"></select>
-            <button
-              id="chat-airllm-toggle"
-              class="ghost-btn model-airllm-btn"
-              type="button"
-              aria-pressed="false"
-              title="Ativar/desativar AIRLLM para modelos grandes"
-            >
-              AIRLLM OFF
-            </button>
-            <button id="refresh-models" class="ghost-btn model-refresh-btn" title="Atualizar modelos">
-              Atualizar
-            </button>
+            <div class="model-menu hidden" id="model-menu">
+              <div class="model-menu-item" style="pointer-events:none;color:var(--text-tertiary)">Carregando modelos...</div>
+            </div>
           </div>
-
-          <div id="status-pill" class="status-pill">pronto</div>
+          <div class="status-badge" id="status-badge">
+            <span class="badge-dot online"></span>
+            <span>Online</span>
+          </div>
         </div>
       </header>
 
-      <section id="panel-chat" class="main-panel active" role="tabpanel">
-        <header class="chat-header">
-          <div>
-            <p class="chat-eyebrow">Conversa atual</p>
-            <h2 id="selected-thread-label">Nova conversa</h2>
-            <p id="selected-model-label" class="meta-note">Nenhum modelo selecionado</p>
-          </div>
-        </header>
+      <!-- Panels -->
+      <div class="panels">
 
-        <section id="chat-empty-hero" class="chat-empty-hero">
-          <div class="chat-empty-title-row">
-            <img class="chat-empty-logo" src="./assets/mlxpilot-mark.png" alt="MLX Pilot" />
-            <h2>Como posso te ajudar?</h2>
+        <!-- CHAT PANEL -->
+        <section class="panel active" id="panel-chat">
+          <div class="chat-layout">
+            <div class="chat-messages" id="chat-messages">
+              <div class="welcome-message" style="text-align:center;padding:60px 20px;max-width:500px;margin:0 auto;">
+                <div style="font-size:36px;margin-bottom:12px;">
+                  <svg viewBox="0 0 64 64" width="48" height="48" style="margin:0 auto;display:block;">
+                    <path d="M32 4 L58 18 L58 46 L32 60 L6 46 L6 18 Z" fill="none" stroke="var(--cyan)" stroke-width="2" opacity="0.4"/>
+                    <circle cx="32" cy="32" r="8" fill="var(--cyan)" opacity="0.3"/>
+                    <circle cx="32" cy="32" r="3" fill="var(--cyan)"/>
+                  </svg>
+                </div>
+                <h3 style="font-family:var(--font-heading);font-size:20px;font-weight:600;margin-bottom:8px;color:var(--text-primary)">MLX Pilot Chat</h3>
+                <p style="font-size:14px;color:var(--text-tertiary);line-height:1.6">Selecione um modelo no seletor acima e envie sua mensagem para comecar uma conversa.</p>
+              </div>
+            </div>
+
+            <div class="chat-input-area">
+              <div class="chat-input-wrapper">
+                <div class="input-toggles">
+                  <button class="toggle-chip active" id="web-search-toggle" title="Busca web">
+                    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <circle cx="8" cy="8" r="6" /><path d="M2 8h12M8 2c2 2 2 10 0 12M8 2c-2 2-2 10 0 12" />
+                    </svg>
+                    Web
+                  </button>
+                  <button class="toggle-chip" id="airllm-toggle" title="AIRLLM fallback">
+                    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <path d="M8 1v14M1 8h14M3 3l10 10M13 3L3 13" />
+                    </svg>
+                    AIRLLM
+                  </button>
+                </div>
+                <textarea class="chat-input" id="chat-input" placeholder="Envie uma mensagem..." rows="1"></textarea>
+                <button class="send-btn" id="send-btn" title="Enviar">
+                  <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M4 10l12-6-4 16-3-6z" /><path d="M4 10h8" />
+                  </svg>
+                </button>
+              </div>
+            </div>
           </div>
         </section>
 
-        <section id="chat-log" class="chat-log"></section>
-
-        <form id="chat-form" class="chat-form">
-          <textarea id="message-input" placeholder="Mensagem para MLX Pilot" rows="1" required></textarea>
-
-          <input id="chat-websearch-toggle" type="checkbox" class="visually-hidden" />
-
-          <div class="chat-form-actions">
-            <div class="chat-form-left">
-              <button id="chat-websearch-btn" type="button" class="chat-option-chip" aria-pressed="false">
-                Pesquisar
-              </button>
+        <!-- DISCOVER MODELS PANEL -->
+        <section class="panel" id="panel-discover">
+          <div class="panel-scroll">
+            <div class="section-header">
+              <h2 class="section-title">Descobrir Modelos</h2>
+              <p class="section-subtitle">Busque, baixe e gerencie modelos para inferencia local</p>
             </div>
 
-            <div class="chat-form-right">
-              <button id="cancel-edit" type="button" class="ghost-btn hidden">Cancelar edicao</button>
-              <button id="stop-generation" type="button" class="ghost-btn" disabled>Parar</button>
-              <button type="submit" class="primary-btn">Enviar</button>
+            <div class="discover-tabs">
+              <button class="discover-tab active" data-dtab="catalog">Catalogo</button>
+              <button class="discover-tab" data-dtab="installed">Instalados</button>
+            </div>
+
+            <div class="discover-content active" id="dtab-catalog">
+              <div class="search-bar">
+                <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <circle cx="9" cy="9" r="6" /><path d="M13.5 13.5L18 18" />
+                </svg>
+                <input type="text" id="catalog-search" class="search-input" placeholder="Buscar modelos em HuggingFace..." />
+                <select class="source-select">
+                  <option>HuggingFace</option>
+                  <option>MLX Community</option>
+                  <option>Ollama</option>
+                </select>
+              </div>
+
+              <div id="catalog-results" class="model-cards">
+                <div style="padding:40px;text-align:center;color:var(--text-tertiary)">
+                  Busque por nome para encontrar modelos no HuggingFace
+                </div>
+              </div>
+            </div>
+
+            <div class="discover-content" id="dtab-installed" style="display:none;">
+              <div class="installed-header">
+                <span class="installed-count" id="installed-count">Carregando...</span>
+                <button class="refresh-btn" id="refresh-installed">
+                  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M2 8a6 6 0 0 1 10.5-4M14 8a6 6 0 0 1-10.5 4" /><path d="M12.5 1v3h-3M3.5 15v-3h3" />
+                  </svg>
+                  Atualizar
+                </button>
+              </div>
+              <div class="installed-list" id="installed-list">
+                <div style="padding:24px;text-align:center;color:var(--text-tertiary)">Carregando modelos...</div>
+              </div>
             </div>
           </div>
-        </form>
-      </section>
-
-      <section id="panel-discover" class="main-panel" role="tabpanel">
-        <header class="discover-header glass">
-          <div>
-            <p class="chat-eyebrow">Catalogo remoto</p>
-            <h2>Encontre novos modelos para baixar</h2>
-          </div>
-        </header>
-
-        <section class="discover-subtabs">
-          <button id="discover-subtab-catalog" type="button" class="tab-btn active" data-discover-subtab="catalog"
-            role="tab" aria-selected="true">
-            Catalogo e Downloads
-          </button>
-          <button id="discover-subtab-installed" type="button" class="tab-btn" data-discover-subtab="installed"
-            role="tab" aria-selected="false">
-            Modelos Instalados
-          </button>
         </section>
 
-        <div id="discover-view-catalog" class="discover-subtab-view discover-catalog-view active">
-          <section class="discover-controls glass">
-            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <label class="field-group">
-                <span>Fonte</span>
-                <select id="catalog-source" class="input"></select>
-              </label>
-
-              <label class="field-group field-grow">
-                <span>Busca</span>
-                <input id="catalog-query" class="input" placeholder="Ex: mlx-community qwen coder" />
-              </label>
-
-              <button id="catalog-search-btn" class="primary-btn">Buscar</button>
+        <!-- OPENCLAW PANEL -->
+        <section class="panel" id="panel-openclaw">
+          <div class="panel-scroll">
+            <div class="section-header">
+              <h2 class="section-title">OpenClaw Runtime</h2>
+              <p class="section-subtitle">Gerencie o framework agente OpenClaw/NanoBot</p>
             </div>
 
-            <div style="margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px;">
-              <label class="field-group">
-                <span style="display: flex; justify-content: space-between;">
-                  Diretorio de Instalacao (Models Path)
-                  <span id="discover-models-feedback" class="meta-note"
-                    style="color: var(--ok); opacity: 0; transition: opacity 0.3s;">Salvo!</span>
-                </span>
-                <input id="discover-models-dir" class="input" placeholder="Ex: /Users/kaike/models" />
-              </label>
+            <div class="runtime-hero">
+              <div class="runtime-status-card" id="runtime-status-card">
+                <div class="runtime-status-row">
+                  <span class="runtime-framework">OpenClaw v0.4.2</span>
+                  <span class="runtime-badge running"><span class="badge-dot"></span> Executando</span>
+                </div>
+                <div class="runtime-meta">
+                  <span>PID: 48291</span>
+                  <span>Uptime: 2h 34m</span>
+                  <span>Mem: 1.2 GB</span>
+                </div>
+                <div class="runtime-actions">
+                  <button class="runtime-btn primary" id="runtime-restart">Reiniciar</button>
+                  <button class="runtime-btn" id="runtime-stop">Parar</button>
+                  <button class="runtime-btn" id="runtime-logs">Logs</button>
+                </div>
+              </div>
             </div>
-          </section>
 
-          <p id="catalog-meta" class="meta-note">Carregando catalogo...</p>
-          <section id="remote-results" class="remote-grid"></section>
-
-          <section class="downloads-panel glass">
-            <div class="panel-title-row">
-              <h3>Downloads</h3>
-              <button id="refresh-downloads" class="ghost-btn">Atualizar</button>
+            <div class="openclaw-subtabs">
+              <button class="oc-tab active" data-oc="chat">Chat</button>
+              <button class="oc-tab" data-oc="logs">Logs</button>
+              <button class="oc-tab" data-oc="skills-tools">Skills &amp; Tools</button>
+              <button class="oc-tab" data-oc="config">Configura&ccedil;&atilde;o</button>
             </div>
-            <ul id="download-list" class="download-list"></ul>
-          </section>
-        </div>
 
-        <div id="discover-view-installed" class="discover-subtab-view discover-installed-view">
-          <section id="installed-models-panel" class="installed-models-panel glass">
-            <div class="panel-title-row">
-              <h3>Modelos instalados</h3>
-              <button id="refresh-installed-models" class="ghost-btn">Atualizar lista</button>
+            <div class="oc-content active" id="oc-chat">
+              <div class="oc-chat-box">
+                <div class="oc-messages">
+                <div class="oc-input">
+                  <input type="text" placeholder="Pergunte ao OpenClaw..." />
+                  <button class="send-btn small">Enviar</button>
+                </div>
+              </div>
             </div>
-            <p id="installed-models-meta" class="meta-note">-</p>
-            <ul id="installed-models-list" class="installed-models-list"></ul>
-          </section>
-        </div>
-      </section>
 
-      <section id="panel-openclaw" class="main-panel" role="tabpanel">
-        <header class="openclaw-header glass">
-          <div>
-            <p id="agent-panel-eyebrow" class="chat-eyebrow">OpenClaw Integration</p>
-            <h2 id="agent-panel-title">Chat, observabilidade e configuracao</h2>
-            <p id="openclaw-status-text" class="meta-note">status: verificando...</p>
-            <p id="openclaw-runtime-meta" class="meta-note">runtime: verificando...</p>
+            <div class="oc-content" id="oc-logs" style="display:none;">
+              <div class="log-viewer">
+                <div class="log-header">
+                  <span class="log-title" id="log-stream-name">gateway.log</span>
+                  <select class="filter-select" id="log-stream-select" style="margin-right:8px">
+                    <option value="gateway">Gateway</option>
+                    <option value="error">Error</option>
+                    <option value="sync">Sync</option>
+                  </select>
+                  <button class="log-refresh" id="log-refresh-btn">Atualizar</button>
+                </div>
+                <div class="log-body" id="log-body">
+                  <div style="padding:20px;text-align:center;color:var(--text-tertiary)">Clique em "Atualizar" para carregar os logs</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="oc-content" id="oc-skills-tools" style="display:none;">
+              <div class="observability-grid" id="observability-grid">
+                <div class="obs-card">
+                  <h4>Modelo Ativo</h4>
+                  <div class="obs-value obs-model-value">-</div>
+                  <div class="obs-bar"><div class="obs-bar-fill" style="width:0%"></div></div>
+                  <span class="obs-label">contexto utilizado</span>
+                </div>
+                <div class="obs-card">
+                  <h4>Uso de Tokens</h4>
+                  <div class="obs-value obs-usage-value">- <span class="obs-unit">total</span></div>
+                  <div class="obs-detail">
+                    <span>Verifique o status do agente</span>
+                  </div>
+                </div>
+                <div class="obs-card">
+                  <h4>Skills Carregadas</h4>
+                  <div class="skill-list obs-skills-list">
+                    <span style="color:var(--text-tertiary);font-size:12px">Carregando...</span>
+                  </div>
+                </div>
+                <div class="obs-card">
+                  <h4>Tools Disponíveis</h4>
+                  <div class="skill-list obs-tools-list">
+                    <span style="color:var(--text-tertiary);font-size:12px">Carregando...</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="oc-content" id="oc-config" style="display:none;">
+              <div class="config-section">
+                <h4>Framework</h4>
+                <div class="radio-cards" id="oc-framework-cards">
+                  <label class="radio-card selected">
+                    <input type="radio" name="framework" value="openclaw" checked />
+                    <div class="radio-card-body">
+                      <span class="radio-card-name">OpenClaw</span>
+                      <span class="radio-card-desc">Framework agente completo com policy engine</span>
+                    </div>
+                  </label>
+                  <label class="radio-card">
+                    <input type="radio" name="framework" value="nanobot" />
+                    <div class="radio-card-body">
+                      <span class="radio-card-name">NanoBot</span>
+                      <span class="radio-card-desc">Framework leve para agentes simples</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+              <div class="config-section">
+                <h4>Diretórios</h4>
+                <div class="config-fields">
+                  <div class="config-field">
+                    <label>Diretório de Models</label>
+                    <input type="text" id="oc-models-dir" class="input" value="" placeholder="Carregando..." />
+                  </div>
+                  <div class="config-field">
+                    <label>CLI Path</label>
+                    <input type="text" id="oc-cli-path" class="input" value="" placeholder="Carregando..." />
+                  </div>
+                  <div class="config-field">
+                    <label>State Directory</label>
+                    <input type="text" id="oc-state-dir" class="input" value="" placeholder="Carregando..." />
+                  </div>
+                </div>
+                <button class="primary-btn" id="oc-save-config">Aplicar Configura&ccedil;&otilde;es</button>
+              </div>
+            </div>
           </div>
-          <div class="openclaw-header-actions">
-            <div class="openclaw-runtime-actions">
-              <button id="openclaw-start-btn" type="button" class="ghost-btn">Play</button>
-              <button id="openclaw-stop-btn" type="button" class="ghost-btn">Stop</button>
-              <button id="openclaw-restart-btn" type="button" class="ghost-btn">Restart</button>
-            </div>
-            <button id="refresh-openclaw-status" class="ghost-btn">Atualizar status</button>
-          </div>
-        </header>
-
-        <section class="openclaw-controls glass">
-          <div id="agent-subtabs-label" class="openclaw-subtabs" role="tablist" aria-label="OpenClaw visualizacao">
-            <button class="tab-btn openclaw-view-btn active" data-openclaw-view="chat">Chat</button>
-            <button class="tab-btn openclaw-view-btn" data-openclaw-view="logs">Logs</button>
-            <button class="tab-btn openclaw-view-btn" data-openclaw-view="observability">Skills e Tools</button>
-            <button class="tab-btn openclaw-view-btn" data-openclaw-view="config">Configuracao</button>
-          </div>
-
-          <label class="openclaw-multi-toggle">
-            <input id="openclaw-multi-view" type="checkbox" />
-            Mostrar mais de um painel ao mesmo tempo
-          </label>
         </section>
 
-        <section id="openclaw-panels" class="openclaw-panels single-mode">
-          <article id="openclaw-panel-chat" class="openclaw-panel openclaw-chat-panel glass active">
-            <div class="panel-title-row">
-              <h3 id="agent-chat-title">Chat com OpenClaw</h3>
+        <!-- AGENT PANEL -->
+        <section class="panel" id="panel-agent">
+          <div class="panel-scroll">
+            <div class="section-header">
+              <h2 class="section-title">Agent Control Plane</h2>
+              <p class="section-subtitle">Controle channels, plugins, skills, policies e runtime</p>
             </div>
 
-            <section id="openclaw-chat-log" class="openclaw-chat-log"></section>
-
-            <form id="openclaw-chat-form" class="openclaw-chat-form">
-              <textarea id="openclaw-message-input" rows="1" placeholder="Converse com o agente aqui..."
-                required></textarea>
-              <div class="chat-form-actions">
-                <button type="submit" class="primary-btn">Enviar para OpenClaw</button>
+            <div class="agent-sections">
+              <!-- Channels -->
+              <div class="agent-section">
+                <div class="agent-section-head">
+                  <h3>
+                    <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <path d="M3 5h14v10H3z" /><path d="M7 5V3h6v2" />
+                    </svg>
+                    Channels
+                  </h3>
+                  <button class="add-btn" id="btn-new-channel">+ Novo Channel</button>
+                </div>
+                <div class="channel-cards" id="channel-list">
+                  <div style="padding:16px;text-align:center;color:var(--text-tertiary)">Carregando channels...</div>
+                </div>
               </div>
-            </form>
-          </article>
 
-          <article id="openclaw-panel-logs" class="openclaw-panel openclaw-log-panel glass">
-            <div class="panel-title-row">
-              <h3 id="agent-logs-title">Logs em tempo real</h3>
-              <button id="clear-openclaw-log" class="ghost-btn">Limpar</button>
+              <!-- Plugins -->
+              <div class="agent-section">
+                <div class="agent-section-head">
+                  <h3>
+                    <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <rect x="3" y="3" width="14" height="14" rx="2" /><path d="M7 3v14M3 7h14" />
+                    </svg>
+                    Plugins
+                  </h3>
+                </div>
+                <div class="plugin-list" id="plugin-list">
+                  <div style="padding:16px;text-align:center;color:var(--text-tertiary)">Carregando plugins...</div>
+                </div>
+              </div>
+
+              <!-- Tools & Policies -->
+              <div class="agent-section">
+                <div class="agent-section-head">
+                  <h3>
+                    <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <path d="M10 2v4m0 8v4M2 10h4m8 0h4" /><circle cx="10" cy="10" r="3" />
+                    </svg>
+                    Tools &amp; Policies
+                  </h3>
+                </div>
+                <div class="policy-grid">
+                  <div class="policy-card">
+                    <h4>Execution Mode</h4>
+                    <div class="radio-cards compact">
+                      <label class="radio-card selected"><input type="radio" name="exec" value="full" checked /><div class="radio-card-body"><span class="radio-card-name">Full</span></div></label>
+                      <label class="radio-card"><input type="radio" name="exec" value="read-only" /><div class="radio-card-body"><span class="radio-card-name">Read-only</span></div></label>
+                      <label class="radio-card"><input type="radio" name="exec" value="dry-run" /><div class="radio-card-body"><span class="radio-card-name">Dry-run</span></div></label>
+                    </div>
+                  </div>
+                  <div class="policy-card">
+                    <h4>Approval Mode</h4>
+                    <div class="radio-cards compact">
+                      <label class="radio-card"><input type="radio" name="approval" value="auto" /><div class="radio-card-body"><span class="radio-card-name">Auto</span></div></label>
+                      <label class="radio-card selected"><input type="radio" name="approval" value="ask" checked /><div class="radio-card-body"><span class="radio-card-name">Ask</span></div></label>
+                      <label class="radio-card"><input type="radio" name="approval" value="deny" /><div class="radio-card-body"><span class="radio-card-name">Deny</span></div></label>
+                    </div>
+                  </div>
+                  <div class="policy-card full-width">
+                    <h4>Tools Disponíveis</h4>
+                    <div class="tools-grid" id="tools-grid">
+                      <div style="color:var(--text-tertiary);font-size:12px">Carregando...</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Observability -->
+              <div class="agent-section">
+                <div class="agent-section-head">
+                  <h3>
+                    <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <path d="M2 16l4-4 3 3 4-6 5 5" /><circle cx="17" cy="3" r="2" />
+                    </svg>
+                    Observabilidade
+                  </h3>
+                  <div class="filter-row">
+                    <button class="action-btn" id="refresh-audit">Atualizar</button>
+                  </div>
+                </div>
+                <div class="audit-feed" id="audit-feed">
+                  <div style="padding:16px;text-align:center;color:var(--text-tertiary)">Carregando auditoria...</div>
+                </div>
+              </div>
+
+              <!-- Agent Chat -->
+              <div class="agent-section">
+                <div class="agent-section-head">
+                  <h3>
+                    <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <path d="M3 4h14v9H7l-4 3V4z" />
+                    </svg>
+                    Agent Chat
+                  </h3>
+                  <div class="session-controls">
+                    <button class="action-btn" id="btn-new-session">Nova Sessão</button>
+                    <button class="action-btn" id="btn-export-session">Exportar</button>
+                  </div>
+                </div>
+                <div class="agent-chat-box">
+                  <div class="agent-chat-messages">
+                  <div class="oc-input">
+                    <input type="text" placeholder="Comando para o agente..." />
+                    <button class="send-btn small">Executar</button>
+                  </div>
+                </div>
+              </div>
             </div>
-
-            <div class="openclaw-log-controls">
-              <label class="field-group">
-                <span>Stream</span>
-                <select id="openclaw-log-stream" class="input">
-                  <option id="agent-log-option-gateway" value="gateway">gateway.log</option>
-                  <option id="agent-log-option-error" value="error">gateway.err.log</option>
-                  <option id="agent-log-option-sync" value="sync">openclaw-mlx-sync.log</option>
-                </select>
-              </label>
-
-              <button id="refresh-openclaw-log" class="ghost-btn">Atualizar</button>
-            </div>
-
-            <p id="openclaw-log-meta" class="meta-note">-</p>
-            <pre id="openclaw-log-viewer" class="openclaw-log-viewer"></pre>
-          </article>
-
-          <article id="openclaw-panel-observability" class="openclaw-panel openclaw-meta-panel glass">
-            <h3 id="agent-observability-title">Skills e Tools da ultima resposta</h3>
-
-            <div class="openclaw-meta-block">
-              <p class="openclaw-meta-label">Modelo</p>
-              <p id="openclaw-provider-model" class="openclaw-meta-value">-</p>
-            </div>
-
-            <div class="openclaw-meta-block">
-              <p class="openclaw-meta-label">Uso de tokens</p>
-              <p id="openclaw-usage" class="openclaw-meta-value">-</p>
-            </div>
-
-            <div class="openclaw-meta-block">
-              <p class="openclaw-meta-label">Skills carregadas</p>
-              <ul id="openclaw-skills" class="chip-list"></ul>
-            </div>
-
-            <div class="openclaw-meta-block">
-              <p class="openclaw-meta-label">Tools disponiveis</p>
-              <ul id="openclaw-tools" class="chip-list"></ul>
-            </div>
-          </article>
-
-          <article id="openclaw-panel-config" class="openclaw-panel openclaw-config-panel glass">
-            <h3 id="agent-config-title">Configuracao de modelo OpenClaw</h3>
-
-            <label class="field-group">
-              <span id="openclaw-model-source-label">Origem do modelo</span>
-              <select id="openclaw-model-source" class="input">
-                <option id="openclaw-model-source-cloud-option" value="cloud">Nuvem (OpenClaw configurado)</option>
-                <option id="openclaw-model-source-local-option" value="local">Local (MLX-Pilot)</option>
-              </select>
-            </label>
-
-            <label id="openclaw-cloud-picker" class="field-group">
-              <span id="openclaw-cloud-label">Modelos cloud</span>
-              <select id="openclaw-cloud-model-select" class="input"></select>
-            </label>
-
-            <label id="openclaw-local-picker" class="field-group hidden">
-              <span id="openclaw-local-label">Modelos locais</span>
-              <select id="openclaw-local-model-select" class="input"></select>
-            </label>
-
-            <label id="nanobot-model-picker" class="field-group hidden">
-              <span id="nanobot-model-label">Modelo NanoBot</span>
-              <input id="nanobot-model-input" class="input" placeholder="Ex: openai-codex/gpt-5.1-codex" />
-            </label>
-
-            <div class="openclaw-config-actions">
-              <button id="refresh-openclaw-models" type="button" class="ghost-btn">
-                Atualizar modelos
-              </button>
-              <button id="apply-openclaw-model" type="button" class="primary-btn">
-                Aplicar modelo
-              </button>
-            </div>
-
-            <p id="openclaw-model-current" class="meta-note">Modelo atual: -</p>
-            <p id="openclaw-config-feedback" class="meta-note">-</p>
-          </article>
+          </div>
         </section>
-      </section>
 
-      <section id="panel-agent" class="main-panel" role="tabpanel">
-        <header class="agent-header glass">
-          <div>
-            <p class="chat-eyebrow">Agent Control Plane</p>
-            <h2>Controle completo do runtime do agente</h2>
-            <p id="agent-meta" class="meta-note">Channels, plugins, skills, policy, contexto e health em uma unica aba.</p>
-          </div>
-          <div class="agent-header-actions">
-            <button id="agent-refresh-btn" class="ghost-btn">Atualizar</button>
-            <button id="agent-save-config-btn" class="primary-btn">Salvar configuracoes</button>
-          </div>
-        </header>
-
-        <nav class="agent-section-nav glass" aria-label="Agent sections">
-          <a class="agent-nav-chip" href="#agent-section-channels">Channels</a>
-          <a class="agent-nav-chip" href="#agent-section-plugins">Plugins</a>
-          <a class="agent-nav-chip" href="#agent-section-skills">Skills</a>
-          <a class="agent-nav-chip" href="#agent-section-tools">Tools & Policies</a>
-          <a class="agent-nav-chip" href="#agent-section-context">Context & Memory</a>
-          <a class="agent-nav-chip" href="#agent-section-runtime">Runtime & Health</a>
-        </nav>
-
-        <div class="agent-section-stack">
-          <section id="agent-section-channels" class="agent-control-section glass">
-            <header class="agent-section-head">
-              <div>
-                <p class="chat-eyebrow">Channels</p>
-                <h3>Catalogo, contas, login e operacao</h3>
-              </div>
-              <button id="agent-channels-refresh-btn" class="ghost-btn">Atualizar canais</button>
-            </header>
-
-            <div class="agent-grid agent-grid-wide">
-              <article class="agent-card agent-card-span-12">
-                <h4 class="agent-card-title">Catalogo e status</h4>
-                <p class="meta-note">Cada card mostra protocolo, capabilities, health, sessao e contas configuradas.</p>
-                <div id="agent-channel-list" class="agent-channel-list"></div>
-              </article>
-
-              <article class="agent-card agent-card-span-6">
-                <h4 class="agent-card-title">Add / edit conta</h4>
-                <label class="field-group">
-                  <span>Canal</span>
-                  <select id="agent-channel-select" class="input"></select>
-                </label>
-                <label class="field-group">
-                  <span>Account ID</span>
-                  <input id="agent-channel-account-id" class="input" placeholder="work, personal, bot-a" />
-                </label>
-                <label class="field-group">
-                  <span id="agent-channel-credentials-label">Credencial (token ou JSON)</span>
-                  <textarea id="agent-channel-credentials" class="input" rows="4" placeholder='{"token":"..."} ou xoxb-...'></textarea>
-                </label>
-                <p id="agent-channel-credential-hint" class="meta-note">Cole um token simples ou JSON, dependendo do canal.</p>
-                <label class="field-group">
-                  <span id="agent-channel-metadata-label">Metadata (JSON)</span>
-                  <textarea id="agent-channel-metadata" class="input" rows="3" placeholder='{"workspace":"ops"}'></textarea>
-                </label>
-                <label class="field-group">
-                  <span id="agent-channel-routing-defaults-label">Routing defaults (JSON)</span>
-                  <textarea id="agent-channel-routing-defaults" class="input" rows="3" placeholder='{"target":"#alerts"}'></textarea>
-                </label>
-                <label class="field-group">
-                  <span id="agent-channel-adapter-config-label">Adapter config (JSON)</span>
-                  <textarea id="agent-channel-adapter-config" class="input" rows="4" placeholder='{"endpoint":"https://bridge.exemplo","token":"..."}'></textarea>
-                </label>
-                <section class="agent-channel-onboarding-panel">
-                  <div class="agent-channel-onboarding-head">
-                    <div>
-                      <p class="meta-note">Onboarding guiado</p>
-                      <h5 id="agent-channel-onboarding-title">Selecione um canal para ver o fluxo recomendado</h5>
-                    </div>
-                  </div>
-                  <p id="agent-channel-onboarding-summary" class="meta-note">A UI adapta as instrucoes conforme QR local, token de bot ou bridge externa.</p>
-                  <ul id="agent-channel-onboarding-steps" class="agent-channel-onboarding-list">
-                    <li>Selecione um canal.</li>
-                    <li>Salve uma conta.</li>
-                    <li>Siga o fluxo de login indicado pelo canal.</li>
-                  </ul>
-                </section>
-                <label class="agent-toggle-row">
-                  <input id="agent-channel-enabled" type="checkbox" checked />
-                  <span>Conta habilitada</span>
-                </label>
-                <label class="agent-toggle-row">
-                  <input id="agent-channel-set-default" type="checkbox" />
-                  <span>Marcar como default do canal</span>
-                </label>
-                <div class="agent-inline-actions">
-                  <button id="agent-channel-save-btn" class="primary-btn" type="button">Salvar conta</button>
-                  <button id="agent-channel-clear-btn" class="ghost-btn" type="button">Limpar</button>
+        <!-- AI INTERACTION PANEL -->
+        <section class="panel" id="panel-ai-interaction">
+          <div class="ai-interaction-layout">
+            <canvas id="ai-canvas"></canvas>
+            <div class="ai-overlay">
+              <div class="ai-prompt-area">
+                <h2 class="ai-title">IA Visual</h2>
+                <p class="ai-subtitle">Pergunte algo e veja a resposta como arte cinematografica</p>
+                <div class="ai-input-row">
+                  <input type="text" id="ai-input" class="ai-input" placeholder="Ex: mostre a serie de Fibonacci como espiral..." />
+                  <button class="ai-send-btn" id="ai-send-btn">Renderizar</button>
                 </div>
-                <p id="agent-channel-form-feedback" class="meta-note">-</p>
-                <section class="agent-channel-session-panel">
-                  <div class="agent-channel-session-head">
-                    <div class="agent-channel-session-copy">
-                      <p class="meta-note">Conexao da conta selecionada</p>
-                      <h5 id="agent-channel-session-title">Selecione um canal e uma conta</h5>
-                    </div>
-                    <div class="agent-channel-session-actions">
-                      <button id="agent-channel-login-btn" class="primary-btn" type="button">Login</button>
-                      <button id="agent-channel-logout-btn" class="ghost-btn" type="button">Logout</button>
-                      <button id="agent-channel-show-qr-btn" class="ghost-btn" type="button">Ver QR</button>
-                    </div>
-                  </div>
-                  <p id="agent-channel-session-status" class="meta-note">Salve a conta para habilitar a conexao do canal.</p>
-                  <p id="agent-channel-session-meta" class="meta-note">-</p>
-                  <div id="agent-channel-session-capabilities" class="agent-skill-badges"></div>
-                  <div id="agent-channel-qr-panel" class="agent-channel-qr-panel" hidden>
-                    <div class="agent-channel-qr-frame">
-                      <canvas id="agent-channel-qr-canvas" class="agent-channel-qr-canvas" width="220" height="220"></canvas>
-                      <img id="agent-channel-qr-image" class="agent-channel-qr-image" alt="QRCode de login" hidden />
-                    </div>
-                    <div class="agent-channel-qr-copy">
-                      <p class="meta-note">QRCode atual da sessao</p>
-                      <code id="agent-channel-qr-text" class="agent-channel-qr-raw">-</code>
-                    </div>
-                  </div>
-                </section>
-              </article>
+                <div class="ai-examples">
+                  <button class="example-btn" data-prompt="Quero ver a formula de Bhaskara animada com curvas e cores">Baskara</button>
+                  <button class="example-btn" data-prompt="Crie uma animacao de particulas representando o infinito de Gojo Satoru">Gojo Infinity</button>
+                  <button class="example-btn" data-prompt="Desenhe a espiral de Fibonacci como particulas interconectadas">Fibonacci</button>
+                  <button class="example-btn" data-prompt="Crie ondas senoidais com particulas se sobrepondo em harmonia">Ondas</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
 
-              <article class="agent-card agent-card-span-6">
-                <h4 class="agent-card-title">Login, probe e teste</h4>
-                <div class="agent-quad-grid">
-                  <label class="field-group">
-                    <span>Canal</span>
-                    <select id="agent-send-channel" class="input"></select>
+        <!-- SETTINGS PANEL -->
+        <section class="panel" id="panel-settings">
+          <div class="panel-scroll">
+            <div class="section-header">
+              <h2 class="section-title">Configura&ccedil;&otilde;es</h2>
+              <p class="section-subtitle">Preferencias do sistema e integracoes</p>
+            </div>
+
+            <div class="settings-grid">
+              <div class="settings-card">
+                <h3>Framework Agente</h3>
+                <div class="radio-cards" id="settings-framework-cards">
+                  <label class="radio-card selected">
+                    <input type="radio" name="settings-framework" value="openclaw" checked />
+                    <div class="radio-card-body">
+                      <span class="radio-card-name">OpenClaw</span>
+                      <span class="radio-card-desc">Framework completo com policy engine e skills</span>
+                    </div>
                   </label>
-                  <label class="field-group">
-                    <span>Conta</span>
-                    <select id="agent-send-account" class="input">
-                      <option value="">Resolver automaticamente</option>
-                    </select>
-                  </label>
-                  <label class="field-group">
-                    <span>Target</span>
-                    <input id="agent-send-target" class="input" placeholder="@team ou #alerts" />
-                  </label>
-                  <label class="field-group">
-                    <span>Mensagem</span>
-                    <input id="agent-send-message" class="input" placeholder="Mensagem de teste" />
+                  <label class="radio-card">
+                    <input type="radio" name="settings-framework" value="nanobot" />
+                    <div class="radio-card-body">
+                      <span class="radio-card-name">NanoBot</span>
+                      <span class="radio-card-desc">Framework leve para agentes simples</span>
+                    </div>
                   </label>
                 </div>
-                <div class="agent-inline-actions">
-                  <button id="agent-send-test-btn" class="primary-btn" type="button">Enviar teste</button>
-                  <button id="agent-probe-channel-btn" class="ghost-btn" type="button">Probe</button>
-                  <button id="agent-resolve-target-btn" class="ghost-btn" type="button">Resolver alvo</button>
-                </div>
-                <p id="agent-channel-action-feedback" class="meta-note">-</p>
-
-                <div class="panel-title-row" style="margin-top: 10px;">
-                  <h4 style="margin: 0;">Logs por canal/conta</h4>
-                  <button id="agent-channel-logs-refresh-btn" class="ghost-btn" type="button">Atualizar logs</button>
-                </div>
-                <div class="agent-inline-actions">
-                  <select id="agent-channel-logs-channel" class="input compact-input">
-                    <option value="">Todos canais</option>
-                  </select>
-                  <select id="agent-channel-logs-account" class="input compact-input">
-                    <option value="">Todas contas</option>
-                  </select>
-                </div>
-                <ul id="agent-channel-logs-list" class="agent-audit-list"></ul>
-              </article>
-            </div>
-          </section>
-
-          <section id="agent-section-plugins" class="agent-control-section glass">
-            <header class="agent-section-head">
-              <div>
-                <p class="chat-eyebrow">Plugins</p>
-                <h3>Enable/disable e schema dinâmico</h3>
               </div>
-              <button id="agent-plugins-refresh-btn" class="ghost-btn">Atualizar plugins</button>
-            </header>
 
-            <div class="agent-grid agent-grid-wide">
-              <article class="agent-card agent-card-span-5">
-                <h4 class="agent-card-title">Runtime plugins</h4>
-                <div id="agent-plugins-list" class="agent-plugin-list"></div>
-              </article>
+              <div class="settings-card">
+                <h3>Provider Local</h3>
+                <div class="settings-field">
+                  <label>MLX Command</label>
+                  <input type="text" id="set-mlx-cmd" class="input" value="" placeholder="Carregando..." />
+                </div>
+                <div class="settings-field">
+                  <label>MLX Prefix Args</label>
+                  <input type="text" id="set-mlx-prefix" class="input" value="" placeholder="Carregando..." />
+                </div>
+                <div class="settings-field">
+                  <label>Timeout (segundos)</label>
+                  <input type="number" id="set-mlx-timeout" class="input" value="" placeholder="Carregando..." />
+                </div>
+              </div>
 
-              <article class="agent-card agent-card-span-7">
-                <div class="panel-title-row">
-                  <h4 id="agent-plugin-detail-title" style="margin: 0;">Selecione um plugin</h4>
-                  <label class="agent-toggle-row">
-                    <input id="agent-plugin-config-enabled" type="checkbox" />
-                    <span>Habilitado</span>
+              <div class="settings-card">
+                <h3>llama.cpp Server</h3>
+                <div class="settings-field">
+                  <label>Binary Path</label>
+                  <input type="text" id="set-llamacpp-binary" class="input" value="" placeholder="Carregando..." />
+                </div>
+                <div class="settings-field">
+                  <label>Base URL</label>
+                  <input type="text" id="set-llamacpp-url" class="input" value="" placeholder="Carregando..." />
+                </div>
+                <div class="settings-field">
+                  <label>Context Size</label>
+                  <input type="number" id="set-llamacpp-ctx" class="input" value="" placeholder="Carregando..." />
+                </div>
+                <div class="settings-row">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="set-llamacpp-autostart" /> Auto-start
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="set-llamacpp-autoinstall" /> Auto-install
                   </label>
                 </div>
-                <p id="agent-plugin-detail-meta" class="meta-note">Selecione um plugin para editar schema/config.</p>
-                <div id="agent-plugin-config-form" class="agent-plugin-config-form"></div>
-                <div class="agent-inline-actions">
-                  <button id="agent-plugin-save-btn" class="primary-btn" type="button">Salvar plugin</button>
-                  <button id="agent-plugin-reset-btn" class="ghost-btn" type="button">Restaurar form</button>
+              </div>
+
+              <div class="settings-card">
+                <h3>AIRLLM Fallback</h3>
+                <div class="settings-field">
+                  <label>Threshold RAM (%)</label>
+                  <input type="range" id="set-airllm-threshold" class="range-input" min="50" max="95" value="70" />
+                  <span class="range-value" id="set-airllm-threshold-val">70%</span>
                 </div>
-                <p id="agent-plugin-feedback" class="meta-note">-</p>
-              </article>
+                <div class="settings-field">
+                  <label>Python Command</label>
+                  <input type="text" id="set-airllm-python" class="input" value="" placeholder="Carregando..." />
+                </div>
+                <div class="settings-field">
+                  <label>Bridge Script</label>
+                  <input type="text" id="set-airllm-runner" class="input" value="" placeholder="Carregando..." />
+                </div>
+              </div>
+
+              <div class="settings-card full-width">
+                <h3>Environment &amp; Secrets</h3>
+                <div class="env-table" id="env-table">
+                  <div style="padding:16px;text-align:center;color:var(--text-tertiary)">Carregando vari&aacute;veis...</div>
+                </div>
+                <button class="primary-btn" id="save-env-btn">Salvar Vari&aacute;veis</button>
+              </div>
+
+              <div class="settings-card full-width" style="text-align:right">
+                <button class="primary-btn" id="save-settings-btn">Aplicar Todas as Configura&ccedil;&otilde;es</button>
+              </div>
             </div>
-          </section>
-
-          <section id="agent-section-skills" class="agent-control-section glass">
-            <header class="agent-section-head">
-              <div>
-                <p class="chat-eyebrow">Skills</p>
-                <h3>Status, dependencias e configuracao</h3>
-              </div>
-              <div class="agent-inline-actions">
-                <button id="agent-check-skills-btn" class="ghost-btn">Check</button>
-                <button id="agent-configure-skills-btn" class="ghost-btn">Configurar</button>
-                <button id="agent-install-skills-btn" class="ghost-btn">Instalar deps</button>
-                <button id="agent-reload-skills-btn" class="ghost-btn">Reload</button>
-              </div>
-            </header>
-
-            <div class="agent-grid">
-              <article class="agent-card agent-card-span-4">
-                <label class="field-group">
-                  <span>Node manager</span>
-                  <select id="agent-node-manager-select" class="input">
-                    <option value="npm">npm</option>
-                    <option value="pnpm">pnpm</option>
-                    <option value="bun">bun</option>
-                  </select>
-                </label>
-                <p id="agent-skills-summary" class="meta-note">Check das skills pendente.</p>
-              </article>
-
-              <article class="agent-card agent-card-span-8">
-                <ul id="agent-skills-list" class="agent-toggle-list"></ul>
-              </article>
-            </div>
-          </section>
-
-          <section id="agent-section-tools" class="agent-control-section glass">
-            <header class="agent-section-head">
-              <div>
-                <p class="chat-eyebrow">Tools & Policies</p>
-                <h3>Profile, allow/deny e política efetiva</h3>
-              </div>
-            </header>
-
-            <div class="agent-grid agent-grid-wide">
-              <article class="agent-card agent-card-span-4">
-                <h4 class="agent-card-title">Provider e runtime base</h4>
-                <label class="field-group">
-                  <span>Provider</span>
-                  <select id="agent-provider-select" class="input"></select>
-                </label>
-                <label class="field-group">
-                  <span>Model</span>
-                  <select id="agent-model-select" class="input"></select>
-                </label>
-                <label class="field-group">
-                  <span>API Key</span>
-                  <input id="agent-api-key-input" class="input" type="password" placeholder="sk-..." autocomplete="off" />
-                </label>
-                <label class="field-group">
-                  <span>Base URL</span>
-                  <input id="agent-base-url-input" class="input" placeholder="https://..." />
-                </label>
-                <label class="field-group">
-                  <span>Execution mode</span>
-                  <select id="agent-execution-mode-select" class="input">
-                    <option value="full">Full</option>
-                    <option value="read_only">ReadOnly</option>
-                    <option value="dry_run">DryRun</option>
-                  </select>
-                </label>
-                <label class="field-group">
-                  <span>Approval mode</span>
-                  <select id="agent-approval-mode-select" class="input">
-                    <option value="ask">ask</option>
-                    <option value="auto">auto</option>
-                    <option value="deny">deny</option>
-                  </select>
-                </label>
-                <label class="agent-toggle-row">
-                  <input id="agent-streaming-toggle" type="checkbox" />
-                  <span>Streaming</span>
-                </label>
-                <label class="agent-toggle-row">
-                  <input id="agent-fallback-toggle" type="checkbox" />
-                  <span>Fallback automatico</span>
-                </label>
-                <label class="field-group">
-                  <span>Provider fallback</span>
-                  <select id="agent-fallback-provider-select" class="input"></select>
-                </label>
-                <label class="field-group">
-                  <span>Model fallback</span>
-                  <input id="agent-fallback-model-input" class="input" placeholder="model-id" />
-                </label>
-              </article>
-
-              <article class="agent-card agent-card-span-5">
-                <h4 class="agent-card-title">Policy editor</h4>
-                <label class="field-group">
-                  <span>Profile</span>
-                  <select id="agent-tool-profile-select" class="input"></select>
-                </label>
-                <div class="agent-inline-actions">
-                  <button id="agent-tool-profile-apply-btn" class="primary-btn" type="button">Aplicar profile</button>
-                </div>
-                <p id="agent-tool-catalog-summary" class="meta-note">Catalogo de tools carregando...</p>
-                <label class="field-group">
-                  <span>Escopo do override</span>
-                  <select id="agent-policy-scope-select" class="input">
-                    <option value="agent">agent/default</option>
-                    <option value="global">global</option>
-                  </select>
-                </label>
-                <label class="field-group">
-                  <span>Allow patterns</span>
-                  <textarea id="agent-policy-allow-input" class="input" rows="5" placeholder="read_file&#10;list_dir&#10;sessions_*"></textarea>
-                </label>
-                <label class="field-group">
-                  <span>Deny patterns</span>
-                  <textarea id="agent-policy-deny-input" class="input" rows="5" placeholder="exec&#10;write_*"></textarea>
-                </label>
-                <label class="field-group">
-                  <span>Egress allowlist (dominios, separados por virgula)</span>
-                  <input id="agent-egress-input" class="input" placeholder="api.github.com,openrouter.ai" />
-                </label>
-                <label class="field-group">
-                  <span>Paths sensiveis bloqueados (glob, separados por virgula)</span>
-                  <input id="agent-sensitive-paths-input" class="input" placeholder="~/.ssh/*,**/.env" />
-                </label>
-                <label class="agent-toggle-row">
-                  <input id="agent-aggressive-tools-toggle" type="checkbox" />
-                  <span>Aggressive tool filtering</span>
-                </label>
-                <label class="agent-toggle-row">
-                  <input id="agent-tool-fallback-toggle" type="checkbox" />
-                  <span>Tool-call fallback reprompt</span>
-                </label>
-                <div class="agent-inline-actions">
-                  <button id="agent-policy-save-btn" class="primary-btn" type="button">Salvar allow/deny</button>
-                  <button id="agent-policy-reset-btn" class="ghost-btn" type="button">Restaurar</button>
-                </div>
-                <p id="agent-policy-feedback" class="meta-note">-</p>
-              </article>
-
-              <article class="agent-card agent-card-span-3">
-                <h4 class="agent-card-title">Tools habilitados</h4>
-                <ul id="agent-tools-list" class="agent-toggle-list"></ul>
-              </article>
-
-              <article class="agent-card agent-card-span-12">
-                <h4 class="agent-card-title">Politica efetiva</h4>
-                <ul id="agent-effective-policy-list" class="agent-audit-list agent-effective-policy-list"></ul>
-              </article>
-            </div>
-          </section>
-
-          <section id="agent-section-context" class="agent-control-section glass">
-            <header class="agent-section-head">
-              <div>
-                <p class="chat-eyebrow">Context & Memory</p>
-                <h3>Budget, compressao e backend de memoria</h3>
-              </div>
-            </header>
-
-            <div class="agent-grid agent-grid-wide">
-              <article class="agent-card agent-card-span-4">
-                <h4 class="agent-card-title">Prompt budget</h4>
-                <label class="field-group">
-                  <span>Max prompt tokens</span>
-                  <input id="agent-max-prompt-input" class="input" type="range" min="512" max="8192" step="128" />
-                </label>
-                <p id="agent-max-prompt-value" class="meta-note">-</p>
-
-                <label class="field-group">
-                  <span>Max history messages</span>
-                  <input id="agent-max-history-input" class="input" type="range" min="1" max="40" step="1" />
-                </label>
-                <p id="agent-max-history-value" class="meta-note">-</p>
-
-                <label class="field-group">
-                  <span>Max tools in prompt</span>
-                  <input id="agent-max-tools-input" class="input" type="range" min="1" max="20" step="1" />
-                </label>
-                <p id="agent-max-tools-value" class="meta-note">-</p>
-              </article>
-
-              <article class="agent-card agent-card-span-4">
-                <h4 class="agent-card-title">Memoria local</h4>
-                <label class="agent-toggle-row">
-                  <input id="agent-memory-local-toggle" type="checkbox" />
-                  <span>Memoria local ligada</span>
-                </label>
-                <label class="field-group">
-                  <span>Backend</span>
-                  <select id="agent-memory-backend-select" class="input">
-                    <option value="local">local</option>
-                    <option value="json">json</option>
-                    <option value="sqlite">sqlite</option>
-                  </select>
-                </label>
-                <label class="field-group">
-                  <span>Estrategia de compressao</span>
-                  <select id="agent-memory-compression-select" class="input">
-                    <option value="adaptive">adaptive</option>
-                    <option value="conservative">conservative</option>
-                    <option value="aggressive">aggressive</option>
-                  </select>
-                </label>
-                <div class="agent-inline-actions">
-                  <button id="agent-memory-save-btn" class="primary-btn" type="button">Salvar memoria</button>
-                </div>
-                <p id="agent-memory-feedback" class="meta-note">-</p>
-              </article>
-
-              <article class="agent-card agent-card-span-4">
-                <div class="panel-title-row">
-                  <h4 style="margin: 0;">Telemetria de budget</h4>
-                  <button id="agent-budget-refresh-btn" class="ghost-btn" type="button">Atualizar</button>
-                </div>
-                <pre id="agent-budget-telemetry" class="agent-runtime-pre">Nenhuma telemetria de budget disponivel.</pre>
-              </article>
-            </div>
-          </section>
-
-          <section id="agent-section-runtime" class="agent-control-section glass">
-            <header class="agent-section-head">
-              <div>
-                <p class="chat-eyebrow">Runtime & Health</p>
-                <h3>Health checks, logs e diagnostico rapido</h3>
-              </div>
-              <button id="agent-runtime-refresh-btn" class="ghost-btn" type="button">Atualizar health</button>
-            </header>
-
-            <div class="agent-grid agent-grid-wide">
-              <article class="agent-card agent-card-span-3">
-                <h4 class="agent-card-title">Snapshot</h4>
-                <p id="agent-runtime-summary" class="meta-note">daemon n/d</p>
-                <p id="agent-runtime-framework-meta" class="meta-note">framework n/d</p>
-              </article>
-
-              <article class="agent-card agent-card-span-5">
-                <div class="panel-title-row">
-                  <h4 style="margin: 0;">Logs filtraveis</h4>
-                </div>
-                <div class="agent-inline-actions">
-                  <select id="agent-runtime-log-mode" class="input compact-input">
-                    <option value="channel">channel</option>
-                    <option value="plugin">plugin</option>
-                  </select>
-                  <select id="agent-runtime-log-source" class="input compact-input"></select>
-                  <select id="agent-runtime-log-account" class="input compact-input">
-                    <option value="">Todas contas</option>
-                  </select>
-                </div>
-                <ul id="agent-runtime-log-list" class="agent-audit-list"></ul>
-              </article>
-
-              <article class="agent-card agent-card-span-4">
-                <h4 class="agent-card-title">Diagnostico rapido</h4>
-                <ul id="agent-runtime-diagnostics-list" class="agent-audit-list"></ul>
-              </article>
-            </div>
-          </section>
-
-          <section class="agent-console-panel glass">
-            <header class="agent-console-header">
-              <div>
-                <p class="chat-eyebrow">Observability Console</p>
-                <h3>Agent Audit Feed</h3>
-              </div>
-              <div class="agent-console-toolbar">
-                <select id="audit-filter-session" class="input compact-input agent-toolbar-input">
-                  <option value="">Todas Sessoes</option>
-                </select>
-                <select id="audit-filter-event" class="input compact-input agent-toolbar-input">
-                  <option value="">Todos Eventos</option>
-                  <option value="PromptBuilt">PromptBuilt</option>
-                  <option value="ProviderCall">ProviderCall</option>
-                  <option value="ToolRequested">ToolRequested</option>
-                  <option value="ToolExecuted">ToolExecuted</option>
-                  <option value="ToolFailed">ToolFailed</option>
-                  <option value="ApprovalPending">ApprovalPending</option>
-                  <option value="ApprovalDecision">ApprovalDecision</option>
-                  <option value="ResponseFinal">ResponseFinal</option>
-                  <option value="Error">Error</option>
-                </select>
-                <select id="audit-filter-status" class="input compact-input agent-toolbar-input agent-toolbar-input-xs">
-                  <option value="">Todo Status</option>
-                  <option value="success">Success</option>
-                  <option value="error">Error</option>
-                  <option value="denied">Denied</option>
-                </select>
-                <input id="audit-filter-tool" class="input compact-input agent-toolbar-input agent-toolbar-input-xs"
-                  placeholder="Tool name..." />
-
-                <label class="agent-toggle-row agent-console-toggle">
-                  <input id="audit-follow-toggle" type="checkbox" checked />
-                  <span>Follow current session</span>
-                </label>
-
-                <button id="audit-export-btn" class="ghost-btn text-sm">Exportar</button>
-              </div>
-            </header>
-
-            <div class="agent-console-layout">
-              <div class="agent-console-feed">
-                <ul id="agent-observability-list" class="agent-audit-list agent-audit-feed">
-                  <li class="agent-console-empty-state">
-                    Carregando feed...
-                  </li>
-                </ul>
-              </div>
-
-              <aside id="audit-detail-panel" class="agent-detail-panel">
-                <div class="agent-detail-header">
-                  <h4>Detalhes do Evento</h4>
-                  <button id="audit-detail-close" class="ghost-btn text-sm agent-detail-close">✕</button>
-                </div>
-                <div id="audit-detail-content" class="agent-detail-content">
-                  <!-- Details injected via JS -->
-                </div>
-              </aside>
-            </div>
-          </section>
-
-          <section class="agent-chat-panel glass">
-            <div class="agent-session-header">
-              <div class="agent-session-header-main">
-                <p class="chat-eyebrow">Sessoes do Agent</p>
-                <div class="agent-session-controls">
-                  <div class="agent-session-actions">
-                    <button id="agent-new-session-btn" type="button" class="ghost-btn text-sm">Nova Sessao</button>
-                    <button id="agent-rename-session-btn" type="button" class="ghost-btn text-sm" disabled>Renomear</button>
-                    <button id="agent-export-session-btn" type="button" class="ghost-btn text-sm" disabled>Exportar</button>
-                    <button id="agent-delete-session-btn" type="button" class="ghost-btn danger text-sm" disabled>Deletar</button>
-                  </div>
-                  <select id="agent-session-select" class="input compact-input agent-session-select"></select>
-                </div>
-              </div>
-              <span id="agent-chat-status" class="meta-note agent-session-status">pronto</span>
-            </div>
-            <div class="panel-title-row">
-              <h3 id="agent-chat-title">Chat do agente</h3>
-            </div>
-            <div id="agent-chat-log" class="agent-chat-log"></div>
-            <form id="agent-chat-form" class="chat-form">
-              <textarea id="agent-message-input" rows="1" placeholder="Mensagem para o Agent" required></textarea>
-              <div class="chat-form-actions">
-                <button id="agent-send-btn" type="submit" class="primary-btn">Enviar</button>
-              </div>
-            </form>
-          </section>
-        </div>
-      </section>
-
-      <section id="panel-settings" class="main-panel" role="tabpanel">
-        <header class="settings-header glass">
-          <div>
-            <p class="chat-eyebrow">Preferencias do Sistema</p>
-            <h2>Configuracoes do MLX Pilot</h2>
           </div>
-          <button id="save-settings-btn" class="primary-btn">Salvar Configuracoes</button>
-        </header>
+        </section>
 
-        <div class="settings-wrapper">
-          <section class="settings-controls glass" style="margin-bottom: 24px;">
-            <h3>Framework de Agente Ativo</h3>
-            <p class="meta-note" style="margin-bottom: 16px;">Escolha qual esqueleto de agente gerenciar.</p>
-            <div class="agent-selector-container" style="display: flex; gap: 16px; margin-bottom: 8px;">
-              <label class="agent-radio-card"
-                style="flex: 1; cursor: pointer; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 16px; background: rgba(0,0,0,0.2); transition: all 0.2s ease; position: relative; overflow: hidden;">
-                <input type="radio" name="agent-framework" value="openclaw" checked
-                  style="position: absolute; opacity: 0;">
-                <div class="card-content" style="display: flex; flex-direction: column; gap: 4px;">
-                  <span style="font-weight: 600; font-size: 1rem; color: #fff;">OpenClaw</span>
-                  <span style="font-size: 0.8rem; color: var(--muted);">Infraestrutura local</span>
-                </div>
-              </label>
-              <label class="agent-radio-card"
-                style="flex: 1; cursor: pointer; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 16px; background: rgba(0,0,0,0.2); transition: all 0.2s ease; position: relative; overflow: hidden;">
-                <input type="radio" name="agent-framework" value="nanobot" style="position: absolute; opacity: 0;">
-                <div class="card-content" style="display: flex; flex-direction: column; gap: 4px;">
-                  <span style="font-weight: 600; font-size: 1rem; color: #fff;">NanoBot</span>
-                  <span style="font-size: 0.8rem; color: var(--muted);">Agentes leves</span>
-                </div>
-              </label>
-            </div>
-            <style>
-              .agent-radio-card:has(input:checked) {
-                border-color: var(--accent);
-                background: rgba(59, 130, 246, 0.1) !important;
-                box-shadow: 0 0 0 1px var(--accent);
-              }
-
-              .agent-radio-card:hover {
-                background: rgba(255, 255, 255, 0.05);
-                border-color: rgba(255, 255, 255, 0.2);
-              }
-            </style>
-          </section>
-
-          <div id="openclaw-settings-group">
-            <section class="settings-controls glass">
-              <h3 style="display: flex; justify-content: space-between; align-items: center;">
-                Caminhos do Sistema (OpenClaw)
-                <span style="font-size: 0.8rem; font-weight: normal; display: flex; gap: 8px;">
-                  <a href="https://github.com/openclaw/openclaw" target="_blank"
-                    style="color: var(--accent);">GitHub</a>
-                  <a href="https://openclaw.ai/" target="_blank" style="color: var(--accent);">Site Oficial</a>
-                </span>
-              </h3>
-              <p class="meta-note" style="margin-bottom: 12px;">Defina os diretorios onde os modelos serao armazenados e
-                onde o OpenClaw esta localizado.</p>
-
-              <label class="field-group">
-                <span>Diretorio de Modelos (Models Path)</span>
-                <input id="setting-models-dir" class="input" placeholder="Ex: /Users/kaike/models" />
-              </label>
-
-              <label class="field-group">
-                <span>OpenClaw CLI (Caminho do script de CLI)</span>
-                <input id="setting-openclaw-cli" class="input"
-                  placeholder="Ex: /Users/kaike/prod/openclaw/openclaw.mjs" />
-              </label>
-
-              <label class="field-group">
-                <span>OpenClaw State Dir (Diretorio de deploy)</span>
-                <input id="setting-openclaw-state" class="input"
-                  placeholder="Ex: /Users/kaike/prod/openclaw/deploy/data" />
-              </label>
-            </section>
-
-            <section class="settings-controls glass" style="margin-top: 16px;">
-              <h3>Instalacao do OpenClaw</h3>
-              <p class="meta-note">Se o OpenClaw nao estiver instalado, voce pode iniciar o processo automatizado aqui.
-                Isso
-                requer Node.js (npm).</p>
-              <div style="margin-top: 12px;">
-                <button id="install-openclaw-btn" type="button" class="ghost-btn">Instalar OpenClaw agora</button>
-                <p id="install-openclaw-feedback" class="meta-note mt-2" style="margin-top: 8px;">-</p>
-              </div>
-            </section>
-
-            <section class="settings-controls glass" style="margin-top: 16px;">
-              <h3>Diagnostico do OpenClaw</h3>
-              <p class="meta-note">Valide instalacao, estado de runtime e logs configurados.</p>
-              <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
-                <button id="check-openclaw-status-btn" type="button" class="ghost-btn">Checar status OpenClaw</button>
-              </div>
-              <p id="openclaw-install-status-feedback" class="meta-note mt-2" style="margin-top: 8px;">-</p>
-              <pre id="openclaw-install-status-output" class="openclaw-log-viewer"
-                style="max-height: 220px; margin-top: 8px;">-</pre>
-            </section>
-          </div>
-
-          <div id="nanobot-settings-group" class="hidden">
-            <section class="settings-controls glass">
-              <h3 style="display: flex; justify-content: space-between; align-items: center;">
-                Caminhos do Sistema (NanoBot)
-                <span style="font-size: 0.8rem; font-weight: normal; display: flex; gap: 8px;">
-                  <a href="https://github.com/HKUDS/nanobot" target="_blank" style="color: var(--accent);">GitHub</a>
-                  <a href="https://www.nanobot.ai/" target="_blank" style="color: var(--accent);">Site Oficial</a>
-                </span>
-              </h3>
-              <p class="meta-note" style="margin-bottom: 12px;">Defina os diretorios onde o NanoBot esta localizado.</p>
-
-              <label class="field-group">
-                <span>NanoBot CLI (comando, binario ou pasta do repo)</span>
-                <input id="setting-nanobot-cli" class="input" placeholder="Ex: nanobot ou /Users/kaike/prod/nanobot" />
-              </label>
-            </section>
-
-            <section class="settings-controls glass" style="margin-top: 16px;">
-              <h3>Instalacao do NanoBot</h3>
-              <p class="meta-note">Fluxo automatizado: clone/pull do repositorio + pip install -e.</p>
-              <div style="margin-top: 12px;">
-                <button id="install-nanobot-btn" type="button" class="ghost-btn">Instalar NanoBot agora</button>
-                <p id="install-nanobot-feedback" class="meta-note mt-2" style="margin-top: 8px;">-</p>
-              </div>
-            </section>
-
-            <section class="settings-controls glass" style="margin-top: 16px;">
-              <h3>Diagnostico e Bootstrap</h3>
-              <p class="meta-note">Valide instalacao/versao e inicialize o config em ~/.nanobot/config.json.</p>
-              <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
-                <button id="check-nanobot-status-btn" type="button" class="ghost-btn">Checar status NanoBot</button>
-                <button id="init-nanobot-btn" type="button" class="ghost-btn">Inicializar (onboard)</button>
-              </div>
-              <p id="nanobot-status-feedback" class="meta-note mt-2" style="margin-top: 8px;">-</p>
-              <pre id="nanobot-status-output" class="openclaw-log-viewer"
-                style="max-height: 220px; margin-top: 8px;">-</pre>
-            </section>
-          </div>
-
-          <section id="environment-settings-group" class="settings-controls glass">
-            <h3>Environment e Secrets (Global)</h3>
-            <p class="meta-note">Gerencie chaves e tokens compartilhados por Chat, Agent, OpenClaw e NanoBot.</p>
-            <div class="openclaw-config-actions" style="margin-top: 12px;">
-              <button id="refresh-openclaw-env-btn" type="button" class="ghost-btn">Atualizar environment</button>
-              <button id="save-openclaw-env-btn" type="button" class="primary-btn">Salvar environment</button>
-              <label class="openclaw-multi-toggle">
-                <input id="reveal-openclaw-env" type="checkbox" checked />
-                Mostrar valores reais
-              </label>
-            </div>
-            <p id="openclaw-env-feedback" class="meta-note mt-2" style="margin-top: 8px;">-</p>
-            <p id="openclaw-env-path" class="meta-note mt-2" style="margin-top: 8px;">-</p>
-            <div id="openclaw-env-list" class="openclaw-env-grid"></div>
-          </section>
-        </div>
-      </section>
-
-      <section id="panel-ai-interaction" class="main-panel" role="tabpanel">
-        <div id="grain"></div>
-        <div id="bg-canvas"></div>
-
-        <div class="ai-interaction-ui glass">
-          <p class="chat-eyebrow">Interacao Visual</p>
-          <h2>IA em Particulas</h2>
-          <p class="meta-note">Pergunte normalmente. A resposta vira animacao por setas, numeros, formas e etapas.</p>
-
-          <textarea id="ai-particle-input" class="input ai-scene-input" rows="2"
-            placeholder="Ex: Voce sabe como se faz o calculo de baskara?"></textarea>
-
-          <div class="ai-scene-actions">
-            <button id="ai-particle-btn" class="primary-btn">Animar resposta</button>
-            <button id="ai-particle-stop-btn" class="ghost-btn" type="button">Parar cena</button>
-          </div>
-
-          <p id="ai-scene-status" class="meta-note">Pronto para montar uma cena.</p>
-
-          <div class="ai-scene-examples">
-            <button type="button" class="ghost-btn ai-scene-example-btn"
-              data-prompt="Voce sabe como se faz o calculo de baskara?">Exemplo Baskara</button>
-            <button type="button" class="ghost-btn ai-scene-example-btn"
-              data-prompt="Consegue me mostrar como voce imagina a expansao de Satoru Gojo?">Exemplo Gojo</button>
-          </div>
-
-          <ul id="ai-scene-steps" class="ai-scene-steps"></ul>
-        </div>
-      </section>
-
+      </div><!-- /panels -->
     </main>
-  </div>
+  </div><!-- /app -->
 
-  <template id="message-template">
-    <article class="message-card">
-      <header class="message-role"></header>
-      <div class="message-content"></div>
-      <div class="message-actions hidden">
-        <button class="ghost-btn edit-message-btn" type="button">Editar e regenerar</button>
-      </div>
-    </article>
-  </template>
-
-  <template id="assistant-stream-template">
-    <article class="message-card assistant-stream-card">
-      <header class="message-role">assistant</header>
-
-      <div class="assistant-state-row">
-        <span class="assistant-state-label">aguardando</span>
-        <span class="assistant-runtime-badge hidden"></span>
-        <div class="typing-indicator">
-          <span></span>
-          <span></span>
-          <span></span>
-        </div>
-      </div>
-
-      <section class="assistant-thinking hidden">
-        <h4>thinking</h4>
-        <pre class="assistant-thinking-text"></pre>
-      </section>
-
-      <section class="assistant-answer hidden">
-        <h4>resposta</h4>
-        <div class="assistant-answer-text markdown-view"></div>
-      </section>
-
-      <section class="assistant-metrics hidden">
-        <h4>metricas</h4>
-        <pre class="assistant-metrics-text"></pre>
-      </section>
-    </article>
-  </template>
-
-  <template id="remote-card-template">
-    <article class="remote-card glass">
-      <div class="remote-head">
-        <div>
-          <h3 class="remote-name"></h3>
-          <p class="remote-subtitle"></p>
-        </div>
-        <span class="remote-task"></span>
-      </div>
-
-      <p class="remote-summary"></p>
-
-      <div class="remote-stats">
-        <span class="remote-size"></span>
-        <span class="remote-downloads"></span>
-        <span class="remote-likes"></span>
-      </div>
-
-      <div class="remote-tags"></div>
-
-      <div class="remote-actions">
-        <button class="primary-btn remote-download-btn">Baixar</button>
-      </div>
-    </article>
-  </template>
-
-  <template id="download-item-template">
-    <li class="download-item">
-      <div class="download-main">
-        <p class="download-model"></p>
-        <p class="download-destination"></p>
-
-        <div class="download-progress-track">
-          <div class="download-progress-fill"></div>
-        </div>
-
-        <p class="download-progress-label"></p>
-      </div>
-
-      <div class="download-meta">
-        <span class="download-status"></span>
-        <p class="download-time"></p>
-        <button class="ghost-btn download-cancel-btn">Cancelar</button>
-      </div>
-    </li>
-  </template>
-
-  <script src="./vendor/qrcode.bundle.js"></script>
-  <script type="module" src="./app.js"></script>
+  <script src="app.js"></script>
 </body>
-
 </html>

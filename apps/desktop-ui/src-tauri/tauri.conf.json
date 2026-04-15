@@ -10,10 +10,12 @@
     "windows": [
       {
         "label": "main",
-        "title": "MLX Pilot",
-        "width": 1240,
-        "height": 860,
-        "resizable": true
+        "title": "MLX Pilot — Orbital Command",
+        "width": 1280,
+        "height": 900,
+        "resizable": true,
+        "minWidth": 960,
+        "minHeight": 600
       }
     ],
     "security": {
