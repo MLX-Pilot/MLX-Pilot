@@ -1,5 +1,6 @@
 //! `WriteFileTool` — writes/creates a file within the sandbox.
 
+use crate::checkpoints::record_file_checkpoint;
 use crate::sandbox::assert_sandbox_path;
 use crate::types::{ExecutionMode, ParamSchema, ToolContext, ToolError, ToolResult};
 use serde_json::Value;
@@ -80,6 +81,17 @@ impl crate::Tool for WriteFileTool {
             })?;
 
         let safe_path = assert_sandbox_path(&ctx.workspace_root, path_str)?;
+        let previous_bytes = if safe_path.exists() {
+            Some(
+                tokio::fs::read(&safe_path)
+                    .await
+                    .map_err(|e| ToolError::ExecutionFailed {
+                        message: format!("failed to snapshot '{}': {e}", safe_path.display()),
+                    })?,
+            )
+        } else {
+            None
+        };
 
         // Create parent directories.
         if let Some(parent) = safe_path.parent() {
@@ -96,10 +108,27 @@ impl crate::Tool for WriteFileTool {
                 message: format!("failed to write '{}': {e}", safe_path.display()),
             })?;
 
+        let checkpoint = record_file_checkpoint(
+            &ctx.workspace_root,
+            &ctx.session_id,
+            self.name(),
+            path_str,
+            previous_bytes.as_deref(),
+            content.as_bytes(),
+        )
+        .await?;
+
+        let mut metadata = HashMap::new();
+        metadata.insert("checkpoint_id".to_string(), Value::String(checkpoint.id));
+        metadata.insert(
+            "checkpoint_path".to_string(),
+            Value::String(checkpoint.relative_path),
+        );
+
         Ok(ToolResult {
             output: format!("Wrote {} bytes to '{}'", content.len(), path_str),
             is_error: false,
-            metadata: HashMap::new(),
+            metadata,
         })
     }
 }

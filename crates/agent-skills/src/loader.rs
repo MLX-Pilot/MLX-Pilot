@@ -1,15 +1,14 @@
-//! Skill loader — discovers and loads skills from `workspace_root/skills/`.
+//! Skill loader — discovers and loads skills from project skill directories.
 //!
 //! Each skill is a directory containing a `SKILL.md` file with YAML
 //! frontmatter. The loader parses, filters, and assembles
 //! [`SkillPackage`] instances ready for the agent.
 
-use crate::frontmatter::{
-    check_requirements, matches_current_os, parse_frontmatter, to_skill_package,
-};
+use crate::frontmatter::{check_skill_requirements, parse_frontmatter, to_skill_package};
 use crate::resolver::ResolverError;
-use crate::types::{SkillPackage, SkillSource, TrustLevel};
+use crate::types::{RequirementContext, SkillPackage, SkillSource, TrustLevel};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
 
@@ -36,21 +35,42 @@ impl Default for SkillLimits {
 
 /// Loads skills from the filesystem.
 pub struct SkillLoader {
-    /// Root directory to search for skills (e.g. `workspace_root/skills/`).
-    skills_dir: PathBuf,
+    /// Ordered directories to search for skills.
+    ///
+    /// The loader preserves the existing legacy priority by checking
+    /// `skills/` before `.claude/skills/`. Duplicate names found in later
+    /// directories are ignored.
+    skills_dirs: Vec<PathBuf>,
     /// Limits for skill loading.
     limits: SkillLimits,
+}
+
+#[derive(Debug, Clone)]
+pub struct DiscoveredSkill {
+    pub package: SkillPackage,
+    pub requirements: crate::frontmatter::RequirementCheck,
 }
 
 impl SkillLoader {
     /// Create a new loader pointing at `skills_dir`.
     pub fn new(skills_dir: PathBuf, limits: SkillLimits) -> Self {
-        Self { skills_dir, limits }
+        Self::with_dirs(vec![skills_dir], limits)
     }
 
-    /// Create a loader from a workspace root (appends `skills/`).
+    /// Create a loader from an explicit ordered list of skill directories.
+    pub fn with_dirs(skills_dirs: Vec<PathBuf>, limits: SkillLimits) -> Self {
+        Self {
+            skills_dirs,
+            limits,
+        }
+    }
+
+    /// Create a loader from a workspace root.
+    ///
+    /// Supports the legacy `skills/` layout plus Claude/Hermes/Codex-style
+    /// project-local roots.
     pub fn from_workspace(workspace_root: &Path, limits: SkillLimits) -> Self {
-        Self::new(workspace_root.join("skills"), limits)
+        Self::with_dirs(workspace_skill_dirs(workspace_root), limits)
     }
 
     /// Discover and load all skills from the skills directory.
@@ -58,63 +78,91 @@ impl SkillLoader {
     /// Skills that fail to parse or don't match the current OS are skipped
     /// (logged as warnings). Returns the successfully loaded skills.
     pub async fn load_all(&self) -> Result<Vec<SkillPackage>, ResolverError> {
-        if !self.skills_dir.exists() {
-            debug!(dir = %self.skills_dir.display(), "skills directory not found, returning empty");
+        self.load_all_with_context(&RequirementContext::from_current_env())
+            .await
+    }
+
+    pub async fn load_all_with_context(
+        &self,
+        context: &RequirementContext,
+    ) -> Result<Vec<SkillPackage>, ResolverError> {
+        Ok(self
+            .discover_all_with_context(context)
+            .await?
+            .into_iter()
+            .filter(|entry| entry.requirements.satisfied)
+            .map(|entry| entry.package)
+            .collect())
+    }
+
+    pub async fn discover_all(&self) -> Result<Vec<DiscoveredSkill>, ResolverError> {
+        self.discover_all_with_context(&RequirementContext::from_current_env())
+            .await
+    }
+
+    pub async fn discover_all_with_context(
+        &self,
+        context: &RequirementContext,
+    ) -> Result<Vec<DiscoveredSkill>, ResolverError> {
+        let existing_dirs = self
+            .skills_dirs
+            .iter()
+            .filter(|dir| dir.exists())
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if existing_dirs.is_empty() {
+            debug!(dirs = ?self.skills_dirs, "skills directories not found, returning empty");
             return Ok(Vec::new());
         }
 
         let mut skills = Vec::new();
-        let mut entries = tokio::fs::read_dir(&self.skills_dir)
-            .await
-            .map_err(ResolverError::Io)?;
+        let mut seen_names = HashSet::new();
 
-        while let Some(entry) = entries.next_entry().await.map_err(ResolverError::Io)? {
-            let path = entry.path();
+        for skills_dir in existing_dirs {
+            let skill_files = collect_skill_files(&skills_dir)
+                .await
+                .map_err(ResolverError::Io)?;
 
-            // Each skill is a directory containing SKILL.md.
-            let skill_file = if path.is_dir() {
-                path.join("SKILL.md")
-            } else if path.is_file()
-                && path
-                    .file_name()
-                    .is_some_and(|f| f.eq_ignore_ascii_case("SKILL.md"))
-            {
-                // Also accept SKILL.md directly in skills/ (flat layout).
-                path.clone()
-            } else {
-                continue;
-            };
+            for skill_file in skill_files {
+                match self.load_single(&skill_file).await {
+                    Ok(pkg) => {
+                        let normalized_name = pkg.name.to_ascii_lowercase();
+                        if !seen_names.insert(normalized_name.clone()) {
+                            warn!(
+                                skill = %pkg.name,
+                                file = %skill_file.display(),
+                                directory = %skills_dir.display(),
+                                "duplicate skill name discovered in lower-priority directory, skipping"
+                            );
+                            continue;
+                        }
 
-            if !skill_file.exists() {
-                continue;
-            }
+                        let req_check = check_skill_requirements(&pkg, context);
+                        if !req_check.satisfied {
+                            debug!(
+                                skill = %pkg.name,
+                                os_supported = req_check.os_supported,
+                                missing_bins = ?req_check.missing_bins,
+                                missing_any_bins = ?req_check.missing_any_bins,
+                                missing_env = ?req_check.missing_env,
+                                missing_config = ?req_check.missing_config,
+                                "skill discovered but not currently eligible"
+                            );
+                        }
 
-            match self.load_single(&skill_file).await {
-                Ok(pkg) => {
-                    if !matches_current_os(&pkg) {
-                        debug!(skill = %pkg.name, os = ?pkg.os, "skipping skill (OS filter)");
-                        continue;
+                        skills.push(DiscoveredSkill {
+                            package: pkg,
+                            requirements: req_check,
+                        });
                     }
-
-                    let req_check = check_requirements(&pkg.requires);
-                    if !req_check.satisfied {
-                        debug!(
-                            skill = %pkg.name,
-                            missing_bins = ?req_check.missing_bins,
-                            any_bins_ok = req_check.any_bins_satisfied,
-                            "skipping skill (requirements not met)"
+                    Err(e) => {
+                        warn!(
+                            file = %skill_file.display(),
+                            error = %e,
+                            "failed to parse SKILL.md, skipping"
                         );
-                        continue;
                     }
-
-                    skills.push(pkg);
-                }
-                Err(e) => {
-                    warn!(
-                        file = %skill_file.display(),
-                        error = %e,
-                        "failed to parse SKILL.md, skipping"
-                    );
                 }
             }
         }
@@ -147,6 +195,15 @@ impl SkillLoader {
             SkillSource::Workspace,
             TrustLevel::Local,
         );
+        if package.import_source.is_none()
+            && matches!(package.format, crate::types::SkillFormat::HermesCompatible)
+        {
+            package.import_source = Some("hermes_compatible".to_string());
+            package.compatibility_notes.push(
+                "Imported via Hermes-compatible metadata; review tools/capabilities before enabling."
+                    .to_string(),
+            );
+        }
         package.sha256 = Some(sha256_hex(content.as_bytes()));
         Ok(package)
     }
@@ -206,6 +263,45 @@ impl SkillLoader {
             truncated,
         }
     }
+}
+
+async fn collect_skill_files(root: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let mut out = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+
+    while let Some(dir) = pending.pop() {
+        let mut entries = match tokio::fs::read_dir(&dir).await {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            if path
+                .file_name()
+                .is_some_and(|file| file.eq_ignore_ascii_case("SKILL.md"))
+            {
+                out.push(path);
+            }
+        }
+    }
+
+    out.sort();
+    Ok(out)
+}
+
+fn workspace_skill_dirs(workspace_root: &Path) -> Vec<PathBuf> {
+    vec![
+        workspace_root.join("skills"),
+        workspace_root.join(".claude").join("skills"),
+        workspace_root.join(".hermes").join("skills"),
+        workspace_root.join(".codex").join("skills"),
+    ]
 }
 
 fn sha256_hex(input: &[u8]) -> String {
@@ -268,12 +364,33 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::RequirementContext;
     use std::fs;
 
     fn create_test_skill(dir: &Path, name: &str, content: &str) {
         let skill_dir = dir.join(name);
         fs::create_dir_all(&skill_dir).unwrap();
         fs::write(skill_dir.join("SKILL.md"), content).unwrap();
+    }
+
+    fn create_fake_bin(dir: &Path, name: &str) {
+        #[cfg(windows)]
+        let path = dir.join(format!("{name}.cmd"));
+        #[cfg(not(windows))]
+        let path = dir.join(name);
+
+        #[cfg(windows)]
+        fs::write(&path, "@echo off\r\nexit /b 0\r\n").unwrap();
+        #[cfg(not(windows))]
+        fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&path, perms).unwrap();
+        }
     }
 
     #[tokio::test]
@@ -324,6 +441,233 @@ World!"#,
     }
 
     #[tokio::test]
+    async fn load_all_from_claude_compat_directory() {
+        let tmp = std::env::temp_dir().join("skill_loader_claude_test");
+        let skills = tmp.join(".claude").join("skills");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&skills).unwrap();
+
+        create_test_skill(
+            &skills,
+            "repo-onboarding",
+            r#"---
+name: repo-onboarding
+description: Understand the repository quickly.
+---
+
+# Repo Onboarding
+"#,
+        );
+
+        let loader = SkillLoader::from_workspace(&tmp, SkillLimits::default());
+        let loaded = loader.load_all().await.unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].name, "repo-onboarding");
+
+        fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[tokio::test]
+    async fn load_all_from_hermes_compat_directory() {
+        let tmp = std::env::temp_dir().join("skill_loader_hermes_test");
+        let skills = tmp.join(".hermes").join("skills");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&skills).unwrap();
+
+        create_test_skill(
+            &skills,
+            "runtime-ops",
+            r#"---
+name: runtime-ops
+description: Manage Hermes runtime tasks.
+---
+
+# Runtime Ops
+"#,
+        );
+
+        let loader = SkillLoader::from_workspace(&tmp, SkillLimits::default());
+        let loaded = loader.load_all().await.unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].name, "runtime-ops");
+
+        fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[tokio::test]
+    async fn load_all_from_codex_compat_directory() {
+        let tmp = std::env::temp_dir().join("skill_loader_codex_test");
+        let skills = tmp.join(".codex").join("skills");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&skills).unwrap();
+
+        create_test_skill(
+            &skills,
+            "codex-review",
+            r#"---
+name: codex-review
+description: Review code with Codex-style workflow.
+---
+
+# Codex Review
+"#,
+        );
+
+        let loader = SkillLoader::from_workspace(&tmp, SkillLimits::default());
+        let loaded = loader.load_all().await.unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].name, "codex-review");
+
+        fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[tokio::test]
+    async fn load_merges_legacy_and_claude_skill_roots() {
+        let tmp = std::env::temp_dir().join("skill_loader_merge_test");
+        let legacy = tmp.join("skills");
+        let compat = tmp.join(".claude").join("skills");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&legacy).unwrap();
+        fs::create_dir_all(&compat).unwrap();
+
+        create_test_skill(
+            &legacy,
+            "legacy-skill",
+            r#"---
+name: legacy-skill
+description: Legacy layout.
+---
+"#,
+        );
+        create_test_skill(
+            &compat,
+            "compat-skill",
+            r#"---
+name: compat-skill
+description: Claude layout.
+---
+"#,
+        );
+
+        let loader = SkillLoader::from_workspace(&tmp, SkillLimits::default());
+        let loaded = loader.load_all().await.unwrap();
+        let names = loaded
+            .iter()
+            .map(|skill| skill.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(loaded.len(), 2);
+        assert!(names.contains(&"legacy-skill"));
+        assert!(names.contains(&"compat-skill"));
+
+        fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[tokio::test]
+    async fn load_merges_all_compat_roots() {
+        let tmp = std::env::temp_dir().join("skill_loader_all_roots_test");
+        let legacy = tmp.join("skills");
+        let claude = tmp.join(".claude").join("skills");
+        let hermes = tmp.join(".hermes").join("skills");
+        let codex = tmp.join(".codex").join("skills");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&legacy).unwrap();
+        fs::create_dir_all(&claude).unwrap();
+        fs::create_dir_all(&hermes).unwrap();
+        fs::create_dir_all(&codex).unwrap();
+
+        create_test_skill(
+            &legacy,
+            "legacy-skill",
+            r#"---
+name: legacy-skill
+description: Legacy layout.
+---
+"#,
+        );
+        create_test_skill(
+            &claude,
+            "claude-skill",
+            r#"---
+name: claude-skill
+description: Claude layout.
+---
+"#,
+        );
+        create_test_skill(
+            &hermes,
+            "hermes-skill",
+            r#"---
+name: hermes-skill
+description: Hermes layout.
+---
+"#,
+        );
+        create_test_skill(
+            &codex,
+            "codex-skill",
+            r#"---
+name: codex-skill
+description: Codex layout.
+---
+"#,
+        );
+
+        let loader = SkillLoader::from_workspace(&tmp, SkillLimits::default());
+        let loaded = loader.load_all().await.unwrap();
+        let names = loaded
+            .iter()
+            .map(|skill| skill.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(loaded.len(), 4);
+        assert!(names.contains(&"legacy-skill"));
+        assert!(names.contains(&"claude-skill"));
+        assert!(names.contains(&"hermes-skill"));
+        assert!(names.contains(&"codex-skill"));
+
+        fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[tokio::test]
+    async fn load_prefers_legacy_skill_when_duplicate_name_exists() {
+        let tmp = std::env::temp_dir().join("skill_loader_duplicate_test");
+        let legacy = tmp.join("skills");
+        let compat = tmp.join(".claude").join("skills");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&legacy).unwrap();
+        fs::create_dir_all(&compat).unwrap();
+
+        create_test_skill(
+            &legacy,
+            "reviewer",
+            r#"---
+name: reviewer
+description: Legacy reviewer.
+---
+
+legacy
+"#,
+        );
+        create_test_skill(
+            &compat,
+            "reviewer",
+            r#"---
+name: reviewer
+description: Compat reviewer.
+---
+
+compat
+"#,
+        );
+
+        let loader = SkillLoader::from_workspace(&tmp, SkillLimits::default());
+        let loaded = loader.load_all().await.unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].description, "Legacy reviewer.");
+
+        fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[tokio::test]
     async fn load_skips_nonexistent_dir() {
         let loader = SkillLoader::from_workspace(
             Path::new("/nonexistent/path/12345"),
@@ -356,6 +700,146 @@ World!"#,
         fs::remove_dir_all(&tmp).unwrap();
     }
 
+    #[tokio::test]
+    async fn discover_reports_eligibility_for_critical_skills() {
+        let tmp = std::env::temp_dir().join("skill_loader_catalog_test");
+        let skills = tmp.join("skills");
+        let bins = tmp.join("bin");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&skills).unwrap();
+        fs::create_dir_all(&bins).unwrap();
+
+        for bin in ["obsidian", "wa-cli", "gh", "curl"] {
+            create_fake_bin(&bins, bin);
+        }
+
+        let original_path = std::env::var_os("PATH");
+        let mut path_entries = vec![bins.clone()];
+        path_entries.extend(std::env::split_paths(
+            &original_path.clone().unwrap_or_default(),
+        ));
+        std::env::set_var("PATH", std::env::join_paths(path_entries).unwrap());
+
+        create_test_skill(
+            &skills,
+            "obsidian",
+            r#"---
+name: obsidian
+description: Obsidian integration.
+metadata: {"hermes":{"requires":{"bins":["obsidian"]}}}
+---
+"#,
+        );
+        create_test_skill(
+            &skills,
+            "wacli",
+            r#"---
+name: wacli
+description: WhatsApp CLI integration.
+metadata: {"hermes":{"requires":{"bins":["wa-cli"]}}}
+---
+"#,
+        );
+        create_test_skill(
+            &skills,
+            "gog",
+            r#"---
+name: gog
+description: GOG downloads.
+metadata: {"hermes":{"requires":{"anyBins":["gogdl","lgogdownloader"]}}}
+---
+"#,
+        );
+        create_test_skill(
+            &skills,
+            "github",
+            r#"---
+name: github
+description: GitHub operations.
+metadata:
+  hermes:
+    primaryEnv: GITHUB_TOKEN
+    requires:
+      bins: ["gh"]
+      env: ["GITHUB_TOKEN"]
+---
+"#,
+        );
+        create_test_skill(
+            &skills,
+            "weather",
+            r#"---
+name: weather
+description: Weather lookup.
+metadata: {"hermes":{"requires":{"bins":["curl"]}}}
+---
+"#,
+        );
+        create_test_skill(
+            &skills,
+            "summarize",
+            r#"---
+name: summarize
+description: Summaries.
+metadata:
+  hermes:
+    requires:
+      config: ["provider"]
+---
+"#,
+        );
+
+        let loader = SkillLoader::from_workspace(&tmp, SkillLimits::default());
+        let context = RequirementContext::from_current_env()
+            .with_env_keys(["GITHUB_TOKEN"])
+            .with_config_keys(["provider"]);
+        let discovered = loader.discover_all_with_context(&context).await.unwrap();
+
+        let obsidian = discovered
+            .iter()
+            .find(|item| item.package.name == "obsidian")
+            .unwrap();
+        assert!(obsidian.requirements.satisfied);
+
+        let wacli = discovered
+            .iter()
+            .find(|item| item.package.name == "wacli")
+            .unwrap();
+        assert!(wacli.requirements.satisfied);
+
+        let gog = discovered
+            .iter()
+            .find(|item| item.package.name == "gog")
+            .unwrap();
+        assert!(!gog.requirements.satisfied);
+        assert_eq!(gog.requirements.missing_any_bins.len(), 2);
+
+        let github = discovered
+            .iter()
+            .find(|item| item.package.name == "github")
+            .unwrap();
+        assert!(github.requirements.satisfied);
+        assert_eq!(github.package.primary_env.as_deref(), Some("GITHUB_TOKEN"));
+
+        let weather = discovered
+            .iter()
+            .find(|item| item.package.name == "weather")
+            .unwrap();
+        assert!(weather.requirements.satisfied);
+
+        let summarize = discovered
+            .iter()
+            .find(|item| item.package.name == "summarize")
+            .unwrap();
+        assert!(summarize.requirements.satisfied);
+
+        match original_path {
+            Some(value) => std::env::set_var("PATH", value),
+            None => std::env::remove_var("PATH"),
+        }
+        fs::remove_dir_all(&tmp).unwrap();
+    }
+
     #[test]
     fn build_prompt_respects_max_skills() {
         let limits = SkillLimits {
@@ -372,13 +856,25 @@ World!"#,
                 emoji: None,
                 always: false,
                 os: Vec::new(),
+                primary_env: None,
                 source: SkillSource::Workspace,
                 file_path: PathBuf::from(format!("skills/skill-{i}/SKILL.md")),
                 base_dir: PathBuf::from(format!("skills/skill-{i}")),
                 body: format!("Body {i}"),
+                format: crate::types::SkillFormat::Native,
+                manifest_version: "1".to_string(),
+                references: Vec::new(),
+                scripts: Vec::new(),
+                templates: Vec::new(),
+                assets: Vec::new(),
+                routines: Vec::new(),
+                workflow_bindings: Vec::new(),
                 requires: Default::default(),
                 capabilities: Default::default(),
+                policy: Default::default(),
                 install: Vec::new(),
+                import_source: None,
+                compatibility_notes: Vec::new(),
                 sha256: None,
                 trust_level: TrustLevel::Local,
             })
@@ -407,13 +903,25 @@ World!"#,
                 emoji: None,
                 always: false,
                 os: Vec::new(),
+                primary_env: None,
                 source: SkillSource::Workspace,
                 file_path: PathBuf::from(format!("skills/skill-{i}/SKILL.md")),
                 base_dir: PathBuf::from(format!("skills/skill-{i}")),
                 body: String::new(),
+                format: crate::types::SkillFormat::Native,
+                manifest_version: "1".to_string(),
+                references: Vec::new(),
+                scripts: Vec::new(),
+                templates: Vec::new(),
+                assets: Vec::new(),
+                routines: Vec::new(),
+                workflow_bindings: Vec::new(),
                 requires: Default::default(),
                 capabilities: Default::default(),
+                policy: Default::default(),
                 install: Vec::new(),
+                import_source: None,
+                compatibility_notes: Vec::new(),
                 sha256: None,
                 trust_level: TrustLevel::Local,
             })
@@ -439,13 +947,25 @@ World!"#,
             emoji: None,
             always,
             os: Vec::new(),
+            primary_env: None,
             source: SkillSource::Workspace,
             file_path: PathBuf::from(format!("skills/{name}/SKILL.md")),
             base_dir: PathBuf::from(format!("skills/{name}")),
             body: String::new(),
+            format: crate::types::SkillFormat::Native,
+            manifest_version: "1".to_string(),
+            references: Vec::new(),
+            scripts: Vec::new(),
+            templates: Vec::new(),
+            assets: Vec::new(),
+            routines: Vec::new(),
+            workflow_bindings: Vec::new(),
             requires: Default::default(),
             capabilities: Default::default(),
+            policy: Default::default(),
             install: Vec::new(),
+            import_source: None,
+            compatibility_notes: Vec::new(),
             sha256: None,
             trust_level: TrustLevel::Local,
         };
@@ -461,5 +981,58 @@ World!"#,
         assert_eq!(prompt.included_skills, 2);
         assert!(prompt.text.contains("always-1"));
         assert!(prompt.truncated); // 2nd regular was truncated.
+    }
+
+    #[tokio::test]
+    async fn hermes_compatible_skill_sets_import_metadata_and_indexes_support_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("skills");
+        let skill_dir = root.join("planner");
+        std::fs::create_dir_all(skill_dir.join("references/deep")).unwrap();
+        std::fs::create_dir_all(skill_dir.join("scripts")).unwrap();
+        std::fs::create_dir_all(skill_dir.join("templates")).unwrap();
+        std::fs::create_dir_all(skill_dir.join("assets")).unwrap();
+        std::fs::create_dir_all(skill_dir.join("routines")).unwrap();
+        std::fs::create_dir_all(skill_dir.join("workflows")).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            r#"---
+name: planner
+description: Hermes-style planner
+metadata:
+  hermes:
+    import_source: hermes://skills/planner
+    compatibility_notes:
+      - Requires review before enabling exec
+---
+
+# Planner
+"#,
+        )
+        .unwrap();
+        std::fs::write(skill_dir.join("references/deep/readme.md"), "ref").unwrap();
+        std::fs::write(skill_dir.join("scripts/run.sh"), "echo hi").unwrap();
+        std::fs::write(skill_dir.join("templates/prompt.md"), "template").unwrap();
+        std::fs::write(skill_dir.join("assets/icon.txt"), "asset").unwrap();
+        std::fs::write(skill_dir.join("routines/plan.json"), "{}").unwrap();
+        std::fs::write(skill_dir.join("workflows/build.yaml"), "name: build").unwrap();
+
+        let loader = SkillLoader::new(root, SkillLimits::default());
+        let skills = loader.load_all().await.unwrap();
+        let skill = skills.iter().find(|skill| skill.name == "planner").unwrap();
+        assert_eq!(
+            skill.import_source.as_deref(),
+            Some("hermes://skills/planner")
+        );
+        assert!(skill
+            .compatibility_notes
+            .iter()
+            .any(|note| note.contains("review")));
+        assert!(!skill.references.is_empty());
+        assert!(!skill.scripts.is_empty());
+        assert!(!skill.templates.is_empty());
+        assert!(!skill.assets.is_empty());
+        assert_eq!(skill.routines.len(), 1);
+        assert_eq!(skill.workflow_bindings.len(), 1);
     }
 }

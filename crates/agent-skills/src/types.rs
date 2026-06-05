@@ -3,6 +3,7 @@
 
 use serde::Deserializer;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 // ── Capabilities ───────────────────────────────────────────────────
@@ -164,9 +165,48 @@ pub enum InstallKind {
     Go,
     Uv,
     Download,
+    Manual,
 }
 
 // ── Skill package ──────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillFormat {
+    #[default]
+    Native,
+    Claude,
+    Codex,
+    HermesCompatible,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SkillPolicy {
+    #[serde(default)]
+    pub enabled_by_default: bool,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SkillRoutine {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub entrypoint: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WorkflowBinding {
+    pub id: String,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub target: String,
+}
 
 /// A fully parsed skill package.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -181,16 +221,40 @@ pub struct SkillPackage {
     pub always: bool,
     #[serde(default)]
     pub os: Vec<String>,
+    #[serde(default)]
+    pub primary_env: Option<String>,
     pub source: SkillSource,
     pub file_path: PathBuf,
     pub base_dir: PathBuf,
     pub body: String,
     #[serde(default)]
+    pub format: SkillFormat,
+    #[serde(default = "default_manifest_version")]
+    pub manifest_version: String,
+    #[serde(default)]
+    pub references: Vec<PathBuf>,
+    #[serde(default)]
+    pub scripts: Vec<PathBuf>,
+    #[serde(default)]
+    pub templates: Vec<PathBuf>,
+    #[serde(default)]
+    pub assets: Vec<PathBuf>,
+    #[serde(default)]
+    pub routines: Vec<SkillRoutine>,
+    #[serde(default)]
+    pub workflow_bindings: Vec<WorkflowBinding>,
+    #[serde(default)]
     pub requires: SkillRequirements,
     #[serde(default)]
     pub capabilities: SkillCapabilities,
     #[serde(default)]
+    pub policy: SkillPolicy,
+    #[serde(default)]
     pub install: Vec<InstallSpec>,
+    #[serde(default)]
+    pub import_source: Option<String>,
+    #[serde(default)]
+    pub compatibility_notes: Vec<String>,
     #[serde(default)]
     pub sha256: Option<String>,
     #[serde(default)]
@@ -215,6 +279,71 @@ pub enum TrustLevel {
     Local,
     #[default]
     Unknown,
+}
+
+fn default_manifest_version() -> String {
+    "1".to_string()
+}
+
+/// Ambient data used to evaluate skill requirements without mutating process state.
+#[derive(Debug, Clone, Default)]
+pub struct RequirementContext {
+    pub env_keys: BTreeSet<String>,
+    pub config_keys: BTreeSet<String>,
+}
+
+impl RequirementContext {
+    pub fn from_current_env() -> Self {
+        let env_keys = std::env::vars()
+            .map(|(key, _)| normalize_env_key(&key))
+            .collect();
+        Self {
+            env_keys,
+            config_keys: BTreeSet::new(),
+        }
+    }
+
+    pub fn with_config_keys<I, S>(mut self, keys: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.config_keys.extend(
+            keys.into_iter()
+                .map(|key| normalize_config_key(key.as_ref()))
+                .filter(|key| !key.is_empty()),
+        );
+        self
+    }
+
+    pub fn with_env_keys<I, S>(mut self, keys: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.env_keys.extend(
+            keys.into_iter()
+                .map(|key| normalize_env_key(key.as_ref()))
+                .filter(|key| !key.is_empty()),
+        );
+        self
+    }
+
+    pub fn has_env(&self, key: &str) -> bool {
+        self.env_keys.contains(&normalize_env_key(key))
+    }
+
+    pub fn has_config(&self, key: &str) -> bool {
+        self.config_keys.contains(&normalize_config_key(key))
+    }
+}
+
+pub fn normalize_env_key(key: &str) -> String {
+    key.trim().to_ascii_uppercase()
+}
+
+pub fn normalize_config_key(key: &str) -> String {
+    key.trim().to_ascii_lowercase()
 }
 
 // ── Tests ──────────────────────────────────────────────────────────

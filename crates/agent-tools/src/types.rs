@@ -35,6 +35,25 @@ pub struct ToolContext {
     pub mode: ExecutionMode,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionDomain {
+    Inference,
+    #[default]
+    Tools,
+    Memory,
+    System,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionPriority {
+    Low,
+    #[default]
+    Normal,
+    High,
+}
+
 /// Controls what a tool is allowed to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ExecutionMode {

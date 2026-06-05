@@ -5,12 +5,12 @@
 
 use crate::resolver::ResolverError;
 use crate::types::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// Raw YAML frontmatter as deserialized from a SKILL.md.
 ///
-/// This maps 1:1 to the YAML keys found in OpenClaw/NanoBot skill files.
+/// This maps 1:1 to the YAML keys found in supported skill files.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RawFrontmatter {
     pub name: String,
@@ -26,17 +26,23 @@ pub struct RawFrontmatter {
     pub metadata: Option<serde_json::Value>,
 }
 
-/// Metadata block nested inside `metadata.openclaw` or `metadata.nanobot`.
+/// Metadata block nested inside supported compatibility namespaces.
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct CompatMetadata {
     #[serde(default)]
     pub emoji: Option<String>,
+    #[serde(default, rename = "primaryEnv")]
+    pub primary_env: Option<String>,
     #[serde(default)]
     pub requires: Option<CompatRequires>,
     #[serde(default)]
     pub install: Vec<InstallSpec>,
     #[serde(default)]
     pub capabilities: Option<SkillCapabilities>,
+    #[serde(default)]
+    pub import_source: Option<String>,
+    #[serde(default)]
+    pub compatibility_notes: Vec<String>,
 }
 
 /// Requirements inside the compatibility metadata block.
@@ -49,6 +55,8 @@ pub struct CompatRequires {
     pub any_bins: Vec<String>,
     #[serde(default)]
     pub env: Vec<String>,
+    #[serde(default)]
+    pub config: Vec<String>,
 }
 
 /// Result of parsing a SKILL.md file.
@@ -57,6 +65,7 @@ pub struct ParsedSkill {
     pub frontmatter: RawFrontmatter,
     pub body: String,
     pub compat: CompatMetadata,
+    pub format: SkillFormat,
 }
 
 /// Parse the frontmatter + body from a SKILL.md string.
@@ -100,33 +109,37 @@ pub fn parse_frontmatter(content: &str) -> Result<ParsedSkill, ResolverError> {
             message: format!("invalid YAML frontmatter: {e}"),
         })?;
 
-    // Extract compatibility metadata (openclaw or nanobot).
-    let compat = extract_compat_metadata(&frontmatter.metadata);
+    // Extract compatibility metadata from supported agent ecosystems.
+    let (compat, format) = extract_compat_metadata(&frontmatter.metadata);
 
     Ok(ParsedSkill {
         frontmatter,
         body,
         compat,
+        format,
     })
 }
 
 /// Extract `CompatMetadata` from the `metadata` JSON value,
-/// checking `metadata.openclaw` first, then `metadata.nanobot`.
-fn extract_compat_metadata(metadata: &Option<serde_json::Value>) -> CompatMetadata {
+/// checking compatibility keys used by the supported agent ecosystems.
+fn extract_compat_metadata(metadata: &Option<serde_json::Value>) -> (CompatMetadata, SkillFormat) {
     let Some(meta) = metadata else {
-        return CompatMetadata::default();
+        return (CompatMetadata::default(), SkillFormat::Native);
     };
 
-    // Try openclaw first, then nanobot.
-    for key in &["openclaw", "nanobot"] {
+    for (key, format) in [
+        ("hermes", SkillFormat::HermesCompatible),
+        ("claude", SkillFormat::Claude),
+        ("codex", SkillFormat::Codex),
+    ] {
         if let Some(inner) = meta.get(key) {
             if let Ok(parsed) = serde_json::from_value::<CompatMetadata>(inner.clone()) {
-                return parsed;
+                return (parsed, format);
             }
         }
     }
 
-    CompatMetadata::default()
+    (CompatMetadata::default(), SkillFormat::Native)
 }
 
 /// Convert a [`ParsedSkill`] into a full [`SkillPackage`].
@@ -147,7 +160,7 @@ pub fn to_skill_package(
             bins: req.bins.clone(),
             any_bins: req.any_bins.clone(),
             env: req.env.clone(),
-            config: Vec::new(),
+            config: req.config.clone(),
         },
         None => SkillRequirements::default(),
     };
@@ -164,16 +177,98 @@ pub fn to_skill_package(
         emoji: compat.emoji.clone(),
         always: fm.always,
         os: fm.os.clone(),
+        primary_env: compat
+            .primary_env
+            .clone()
+            .or_else(|| requires.env.first().cloned()),
         source,
         file_path: file_path.to_path_buf(),
         base_dir,
         body,
+        format: parsed.format.clone(),
+        manifest_version: "1".to_string(),
+        references: collect_support_files(file_path, "references"),
+        scripts: collect_support_files(file_path, "scripts"),
+        templates: collect_support_files(file_path, "templates"),
+        assets: collect_support_files(file_path, "assets"),
+        routines: collect_routines(file_path),
+        workflow_bindings: collect_workflow_bindings(file_path),
         requires,
         capabilities: compat.capabilities.clone().unwrap_or_default(),
+        policy: SkillPolicy {
+            enabled_by_default: fm.always,
+            tags: Vec::new(),
+        },
         install: compat.install.clone(),
+        import_source: compat.import_source.clone(),
+        compatibility_notes: compat.compatibility_notes.clone(),
         sha256: None,
         trust_level,
     }
+}
+
+fn collect_support_files(file_path: &Path, folder_name: &str) -> Vec<PathBuf> {
+    let base_dir = file_path.parent().unwrap_or(Path::new("."));
+    let target = base_dir.join(folder_name);
+    collect_files_recursive(&target)
+}
+
+fn collect_routines(file_path: &Path) -> Vec<SkillRoutine> {
+    let base_dir = file_path.parent().unwrap_or(Path::new("."));
+    collect_files_recursive(&base_dir.join("routines"))
+        .into_iter()
+        .map(|path| SkillRoutine {
+            id: path
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("routine")
+                .to_string(),
+            name: path
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("routine")
+                .replace(['_', '-'], " "),
+            description: String::new(),
+            entrypoint: Some(path),
+        })
+        .collect()
+}
+
+fn collect_workflow_bindings(file_path: &Path) -> Vec<WorkflowBinding> {
+    let base_dir = file_path.parent().unwrap_or(Path::new("."));
+    collect_files_recursive(&base_dir.join("workflows"))
+        .into_iter()
+        .map(|path| WorkflowBinding {
+            id: path
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("workflow")
+                .to_string(),
+            kind: path
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or("file")
+                .to_string(),
+            target: path.display().to_string(),
+        })
+        .collect()
+}
+
+fn collect_files_recursive(root: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut files = Vec::new();
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.is_dir() {
+            files.extend(collect_files_recursive(&path));
+        } else if path.is_file() {
+            files.push(path);
+        }
+    }
+    files.sort();
+    files
 }
 
 /// Check if a skill passes OS filtering for the current platform.
@@ -185,8 +280,22 @@ pub fn matches_current_os(skill: &SkillPackage) -> bool {
     skill.os.iter().any(|os| os.eq_ignore_ascii_case(current))
 }
 
-/// Get the current OS tag matching OpenClaw conventions.
-fn current_os_tag() -> &'static str {
+pub fn check_skill_requirements(
+    skill: &SkillPackage,
+    context: &RequirementContext,
+) -> RequirementCheck {
+    let mut result = check_requirements_with_context(&skill.requires, context);
+    result.os_supported = matches_current_os(skill);
+    result.satisfied = result.os_supported
+        && result.missing_bins.is_empty()
+        && result.any_bins_satisfied
+        && result.missing_env.is_empty()
+        && result.missing_config.is_empty();
+    result
+}
+
+/// Get the current OS tag used by the skill compatibility metadata.
+pub fn current_os_tag() -> &'static str {
     if cfg!(target_os = "macos") {
         "macos"
     } else if cfg!(target_os = "windows") {
@@ -200,8 +309,16 @@ fn current_os_tag() -> &'static str {
 
 /// Check if required binaries are available on PATH.
 pub fn check_requirements(requires: &SkillRequirements) -> RequirementCheck {
+    check_requirements_with_context(requires, &RequirementContext::from_current_env())
+}
+
+pub fn check_requirements_with_context(
+    requires: &SkillRequirements,
+    context: &RequirementContext,
+) -> RequirementCheck {
     let mut missing_bins = Vec::new();
     let mut missing_env = Vec::new();
+    let mut missing_config = Vec::new();
 
     // Check bins (all must be present).
     for bin in &requires.bins {
@@ -211,34 +328,76 @@ pub fn check_requirements(requires: &SkillRequirements) -> RequirementCheck {
     }
 
     // Check any_bins (at least one must be present).
-    let any_bins_ok = if requires.any_bins.is_empty() {
-        true
-    } else {
-        requires.any_bins.iter().any(|b| which_exists(b).is_some())
-    };
+    let satisfied_any_bin = requires
+        .any_bins
+        .iter()
+        .find(|bin| which_exists(bin).is_some())
+        .cloned();
+    let any_bins_ok = requires.any_bins.is_empty() || satisfied_any_bin.is_some();
 
     // Check env vars.
     for var in &requires.env {
-        if std::env::var(var).is_err() {
+        if !context.has_env(var) {
             missing_env.push(var.clone());
         }
     }
 
+    for key in &requires.config {
+        if !context.has_config(key) {
+            missing_config.push(key.clone());
+        }
+    }
+
     RequirementCheck {
-        satisfied: missing_bins.is_empty() && any_bins_ok && missing_env.is_empty(),
+        satisfied: missing_bins.is_empty()
+            && any_bins_ok
+            && missing_env.is_empty()
+            && missing_config.is_empty(),
+        os_supported: true,
         missing_bins,
         any_bins_satisfied: any_bins_ok,
+        satisfied_any_bin,
+        missing_any_bins: if any_bins_ok {
+            Vec::new()
+        } else {
+            requires.any_bins.clone()
+        },
         missing_env,
+        missing_config,
     }
 }
 
 /// Result of checking skill requirements.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequirementCheck {
     pub satisfied: bool,
+    pub os_supported: bool,
     pub missing_bins: Vec<String>,
     pub any_bins_satisfied: bool,
+    pub satisfied_any_bin: Option<String>,
+    pub missing_any_bins: Vec<String>,
     pub missing_env: Vec<String>,
+    pub missing_config: Vec<String>,
+}
+
+impl RequirementCheck {
+    pub fn missing_items(&self) -> Vec<String> {
+        let mut missing = Vec::new();
+        if !self.os_supported {
+            missing.push(format!("os:{current}", current = current_os_tag()));
+        }
+        missing.extend(self.missing_bins.iter().map(|value| format!("bin:{value}")));
+        if !self.any_bins_satisfied && !self.missing_any_bins.is_empty() {
+            missing.push(format!("anyBin:{}", self.missing_any_bins.join("|")));
+        }
+        missing.extend(self.missing_env.iter().map(|value| format!("env:{value}")));
+        missing.extend(
+            self.missing_config
+                .iter()
+                .map(|value| format!("config:{value}")),
+        );
+        missing
+    }
 }
 
 /// Minimal cross-platform "which" — just check if a file is findable on PATH.
@@ -268,7 +427,7 @@ mod tests {
 name: weather
 description: Get current weather and forecasts (no API key required).
 homepage: https://wttr.in/:help
-metadata: {"nanobot":{"emoji":"🌤️","requires":{"bins":["curl"]}}}
+metadata: {"hermes":{"emoji":"🌤️","requires":{"bins":["curl"]}}}
 ---
 
 # Weather
@@ -297,7 +456,7 @@ name: apple-notes
 description: macOS only skill.
 os:
   - macos
-metadata: {"openclaw":{"emoji":"📝","requires":{"bins":["osascript"]}}}
+metadata: {"hermes":{"emoji":"📝","requires":{"bins":["osascript"]}}}
 ---
 
 # Apple Notes
@@ -308,7 +467,7 @@ macOS only.
 name: github
 description: "GitHub operations via gh CLI."
 metadata:
-  openclaw:
+  hermes:
     emoji: "🐙"
     requires:
       bins:
@@ -330,7 +489,7 @@ Use the `gh` CLI.
 name: coding-agent
 description: "Delegate coding tasks."
 metadata:
-  openclaw:
+  hermes:
     emoji: "🧩"
     requires:
       anyBins:
@@ -346,7 +505,7 @@ metadata:
 name: admin-tool
 description: "Needs capabilities"
 metadata:
-  openclaw:
+  hermes:
     capabilities:
       fs_read: true
       fs_write: true
@@ -358,6 +517,38 @@ metadata:
 ---
 
 # Admin
+"#;
+
+    const CONFIGURED_SKILL: &str = r#"---
+name: summarize
+description: "Needs env and config"
+metadata:
+  hermes:
+    primaryEnv: OPENAI_API_KEY
+    requires:
+      env:
+        - OPENAI_API_KEY
+      config:
+        - provider
+---
+
+# Summarize
+"#;
+
+    const CLAUDE_COMPAT_SKILL: &str = r#"---
+name: claude-ops
+description: "Claude compatibility metadata"
+metadata:
+  claude:
+    requires:
+      bins:
+        - rg
+    capabilities:
+      fs_read: true
+      exec: true
+---
+
+# Claude Ops
 "#;
 
     #[test]
@@ -436,6 +627,34 @@ metadata:
             caps.exec_commands,
             vec!["ls".to_string(), "cat".to_string()]
         );
+    }
+
+    #[test]
+    fn parse_primary_env_and_config_requirements() {
+        let parsed = parse_frontmatter(CONFIGURED_SKILL).unwrap();
+        let pkg = to_skill_package(
+            &parsed,
+            Path::new("/skills/summarize/SKILL.md"),
+            SkillSource::Workspace,
+            TrustLevel::Local,
+        );
+        assert_eq!(pkg.primary_env.as_deref(), Some("OPENAI_API_KEY"));
+        assert_eq!(pkg.requires.env, vec!["OPENAI_API_KEY".to_string()]);
+        assert_eq!(pkg.requires.config, vec!["provider".to_string()]);
+    }
+
+    #[test]
+    fn parse_claude_compat_metadata() {
+        let parsed = parse_frontmatter(CLAUDE_COMPAT_SKILL).unwrap();
+        let pkg = to_skill_package(
+            &parsed,
+            Path::new("/skills/claude-ops/SKILL.md"),
+            SkillSource::Workspace,
+            TrustLevel::Local,
+        );
+        assert_eq!(pkg.requires.bins, vec!["rg".to_string()]);
+        assert!(pkg.capabilities.allows_fs_read());
+        assert!(pkg.capabilities.allows_exec());
     }
 
     #[test]
@@ -536,5 +755,22 @@ Run: `{baseDir}/scripts/run.sh`
         let req = SkillRequirements::default();
         let check = check_requirements(&req);
         assert!(check.satisfied);
+    }
+
+    #[test]
+    fn requirement_check_uses_context_for_env_and_config() {
+        let req = SkillRequirements {
+            bins: Vec::new(),
+            any_bins: Vec::new(),
+            env: vec!["OPENAI_API_KEY".into()],
+            config: vec!["provider".into()],
+        };
+        let context = RequirementContext::default()
+            .with_env_keys(["OPENAI_API_KEY"])
+            .with_config_keys(["provider"]);
+        let check = check_requirements_with_context(&req, &context);
+        assert!(check.satisfied);
+        assert!(check.missing_env.is_empty());
+        assert!(check.missing_config.is_empty());
     }
 }

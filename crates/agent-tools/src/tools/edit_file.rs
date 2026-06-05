@@ -1,5 +1,6 @@
 //! `EditFileTool` — find-and-replace edit within the sandbox.
 
+use crate::checkpoints::record_file_checkpoint;
 use crate::sandbox::assert_sandbox_path;
 use crate::types::{ExecutionMode, ParamSchema, ToolContext, ToolError, ToolResult};
 use serde_json::Value;
@@ -88,12 +89,16 @@ impl crate::Tool for EditFileTool {
             })?;
 
         let safe_path = assert_sandbox_path(&ctx.workspace_root, path_str)?;
-
-        let content = tokio::fs::read_to_string(&safe_path).await.map_err(|e| {
-            ToolError::ExecutionFailed {
-                message: format!("failed to read '{}': {e}", safe_path.display()),
-            }
-        })?;
+        let previous_bytes =
+            tokio::fs::read(&safe_path)
+                .await
+                .map_err(|e| ToolError::ExecutionFailed {
+                    message: format!("failed to snapshot '{}': {e}", safe_path.display()),
+                })?;
+        let content =
+            String::from_utf8(previous_bytes.clone()).map_err(|_| ToolError::ExecutionFailed {
+                message: format!("'{}' is not valid UTF-8 for edit_file", safe_path.display()),
+            })?;
 
         if !content.contains(old_text) {
             return Err(ToolError::ExecutionFailed {
@@ -108,6 +113,23 @@ impl crate::Tool for EditFileTool {
                 message: format!("failed to write '{}': {e}", safe_path.display()),
             })?;
 
+        let checkpoint = record_file_checkpoint(
+            &ctx.workspace_root,
+            &ctx.session_id,
+            self.name(),
+            path_str,
+            Some(previous_bytes.as_slice()),
+            new_content.as_bytes(),
+        )
+        .await?;
+
+        let mut metadata = HashMap::new();
+        metadata.insert("checkpoint_id".to_string(), Value::String(checkpoint.id));
+        metadata.insert(
+            "checkpoint_path".to_string(),
+            Value::String(checkpoint.relative_path),
+        );
+
         Ok(ToolResult {
             output: format!(
                 "Edited '{}': replaced {} bytes with {} bytes",
@@ -116,7 +138,7 @@ impl crate::Tool for EditFileTool {
                 new_text.len()
             ),
             is_error: false,
-            metadata: HashMap::new(),
+            metadata,
         })
     }
 }
