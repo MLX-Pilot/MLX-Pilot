@@ -120,69 +120,9 @@
     channels: [],
     environmentVars: [],
     agentProviderOptions: [],
-    consoleEntries: [],
-    desktopLogEntries: [],
-    desktopRuntimeInfo: null,
-    pendingAgentShortcut: null,
     activeDiscoverTab: 'catalog',
     activePanel: 'chat',
   };
-
-  const originalConsole = {
-    log: console.log.bind(console),
-    info: console.info.bind(console),
-    warn: console.warn.bind(console),
-    error: console.error.bind(console),
-  };
-
-  function nativeInvoke(command, args = {}) {
-    const invoke = window.__TAURI__?.core?.invoke || window.__TAURI__?.tauri?.invoke;
-    if (typeof invoke !== 'function') {
-      return Promise.reject(new Error('Runtime Tauri indisponivel'));
-    }
-    return invoke(command, args);
-  }
-
-  function stringifyConsoleArg(value) {
-    if (value instanceof Error) return value.stack || value.message;
-    if (typeof value === 'string') return value;
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  }
-
-  function pushConsoleEntry(level, source, message) {
-    const entry = {
-      time: new Date().toISOString(),
-      level: String(level || 'info').toLowerCase(),
-      source: source || 'ui',
-      message: String(message || '').replace(/\s+/g, ' ').trim(),
-    };
-    state.consoleEntries.push(entry);
-    if (state.consoleEntries.length > 300) state.consoleEntries.shift();
-    void nativeInvoke('desktop_log_append', {
-      level: entry.level,
-      message: `${entry.source}: ${entry.message}`,
-    }).catch(() => {});
-    renderConsole();
-  }
-
-  ['log', 'info', 'warn', 'error'].forEach((level) => {
-    console[level] = (...args) => {
-      originalConsole[level](...args);
-      pushConsoleEntry(level === 'log' ? 'info' : level, 'ui', args.map(stringifyConsoleArg).join(' '));
-    };
-  });
-
-  window.addEventListener('error', (event) => {
-    pushConsoleEntry('error', 'window', `${event.message || 'Erro sem mensagem'} ${event.filename || ''}:${event.lineno || 0}`);
-  });
-
-  window.addEventListener('unhandledrejection', (event) => {
-    pushConsoleEntry('error', 'promise', stringifyConsoleArg(event.reason || 'Promise rejeitada sem motivo'));
-  });
 
   function stripModelDecoration(value) {
     return String(value || '')
@@ -1005,7 +945,6 @@
       localStorage.setItem('mlxPilotDaemonUrl', candidate);
       updateSidebarDaemonUrl();
       updateStatusBadge(state.healthOk);
-      pushConsoleEntry('info', 'daemon', `Conectado em ${candidate}`);
       return health;
     }
 
@@ -1014,7 +953,6 @@
     state.provider = '';
     updateSidebarDaemonUrl(`Daemon ${state.daemonUrl.replace(/^https?:\/\//, '')} indisponivel`);
     updateStatusBadge(false);
-    pushConsoleEntry('warn', 'daemon', `Nenhum daemon respondeu. Tentativas: ${candidates.join(', ')}`);
     return null;
   }
 
@@ -1036,7 +974,6 @@
       loadChannels(),
       loadAudit(),
       loadEnvironment(),
-      loadConsoleSnapshot(),
     ]);
   }
 
@@ -1630,65 +1567,6 @@
     }));
   }
 
-  function isWebSearchEnabled() {
-    const toggle = document.getElementById('web-search-toggle');
-    if (toggle) return toggle.classList.contains('active');
-    return Boolean(state.webSearchEnabled);
-  }
-
-  function renderWebSearchContext(searchResponse) {
-    const results = Array.isArray(searchResponse?.results) ? searchResponse.results : [];
-    if (!results.length) return '';
-
-    const lines = results.slice(0, 5).map((result, index) => {
-      const title = String(result.title || '').trim();
-      const url = String(result.url || '').trim();
-      const description = String(result.description || '').trim();
-      return [
-        `${index + 1}. ${title || url || 'Resultado sem titulo'}`,
-        url ? `URL: ${url}` : '',
-        description ? `Resumo: ${description}` : '',
-      ].filter(Boolean).join('\n');
-    });
-
-    return [
-      'Contexto de busca web recente. Use estes resultados quando responder e deixe claro quando a informacao veio da web.',
-      `Consulta: ${searchResponse.query || ''}`,
-      '',
-      lines.join('\n\n'),
-    ].join('\n');
-  }
-
-  async function buildWebAugmentedMessages(userText) {
-    if (!isWebSearchEnabled()) return state.messages;
-
-    try {
-      const searchResponse = await api('/web/brave/search', {
-        method: 'POST',
-        timeoutMs: API_SLOW_TIMEOUT_MS,
-        body: JSON.stringify({
-          query: userText,
-          max_results: 5,
-        }),
-      });
-      const webContext = renderWebSearchContext(searchResponse);
-      const resultCount = Array.isArray(searchResponse?.results) ? searchResponse.results.length : 0;
-      if (!webContext) {
-        addSystemMsg('Busca web executada, mas nenhum resultado relevante foi retornado.');
-        return state.messages;
-      }
-      addSystemMsg(`Busca web anexada ao contexto (${resultCount} resultado${resultCount === 1 ? '' : 's'}).`);
-      return [
-        { role: 'system', content: webContext },
-        ...state.messages,
-      ];
-    } catch (error) {
-      addSystemMsg(`Busca web nao executada: ${error.message}`);
-      pushConsoleEntry('warn', 'web', `Busca web falhou: ${error.message}`);
-      return state.messages;
-    }
-  }
-
   // -- Catalog ------------------------------------------------
   async function searchCatalog(query) {
     try {
@@ -1763,14 +1641,13 @@
 
     state.messages.push({ role: 'user', content: text });
     const assistantEl = addMessage('assistant', '');
-    state.isStreaming = true;
-    const outboundMessages = await buildWebAugmentedMessages(text);
 
+    state.isStreaming = true;
     state.streamController = new AbortController();
 
     const payload = {
       model_id: modelId,
-      messages: outboundMessages,
+      messages: state.messages,
       options: { temperature: 0.2, airllm_enabled: state.airllmEnabled },
     };
 
@@ -1981,7 +1858,6 @@
     let streamedThinking = '';
     let rawAnswer = '';
     let metrics = {};
-    pushConsoleEntry('info', 'agent', `Iniciando stream: provider=${payload.provider || '-'} model=${payload.model_id || '-'} session=${payload.session_id || 'nova'}`);
 
     const res = await fetch(state.daemonUrl + '/agent/stream', {
       method: 'POST',
@@ -2010,7 +1886,6 @@
         if (!line) continue;
         const evt = JSON.parse(line);
         if (evt.event === 'status') {
-          pushConsoleEntry('info', 'agent', `Status: ${evt.status || 'desconhecido'} session=${evt.session_id || payload.session_id || '-'}`);
           updateStreamStatus(assistantEl, evt.status);
         } else if (evt.event === 'thinking_delta') {
           streamedThinking += evt.delta || '';
@@ -2019,24 +1894,19 @@
           rawAnswer += evt.delta || '';
           renderAssistantOutput(assistantEl, { rawAnswer, streamedThinking });
         } else if (evt.event === 'tool_call_started') {
-          pushConsoleEntry('info', 'agent-tool', `Iniciada: ${evt.tool || '?'} session=${evt.session_id || payload.session_id || '-'}`);
           streamedThinking = joinThinkingSections(streamedThinking, `Executando tool '${evt.tool || '?'}'...`);
           renderAssistantOutput(assistantEl, { rawAnswer, streamedThinking });
         } else if (evt.event === 'tool_call_completed') {
           const preview = evt.message ? `: ${evt.message}` : '';
-          pushConsoleEntry('info', 'agent-tool', `Concluida: ${evt.tool || '?'}${preview}`);
           streamedThinking = joinThinkingSections(streamedThinking, `Tool '${evt.tool || '?'}' concluida${preview}`);
           renderAssistantOutput(assistantEl, { rawAnswer, streamedThinking });
         } else if (evt.event === 'tool_call_denied') {
           const preview = evt.message ? `: ${evt.message}` : '';
-          pushConsoleEntry('warn', 'agent-tool', `Negada: ${evt.tool || '?'}${preview}`);
           streamedThinking = joinThinkingSections(streamedThinking, `Tool '${evt.tool || '?'}' negada${preview}`);
           renderAssistantOutput(assistantEl, { rawAnswer, streamedThinking });
         } else if (evt.event === 'done') {
           metrics = { ...metrics, ...evt };
-          pushConsoleEntry('info', 'agent', `Concluido: tokens=${evt.total_tokens ?? '-'} tempo=${evt.latency_ms ?? '-'}ms session=${evt.session_id || payload.session_id || '-'}`);
         } else if (evt.event === 'error') {
-          pushConsoleEntry('error', 'agent', evt.message || 'Falha no streaming do agent');
           throw new Error(evt.message || 'Falha no streaming do agent');
         }
       }
@@ -2354,101 +2224,6 @@
     updateAgentWorkspaceSummary();
   }
 
-  // -- Console ------------------------------------------------
-  function formatConsoleEntry(entry) {
-    const time = entry?.time
-      ? new Date(entry.time).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-      : '--:--:--';
-    return `${time} [${String(entry?.level || 'info').toUpperCase()}] ${entry?.source || 'ui'} - ${entry?.message || ''}`;
-  }
-
-  function normalizeNativeLogLine(line) {
-    const raw = String(line || '').trim();
-    const match = raw.match(/^(\d{10,})\s+(\[[^\]]+\])\s+(.*)$/);
-    if (!match) return raw;
-    const date = new Date(Number(match[1]));
-    const time = Number.isNaN(date.getTime())
-      ? match[1]
-      : date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    return `${time} ${match[2]} native - ${match[3]}`;
-  }
-
-  function consoleText() {
-    const uiLines = state.consoleEntries.map(formatConsoleEntry);
-    const nativeLines = state.desktopLogEntries.map(normalizeNativeLogLine);
-    return [
-      '== UI ==',
-      ...(uiLines.length ? uiLines : ['Sem eventos de UI nesta sessao.']),
-      '',
-      '== Native ==',
-      ...(nativeLines.length ? nativeLines : ['Log nativo indisponivel ou vazio.']),
-    ].join('\n');
-  }
-
-  function renderConsole() {
-    const feed = document.getElementById('console-feed');
-    if (!feed) return;
-    const textValue = consoleText();
-    feed.textContent = textValue;
-    feed.scrollTop = feed.scrollHeight;
-
-    const count = document.getElementById('console-entry-count');
-    if (count) {
-      count.textContent = `${state.consoleEntries.length + state.desktopLogEntries.length} linhas`;
-    }
-  }
-
-  function renderConsoleStatus(health) {
-    const healthEl = document.getElementById('console-health');
-    const daemonUrlEl = document.getElementById('console-daemon-url');
-    const processEl = document.getElementById('console-process');
-    const runtimeEl = document.getElementById('console-runtime');
-    const logPathEl = document.getElementById('console-log-path');
-    const refreshedEl = document.getElementById('console-last-refresh');
-    const runtime = state.desktopRuntimeInfo || {};
-
-    if (healthEl) healthEl.textContent = health?.status === 'ok' ? 'Online' : 'Offline';
-    if (daemonUrlEl) daemonUrlEl.textContent = state.daemonUrl || runtime.daemon_url || '-';
-    if (processEl) processEl.textContent = runtime.pid ? `PID ${runtime.pid}` : 'Navegador';
-    if (runtimeEl) runtimeEl.textContent = runtime.embedded_daemon_enabled === false ? 'Daemon externo' : 'Daemon embutido';
-    if (logPathEl) logPathEl.textContent = runtime.log_path || 'Indisponivel no navegador';
-    if (refreshedEl) refreshedEl.textContent = `Atualizado ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
-  }
-
-  async function loadConsoleSnapshot() {
-    const health = await probeDaemon(state.daemonUrl, 900);
-    try {
-      state.desktopRuntimeInfo = await nativeInvoke('desktop_runtime_info');
-    } catch {
-      state.desktopRuntimeInfo = null;
-    }
-
-    try {
-      const snapshot = await nativeInvoke('desktop_log_snapshot', { limit: 220 });
-      state.desktopLogEntries = Array.isArray(snapshot?.entries) ? snapshot.entries : [];
-      if (snapshot?.path && !state.desktopRuntimeInfo) {
-        state.desktopRuntimeInfo = { log_path: snapshot.path };
-      }
-    } catch {
-      state.desktopLogEntries = [];
-    }
-
-    renderConsoleStatus(health);
-    renderConsole();
-  }
-
-  async function clearConsole() {
-    state.consoleEntries = [];
-    state.desktopLogEntries = [];
-    try {
-      await nativeInvoke('desktop_log_clear');
-    } catch {
-      /* Browser preview has no native log to clear. */
-    }
-    pushConsoleEntry('info', 'console', 'Console limpo');
-    renderConsole();
-  }
-
   // -- Environment --------------------------------------------
   async function loadEnvironment() {
     try {
@@ -2634,7 +2409,6 @@
       updateAgentWorkspaceSummary();
     }
     if (target === 'ai-interaction') initAICanvas();
-    if (target === 'console') void loadConsoleSnapshot();
   }
 
   document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => switchTab(tab.dataset.panel)));
@@ -2693,155 +2467,6 @@
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(() => { if (e.target.value.trim().length >= 2) searchCatalog(e.target.value.trim()); }, 500);
   });
-
-  function enabledNames(items, key = 'name') {
-    return (Array.isArray(items) ? items : [])
-      .filter(item => item?.enabled !== false && item?.active !== false)
-      .map(item => item?.[key] || item?.id || item?.plugin_id || item?.name)
-      .filter(Boolean);
-  }
-
-  function disabledNames(items, key = 'name') {
-    return (Array.isArray(items) ? items : [])
-      .filter(item => item?.enabled === false || item?.active === false)
-      .map(item => item?.[key] || item?.id || item?.plugin_id || item?.name)
-      .filter(Boolean);
-  }
-
-  async function loadAgentShortcutSnapshot() {
-    const read = async (path, fallback) => {
-      try { return await api(path); } catch { return fallback; }
-    };
-    const [config, tools, channels, audit, plugins, skills] = await Promise.all([
-      read('/agent/config', state.agentConfig || {}),
-      read('/agent/tools', state.tools || []),
-      read('/agent/channels', state.channels || []),
-      read('/agent/audit?limit=30', { entries: state.auditEntries || [] }),
-      read('/agent/plugins', state.plugins || []),
-      read('/agent/skills/check', { skills: state.skills || [] }),
-    ]);
-    return {
-      config: config || {},
-      tools: Array.isArray(tools) ? tools : [],
-      channels: Array.isArray(channels) ? channels : [],
-      auditEntries: Array.isArray(audit?.entries) ? audit.entries : [],
-      plugins: Array.isArray(plugins) ? plugins : [],
-      skills: Array.isArray(skills?.skills) ? skills.skills : [],
-    };
-  }
-
-  function channelActionItems(channels) {
-    const actions = [];
-    (Array.isArray(channels) ? channels : []).forEach(channel => {
-      const id = channel.channel_id || channel.id || channel.name || 'channel';
-      const accounts = Array.isArray(channel.accounts) ? channel.accounts : [];
-      if (!accounts.length) {
-        actions.push(`${id}: sem conta configurada`);
-        return;
-      }
-      accounts.forEach(account => {
-        const accountId = account.account_id || account.id || 'default';
-        const connected = account.status === 'connected' || account.enabled === true;
-        if (!connected) actions.push(`${id}/${accountId}: desconectado`);
-      });
-    });
-    return actions;
-  }
-
-  function riskyAuditItems(entries) {
-    return (Array.isArray(entries) ? entries : []).filter(entry => {
-      const text = `${entry.status || ''} ${entry.event_type || ''} ${entry.summary || ''}`.toLowerCase();
-      return /denied|failed|error|panic|block|risco|falha|negad/.test(text);
-    });
-  }
-
-  function formatBulletList(items, emptyText) {
-    return items.length ? items.map(item => `- ${item}`).join('\n') : `- ${emptyText}`;
-  }
-
-  function buildAgentShortcutResponse(kind, snapshot) {
-    const cfg = snapshot.config || {};
-    const agentCfg = cfg.agent || cfg;
-    const provider = agentCfg.provider || state.agentConfig?.provider || 'ollama';
-    const model = activeAgentModelId() || agentCfg.model_id || agentCfg.model || '-';
-    const execution = agentCfg.execution_mode || 'full';
-    const approval = agentCfg.approval_mode || 'ask';
-    const enabledTools = enabledNames(snapshot.tools);
-    const disabledTools = disabledNames(snapshot.tools);
-    const activePlugins = enabledNames(snapshot.plugins, 'id');
-    const inactivePlugins = disabledNames(snapshot.plugins, 'id');
-    const activeSkills = enabledNames(snapshot.skills);
-    const inactiveSkills = disabledNames(snapshot.skills);
-
-    if (kind === 'runtime') {
-      const suggestions = [];
-      if (!enabledTools.includes('exec')) suggestions.push('`exec` esta desativada; mantenha assim para uso seguro ou habilite apenas quando precisar executar comandos.');
-      if (!enabledTools.includes('grep')) suggestions.push('Habilite `grep` para auditorias de codigo mais precisas.');
-      if (approval === 'deny') suggestions.push('Approval em `deny` bloqueia acoes operacionais; use `ask` para fluxo assistido.');
-      if (!suggestions.length) suggestions.push('Runtime coerente para operacao local: ferramentas principais ativas e aprovacao assistida.');
-      return [
-        '## Runtime e politicas',
-        `- Provider: ${provider}`,
-        `- Modelo: ${model}`,
-        `- Execucao: ${execution}`,
-        `- Approval: ${approval}`,
-        `- Tools ativas: ${enabledTools.join(', ') || 'nenhuma'}`,
-        `- Tools desativadas: ${disabledTools.join(', ') || 'nenhuma'}`,
-        '',
-        '## Ajustes sugeridos',
-        formatBulletList(suggestions, 'Nenhum ajuste imediato.'),
-      ].join('\n');
-    }
-
-    if (kind === 'integrations') {
-      const channelActions = channelActionItems(snapshot.channels);
-      const pluginActions = inactivePlugins.map(name => `${name}: plugin desativado`);
-      const skillActions = inactiveSkills.map(name => `${name}: skill inativa ou inelegivel`);
-      return [
-        '## Integracoes ativas',
-        `- Channels encontrados: ${snapshot.channels.length}`,
-        `- Plugins ativos: ${activePlugins.join(', ') || 'nenhum'}`,
-        `- Skills ativas: ${activeSkills.join(', ') || 'nenhuma'}`,
-        '',
-        '## Acao imediata',
-        formatBulletList([...channelActions, ...pluginActions, ...skillActions], 'Nenhuma acao imediata detectada.'),
-      ].join('\n');
-    }
-
-    const risky = riskyAuditItems(snapshot.auditEntries);
-    const recent = snapshot.auditEntries.slice(0, 5).map(entry => {
-      const tool = entry.tool_name ? ` tool=${entry.tool_name}` : '';
-      return `${entry.event_type || 'event'}${tool}: ${entry.summary || entry.status || 'sem resumo'}`;
-    });
-    return [
-      '## Riscos recentes',
-      `- Eventos analisados: ${snapshot.auditEntries.length}`,
-      `- Eventos com risco: ${risky.length}`,
-      '',
-      '## Itens de atencao',
-      formatBulletList(risky.slice(0, 6).map(entry => `${entry.event_type || 'event'}: ${entry.summary || entry.status || 'sem resumo'}`), 'Nenhum evento recente com risco operacional evidente.'),
-      '',
-      '## Ultimos eventos',
-      formatBulletList(recent, 'Sem eventos de auditoria recentes.'),
-    ].join('\n');
-  }
-
-  async function runAgentShortcut(kind, assistantEl) {
-    pushConsoleEntry('info', 'agent-shortcut', `Executando atalho: ${kind}`);
-    updateThinking(assistantEl, 'Coletando estado real do daemon...\nGerando diagnostico local deterministico...');
-    const snapshot = await loadAgentShortcutSnapshot();
-    const answer = buildAgentShortcutResponse(kind, snapshot);
-    renderAssistantOutput(assistantEl, { rawAnswer: answer, finalize: true });
-    pushConsoleEntry('info', 'agent-shortcut', `Atalho concluido: ${kind}`);
-    state.agentConfig = snapshot.config || state.agentConfig;
-    state.tools = snapshot.tools;
-    state.channels = snapshot.channels;
-    state.auditEntries = snapshot.auditEntries;
-    state.plugins = snapshot.plugins;
-    state.skills = snapshot.skills;
-    updateAgentWorkspaceSummary();
-  }
-
   // -- Agent Chat ---------------------------------------------
   const agentInput = document.getElementById('agent-command-input');
   const agentSendBtn = document.getElementById('agent-send-btn');
@@ -2849,7 +2474,6 @@
   document.querySelectorAll('.agent-prompt-card').forEach(card => {
     card.addEventListener('click', () => {
       if (!agentInput) return;
-      state.pendingAgentShortcut = card.dataset.agentShortcut || null;
       agentInput.value = card.dataset.agentPrompt || '';
       resizeTextArea(agentInput, 220);
       agentInput.focus();
@@ -2860,8 +2484,6 @@
   agentSendBtn?.addEventListener('click', async () => {
     if (!agentInput?.value.trim()) return;
     const msg = agentInput.value.trim();
-    const shortcut = state.pendingAgentShortcut;
-    state.pendingAgentShortcut = null;
     agentInput.value = '';
     resizeTextArea(agentInput, 220);
 
@@ -2876,10 +2498,6 @@
     box.scrollTop = box.scrollHeight;
 
     try {
-      if (shortcut) {
-        await runAgentShortcut(shortcut, agDiv);
-        return;
-      }
       const modelId = activeAgentModelId();
       if (!modelId) throw new Error('Selecione um modelo valido antes de executar o agent.');
       const payload = {
@@ -2891,11 +2509,9 @@
         approval_mode: state.agentConfig?.approval_mode || 'ask',
         max_iterations: 25,
       };
-      pushConsoleEntry('info', 'agent', `Enviando mensagem: provider=${payload.provider} model=${payload.model_id} session=${payload.session_id || 'nova'}`);
       let res = null;
       const streamed = await sendAgentMessageStreaming(payload, agDiv);
       if (!streamed) {
-        pushConsoleEntry('info', 'agent', 'Stream indisponivel; usando /agent/run');
         res = await api('/agent/run', { method: 'POST', body: JSON.stringify(payload) });
       } else if (streamed.session_id) {
         state.currentSessionId = streamed.session_id;
@@ -2911,10 +2527,8 @@
         const content = res?.final_response || 'Sem resposta.';
         renderAssistantOutput(agDiv, { rawAnswer: content, finalize: true });
         if (res?.total_tokens) addMetrics(agDiv, res);
-        pushConsoleEntry('info', 'agent', `Run concluido: tokens=${res.total_tokens ?? '-'} tempo=${res.latency_ms ?? '-'}ms session=${res.session_id || '-'}`);
       }
     } catch (e) {
-      pushConsoleEntry('error', 'agent', e.message);
       agDiv.querySelector('.msg-content').innerHTML = `<span style="color:var(--rose)">Erro: ${esc(e.message)}</span>`;
     }
     box.scrollTop = box.scrollHeight;
@@ -2928,17 +2542,6 @@
 
   // -- Audit Refresh ------------------------------------------
   document.getElementById('refresh-audit')?.addEventListener('click', () => loadAudit());
-
-  document.getElementById('refresh-console')?.addEventListener('click', () => loadConsoleSnapshot());
-  document.getElementById('clear-console')?.addEventListener('click', () => clearConsole());
-  document.getElementById('copy-console')?.addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText(consoleText());
-      pushConsoleEntry('info', 'console', 'Conteudo copiado para a area de transferencia');
-    } catch (error) {
-      pushConsoleEntry('error', 'console', `Falha ao copiar console: ${error.message}`);
-    }
-  });
 
   // -- Settings Save ------------------------------------------
   document.getElementById('save-settings-btn')?.addEventListener('click', async () => {
@@ -2982,8 +2585,6 @@
 
   // -- Toggle Chips -------------------------------------------
   document.querySelectorAll('.toggle-chip').forEach(chip => {
-    if (chip.id === 'web-search-toggle') state.webSearchEnabled = chip.classList.contains('active');
-    if (chip.id === 'airllm-toggle') state.airllmEnabled = chip.classList.contains('active');
     chip.addEventListener('click', () => {
       chip.classList.toggle('active');
       if (chip.id === 'web-search-toggle') state.webSearchEnabled = chip.classList.contains('active');
@@ -3168,7 +2769,7 @@
     if (e.key === 'Escape') document.getElementById('model-menu')?.classList.add('hidden');
     if (!e.ctrlKey && !e.metaKey && !e.altKey && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
       const n = parseInt(e.key);
-      if (n >= 1 && n <= 6) switchTab(['chat', 'discover', 'agent', 'ai-interaction', 'console', 'settings'][n - 1]);
+      if (n >= 1 && n <= 6) switchTab(['chat', 'discover', 'agent', 'ai-interaction', 'settings'][n - 1]);
     }
     if ((e.ctrlKey || e.metaKey) && e.key === '.') state.streamController?.abort();
   });

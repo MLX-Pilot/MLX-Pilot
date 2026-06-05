@@ -4,10 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.kaike.mlxollamapilot",
   "build": {
-    "frontendDist": "../ui"
+    "frontendDist": "../"
   },
   "app": {
-    "withGlobalTauri": true,
     "windows": [
       {
         "label": "main",
@@ -27,7 +26,7 @@
     "active": true,
     "targets": "all",
     "resources": {
-      "../../../scripts/mlx_airllm_bridge.py": "mlx_airllm_bridge.py"
+      "../../scripts/mlx_airllm_bridge.py": "mlx_airllm_bridge.py"
     },
     "icon": [
       "icons/32x32.png",

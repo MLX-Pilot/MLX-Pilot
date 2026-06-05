@@ -1,0 +1,16 @@
+{
+  "name": "mlx-pilot-desktop-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "desktop:dev": "cargo run --manifest-path src-tauri/Cargo.toml",
+    "desktop:build": "cargo build --manifest-path src-tauri/Cargo.toml --release",
+    "test:e2e:channels-smoke": "node --test e2e/channels-smoke.test.js",
+    "test:e2e:skills-smoke": "node --test e2e/skills-smoke.test.js",
+    "test:e2e:agent-control-plane": "node --test e2e/agent-control-plane.test.js",
+    "test:e2e:agent-workspace-ui": "node --test e2e/agent-workspace-ui.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}

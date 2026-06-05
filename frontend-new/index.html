@@ -114,15 +114,6 @@
               </span>
               IA Visual
             </button>
-            <button class="tab" data-panel="console" role="tab">
-              <span class="tab-icon">
-                <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <rect x="3" y="4" width="14" height="12" rx="2" />
-                  <path d="M6 8l2 2-2 2M10 12h4" />
-                </svg>
-              </span>
-              Console
-            </button>
             <button class="tab" data-panel="settings" role="tab">
               <span class="tab-icon">
                 <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -299,13 +290,13 @@
                         <span class="agent-meta-pill">3</span>
                       </div>
                       <div class="agent-prompt-grid">
-                        <button class="agent-prompt-card" type="button" data-agent-shortcut="runtime" data-agent-prompt="Revise a configuracao atual do agent e sugira ajustes de runtime.">
+                        <button class="agent-prompt-card" type="button" data-agent-prompt="Revise a configuracao atual do agent e sugira ajustes de runtime.">
                           <span class="agent-prompt-title">Revisar runtime e politicas</span>
                         </button>
-                        <button class="agent-prompt-card" type="button" data-agent-shortcut="integrations" data-agent-prompt="Liste os channels e diga quais precisam de acao imediata.">
+                        <button class="agent-prompt-card" type="button" data-agent-prompt="Liste os channels e diga quais precisam de acao imediata.">
                           <span class="agent-prompt-title">Auditar integracoes ativas</span>
                         </button>
-                        <button class="agent-prompt-card" type="button" data-agent-shortcut="risks" data-agent-prompt="Investigue os ultimos eventos de auditoria e resuma riscos operacionais.">
+                        <button class="agent-prompt-card" type="button" data-agent-prompt="Investigue os ultimos eventos de auditoria e resuma riscos operacionais.">
                           <span class="agent-prompt-title">Resumir riscos recentes</span>
                         </button>
                       </div>
@@ -517,49 +508,6 @@
                   <button class="example-btn" data-prompt="Crie ondas senoidais com particulas se sobrepondo em harmonia">Ondas</button>
                 </div>
               </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- CONSOLE PANEL -->
-        <section class="panel" id="panel-console">
-          <div class="panel-scroll console-panel-scroll">
-            <div class="section-header console-header">
-              <div>
-                <h2 class="section-title">Console</h2>
-                <p class="section-subtitle">Diagnostico interno do app, daemon embutido e eventos recentes</p>
-              </div>
-              <div class="console-actions">
-                <button class="action-btn" id="refresh-console" type="button">Atualizar</button>
-                <button class="action-btn" id="copy-console" type="button">Copiar</button>
-                <button class="action-btn danger" id="clear-console" type="button">Limpar</button>
-              </div>
-            </div>
-
-            <div class="console-grid">
-              <div class="console-card">
-                <span class="console-card-label">Daemon</span>
-                <strong id="console-health">Verificando...</strong>
-                <span id="console-daemon-url">-</span>
-              </div>
-              <div class="console-card">
-                <span class="console-card-label">Processo</span>
-                <strong id="console-process">Desktop nativo</strong>
-                <span id="console-runtime">Tauri</span>
-              </div>
-              <div class="console-card console-card-wide">
-                <span class="console-card-label">Arquivo de log</span>
-                <strong id="console-log-path">Indisponivel no navegador</strong>
-                <span id="console-last-refresh">-</span>
-              </div>
-            </div>
-
-            <div class="console-feed-shell">
-              <div class="console-feed-head">
-                <span>Eventos</span>
-                <span id="console-entry-count">0 linhas</span>
-              </div>
-              <pre class="console-feed" id="console-feed">Aguardando eventos...</pre>
             </div>
           </div>
         </section>
