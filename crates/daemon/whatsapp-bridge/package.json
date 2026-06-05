@@ -1,0 +1,11 @@
+{
+  "name": "mlx-pilot-whatsapp-bridge",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "7.0.0-rc.9"
+  }
+}
