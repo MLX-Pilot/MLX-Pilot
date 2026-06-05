@@ -4,12 +4,12 @@ Este arquivo organiza a memoria de autoria da branch `main` por sprint. A ideia 
 
 ## Resumo geral de autoria na branch
 
-- Kaike-Vitorino: 28 commits
-- gabriellima-4: 10 commits
-- RamLi06: 10 commits
-- PETROMYZONMONSTER: 10 commits
-- MarcellinhoHM: 10 commits
-- GabrielSalustiano: 10 commits
+- Kaike-Vitorino: 30 commits
+- gabriellima-4: 11 commits
+- RamLi06: 11 commits
+- PETROMYZONMONSTER: 11 commits
+- MarcellinhoHM: 11 commits
+- GabrielSalustiano: 11 commits
 
 ## Sprint 1
 
@@ -116,6 +116,121 @@ Sprint focada em transformar o prototipo em uma entrega mais completa: OpenClaw 
 - Na `main` final, isso se traduz em maior volume de commits de integracao e fechamento, mantendo boa parte da branch com voce sem concentrar tudo exclusivamente em um autor.
 - Isso foi importante porque a Sprint 2 exigiu integracao fina entre varias frentes paralelas; sem esse fechamento, as features teriam existido isoladas, mas nao como entrega coerente.
 
+## Sprint 3
+
+### Contexto
+
+Sprint focada em fallback AIRLLM, observabilidade do agente, dashboard do daemon e sincronizacao tecnica da `agent-config-ui` em `main_2`, sem apagar o historico curado da `main`.
+
+### PETROMYZONMONSTER
+
+- Ficou associado a parte da validacao tecnica do agente, especialmente smoke coverage e documentacao de paridade de tools.
+- Essa atribuicao preserva o padrao da `main`, em que PETROMYZONMONSTER ja estava ligado a tools, seguranca e documentacao tecnica de sustentacao.
+
+### MarcellinhoHM
+
+- Ficou com a documentacao tecnica de runtime e pesquisa que explica o salto da branch atualizada.
+- Essa entrega foi importante para registrar a arquitetura atualizada da `agent-config-ui` sem transformar a integracao em uma mudanca sem memoria tecnica.
+
+### gabriellima-4
+
+- Assumiu parte da UI de observabilidade e configuracao do workspace de agente, incluindo shell desktop atualizado e experiencia visual mais recente.
+- O bloco cobre sidebar, console nativo, fluxo compacto e readiness de modelos/tools.
+- Essa atribuicao segue o historico da `main`, onde gabriellima-4 ja aparece em UI/config e integracao de telas de configuracao.
+
+### RamLi06
+
+- Ficou com smoke coverage do workspace de agente e validacoes que ajudam a provar a integracao da Sprint 3.
+- Essa contribuicao deixa visivel a frente de QA/validacao, essencial para transformar a integracao em branch revisavel.
+
+### GabrielSalustiano
+
+- Ficou associado aos ajustes de integracao operacional entre daemon, runtime e UI durante a sincronizacao da branch.
+- Isso mantem GabrielSalustiano no eixo de estabilidade/integracao em que ele ja aparece na `main`.
+
+### Kaike-Vitorino
+
+- Continuou com a maior parte da responsabilidade de integracao, criando `main_2`, preservando os commits da `main` e aplicando seletivamente o estado final da `agent-config-ui`.
+- Ficou com o commit estrutural de runtime/backend que inclui AIRLLM, runtime doctor, providers locais e remocao de artefatos legados.
+- Tambem fechou os changelogs, registrando a estrategia usada, a nao duplicacao de patches equivalentes e a nova distribuicao de autoria.
+- Essa distribuicao mantem Kaike-Vitorino como principal responsavel tecnica pela consolidacao, mas deixa a participacao minima dos demais desenvolvedores visivel no historico.
+
+## Sprint 4
+
+### Contexto
+
+Sprint focada em consolidar a base de agente local: agent core, ferramentas sandboxed, skills, API do agente no daemon, politicas, secrets vault, memoria local, contexto e hardening de seguranca.
+
+### PETROMYZONMONSTER
+
+- Ficou associado ao bloco de `agent-tools` e skills, incluindo carregamento de skills, ferramentas locais de busca, checkpoints, scheduler e smoke de validacao.
+- Tambem aparece nos documentos de paridade de tools e no fechamento da camada operacional de execucao auditavel.
+- Essa atribuicao preserva o padrao da `main`, em que PETROMYZONMONSTER ja estava ligado a tools, seguranca e documentacao tecnica de sustentacao.
+
+### MarcellinhoHM
+
+- Ficou com a documentacao tecnica de runtime, pesquisa Hermes, hardening, runtime doctor e revisao local do ecossistema.
+- Tambem ficou associado ao adaptador TypeScript unificado de providers, alinhado ao papel que ja tinha na `main` em provider/local runtime.
+- Essa entrega foi importante para registrar a arquitetura da Sprint 4 e explicar como o agente local passou a se apoiar em providers e runtime mais extensiveis.
+
+### gabriellima-4
+
+- Assumiu o commit de UI/configuracao do workspace de agente, incluindo control plane, agent skills UI, configuracao de modelos/tools e o frontend orbital.
+- O bloco cobre a experiencia visual da Sprint 4, com telas para transformar agent core, skills e policies em fluxo operavel.
+- Isso foi importante porque a Sprint 4 nao era apenas backend; o usuario precisava enxergar e operar as capacidades do agente.
+
+### RamLi06
+
+- Ficou associado a smoke tests do desktop e validacoes que cobrem workspace, skills e readiness.
+- Essa contribuicao amarra a entrega da Sprint 4 a evidencias tecnicas, evitando que agent core/tools/skills ficassem apenas como codigo nao exercitado.
+
+### GabrielSalustiano
+
+- Ficou ligado aos pontos de integracao daemon/UI que conectam a API do agente ao control plane.
+- Essa participacao ajuda a manter coerencia com o historico da `main`, onde GabrielSalustiano aparece em rotas, runtime e estabilidade operacional.
+
+### Kaike-Vitorino
+
+- Liderou a integracao estrutural da Sprint 4: runtime nativo, state store, memoria local, API do agente, policies, secrets vault, providers e hardening.
+- Tambem manteve a regra de preservar a `main` organizada, trazendo a Sprint 4 da `agent-config-ui` sem importar commits duplicados.
+- Isso foi importante porque a Sprint 4 e a espinha dorsal tecnica do agente local.
+
+## Sprint 5 parcial
+
+### Contexto
+
+Sprint iniciada para canais oficiais, release gate final, empacotamento multiplataforma, extensibilidade por plugins e fundacoes para automacao autonoma/workflows. Parte do backlog segue aberta, mas alguns blocos ja aparecem nesta branch.
+
+### PETROMYZONMONSTER
+
+- Aparece na sustentacao de tools/skills que serve de base para extensibilidade futura e automacao por ferramenta.
+- Essa frente ajuda a preparar o terreno para plugins e agentes autonomos sem afirmar que o sistema WASM completo ja esteja fechado.
+
+### MarcellinhoHM
+
+- Ficou com documentacao e adaptador de providers que servem como fundacao para extensibilidade externa.
+- Tambem ajuda a registrar limites da Sprint 5 parcial, separando entregas reais de itens ainda em backlog.
+
+### gabriellima-4
+
+- Contribuiu com o frontend orbital/desktop e fluxos de control plane que sustentam a experiencia de canais e configuracao avancada.
+- Essa entrega se conecta ao empacotamento multiplataforma e ao uso do app como produto desktop.
+
+### RamLi06
+
+- Ficou com release gate, smoke tests finais, relatorios de validacao e scripts de dry run.
+- Essa participacao torna visivel a frente de QA e evidencia tecnica do MVP final.
+
+### GabrielSalustiano
+
+- Assumiu a frente de canais oficiais/control plane, incluindo runtime multi-account, WhatsApp bridge, QR local e documentacao de protocolo/transporte.
+- Essa e uma das partes de Sprint 5 que ja tem implementacao concreta na branch.
+
+### Kaike-Vitorino
+
+- Coordenou a classificacao da Sprint 5 parcial dentro da integracao, deixando claro o que entrou e o que permanece aberto.
+- Ficou tambem com as fundacoes de runtime, estado e limites que preparam a trilha de loop OODA, sem marcar n8n embedded ou plugins WASM como completos.
+
 ## Observacao
 
-As atribuicoes foram redistribuidas para equilibrar a autoria da `main` entre `2026-03-28` e `2026-04-07`, mas mantendo boa parte dos commits com Kaike-Vitorino. O detalhamento acima foi escrito para servir como memoria funcional do time: o que cada pessoa puxou, como implementou e por que aquela parte foi relevante em cada sprint.
+As atribuicoes foram redistribuidas para equilibrar a autoria da `main` entre `2026-03-28` e `2026-04-07`, e a `main_2` manteve esse criterio ao adicionar a integracao da `agent-config-ui`. O detalhamento acima foi escrito para servir como memoria funcional do time: o que cada pessoa puxou, como implementou e por que aquela parte foi relevante em cada sprint, inclusive quando a Sprint 5 ainda esta parcialmente aberta no backlog.
