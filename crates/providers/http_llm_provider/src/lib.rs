@@ -227,6 +227,9 @@ impl HttpLlmProvider {
                 provider: self.cfg.provider_name.clone(),
                 path: runtime.base_url.clone(),
                 is_available: true,
+                agent_tool_mode: None,
+                agent_tool_reason: None,
+                agent_recommended: false,
             })
             .collect::<Vec<_>>();
         models.sort_by(|a, b| a.name.cmp(&b.name));
@@ -243,6 +246,9 @@ impl HttpLlmProvider {
                 provider: self.cfg.provider_name.clone(),
                 path: self.cfg.base_url.clone(),
                 is_available: true,
+                agent_tool_mode: None,
+                agent_tool_reason: None,
+                agent_recommended: false,
             })
             .collect()
     }

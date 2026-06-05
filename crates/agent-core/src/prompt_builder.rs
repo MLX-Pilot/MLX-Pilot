@@ -238,7 +238,7 @@ impl PromptBuilder {
     }
 }
 
-fn latest_user_text(conversation: &[ChatMessage]) -> &str {
+pub(crate) fn latest_user_text(conversation: &[ChatMessage]) -> &str {
     conversation
         .iter()
         .rev()
@@ -305,7 +305,7 @@ fn estimate_json_tokens(v: &Value) -> usize {
     }
 }
 
-fn build_system_prompt(
+pub(crate) fn build_system_prompt(
     mode: ExecutionMode,
     verbosity: VerbosityLevel,
     system_override: Option<&str>,
@@ -343,6 +343,7 @@ fn runtime_rules(mode: ExecutionMode, verbosity: VerbosityLevel) -> String {
         "Rules: Do not invent tool outputs.".to_string(),
         "Call tools with valid JSON arguments only when needed.".to_string(),
         "Prefer shortest correct answer.".to_string(),
+        "The exec tool only supports direct program invocations; do not use pipes, redirects, or shell chaining.".to_string(),
     ];
 
     match mode {
@@ -467,7 +468,7 @@ fn truncate_messages_in_place(
     }
 }
 
-fn filter_tools(
+pub(crate) fn filter_tools(
     tools: &[FunctionDef],
     mode: ExecutionMode,
     user_text: &str,
@@ -522,15 +523,85 @@ fn select_relevant_tool_names(query: &str) -> HashSet<&'static str> {
 
     if contains_any(
         query,
+        &[
+            "tool",
+            "tools",
+            "skill",
+            "skills",
+            "plugin",
+            "plugins",
+            "capability",
+            "capabilities",
+            "ferramenta",
+            "ferramentas",
+            "habilidade",
+            "habilidades",
+            "what can you do",
+            "o que voce pode",
+            "o que você pode",
+            "python",
+            "bash",
+            "powershell",
+            "web",
+            "pesquisa",
+            "internet",
+        ],
+    ) {
+        for name in [
+            "read_file",
+            "list_dir",
+            "glob",
+            "grep",
+            "write_file",
+            "edit_file",
+            "exec",
+            "sessions_list",
+            "sessions_history",
+            "sessions_spawn",
+            "sessions_send",
+            "sessions_status",
+            "memory_search",
+            "memory_get",
+        ] {
+            selected.insert(name);
+        }
+        return selected;
+    }
+
+    if contains_any(
+        query,
         &["list", "show", "find", "folder", "directory", "tree"],
     ) {
         selected.insert("list_dir");
+        selected.insert("glob");
         selected.insert("read_file");
     }
 
-    if contains_any(query, &["read", "open", "inspect", "view", "cat", "file"]) {
+    if contains_any(
+        query,
+        &["read", "open", "inspect", "view", "cat", "file", "arquivo"],
+    ) {
         selected.insert("read_file");
         selected.insert("list_dir");
+    }
+
+    if contains_any(
+        query,
+        &[
+            "search",
+            "grep",
+            "regex",
+            "pattern",
+            "match",
+            "find text",
+            "buscar",
+            "procurar",
+            "pesquisar",
+        ],
+    ) {
+        selected.insert("grep");
+        selected.insert("glob");
+        selected.insert("read_file");
     }
 
     if contains_any(query, &["write", "create", "save", "new file", "append"]) {
@@ -844,6 +915,32 @@ mod tests {
         for tool in &output.tools {
             assert!(tool.description.len() <= 120);
             assert!(tool.parameters["properties"]["path"]["description"].is_null());
+        }
+    }
+
+    #[test]
+    fn capability_queries_expose_full_local_toolset() {
+        let selected = select_relevant_tool_names(
+            "quais tools, skills e plugins voce tem? pode rodar python?",
+        );
+
+        for name in [
+            "read_file",
+            "list_dir",
+            "glob",
+            "grep",
+            "write_file",
+            "edit_file",
+            "exec",
+            "sessions_list",
+            "sessions_history",
+            "sessions_spawn",
+            "sessions_send",
+            "sessions_status",
+            "memory_search",
+            "memory_get",
+        ] {
+            assert!(selected.contains(name), "missing tool hint: {name}");
         }
     }
 }

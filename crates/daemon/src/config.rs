@@ -6,6 +6,37 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
+
+pub const APP_CONFIG_SCHEMA_VERSION: u32 = 2;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AgentToolScopeOverride {
+    #[serde(default)]
+    pub allow: Vec<String>,
+    #[serde(default)]
+    pub deny: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentToolPolicyConfig {
+    #[serde(default = "default_tool_profile")]
+    pub profile: String,
+    #[serde(default)]
+    pub agent_overrides: BTreeMap<String, AgentToolScopeOverride>,
+    #[serde(default)]
+    pub session_overrides: BTreeMap<String, AgentToolScopeOverride>,
+}
+
+impl Default for AgentToolPolicyConfig {
+    fn default() -> Self {
+        Self {
+            profile: default_tool_profile(),
+            agent_overrides: BTreeMap::new(),
+            session_overrides: BTreeMap::new(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentSecurityConfig {
@@ -13,6 +44,8 @@ pub struct AgentSecurityConfig {
     pub security_mode: String,
     #[serde(default)]
     pub require_capabilities: bool,
+    #[serde(default)]
+    pub capability_manifest_paths: Vec<String>,
     #[serde(default)]
     pub airgapped: bool,
     #[serde(default)]
@@ -42,6 +75,7 @@ impl Default for AgentSecurityConfig {
         Self {
             security_mode: default_security_mode(),
             require_capabilities: false,
+            capability_manifest_paths: Vec::new(),
             airgapped: false,
             owner_only: false,
             block_direct_ip_egress: true,
@@ -71,6 +105,63 @@ impl Default for AgentSecurityConfig {
             egress_allow_domains: Vec::new(),
             skill_sha256_pins: BTreeMap::new(),
             use_secrets_vault: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSkillOverride {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    #[serde(default)]
+    pub env_refs: BTreeMap<String, String>,
+    #[serde(default)]
+    pub config: BTreeMap<String, String>,
+}
+
+impl Default for AgentSkillOverride {
+    fn default() -> Self {
+        Self {
+            enabled: None,
+            env: BTreeMap::new(),
+            env_refs: BTreeMap::new(),
+            config: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentProviderProfileConfig {
+    pub id: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default = "default_agent_provider")]
+    pub provider: String,
+    #[serde(default = "default_agent_model")]
+    pub model_id: String,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key_ref: Option<String>,
+    #[serde(default)]
+    pub custom_headers: BTreeMap<String, String>,
+    #[serde(default = "default_agent_runtime_variant")]
+    pub runtime_variant: String,
+}
+
+impl Default for AgentProviderProfileConfig {
+    fn default() -> Self {
+        Self {
+            id: "ollama-local".to_string(),
+            description: "Default local Ollama profile".to_string(),
+            provider: "ollama".to_string(),
+            model_id: default_agent_model(),
+            base_url: "http://127.0.0.1:11434".to_string(),
+            api_key_ref: None,
+            custom_headers: BTreeMap::new(),
+            runtime_variant: default_agent_runtime_variant(),
         }
     }
 }
@@ -113,10 +204,34 @@ pub struct AgentUiConfig {
     pub aggressive_tool_filtering: bool,
     #[serde(default = "default_true")]
     pub enable_tool_call_fallback: bool,
+    #[serde(default = "default_agent_runtime_variant")]
+    pub runtime_variant: String,
+    #[serde(default)]
+    pub persist_tool_events: bool,
+    #[serde(default = "default_memory_profile")]
+    pub memory_profile: String,
+    #[serde(default)]
+    pub session_search_enabled: bool,
+    #[serde(default = "default_agent_memory_snapshot_mode")]
+    pub memory_snapshot_mode: String,
     #[serde(default)]
     pub enabled_skills: Vec<String>,
+    #[serde(default = "default_agent_node_manager")]
+    pub node_package_manager: String,
+    #[serde(default)]
+    pub skill_overrides: BTreeMap<String, AgentSkillOverride>,
     #[serde(default)]
     pub enabled_tools: Vec<String>,
+    #[serde(default = "default_toolset_id")]
+    pub default_toolset_id: String,
+    #[serde(default)]
+    pub provider_profile_id: String,
+    #[serde(default = "default_gateway_mode")]
+    pub gateway_mode: String,
+    #[serde(default)]
+    pub provider_profiles: Vec<AgentProviderProfileConfig>,
+    #[serde(default)]
+    pub tool_policy: AgentToolPolicyConfig,
     #[serde(default)]
     pub workspace_root: Option<String>,
     #[serde(default)]
@@ -125,6 +240,37 @@ pub struct AgentUiConfig {
 
 impl Default for AgentUiConfig {
     fn default() -> Self {
+        let default_tools = vec![
+            "read_file".to_string(),
+            "write_file".to_string(),
+            "edit_file".to_string(),
+            "list_dir".to_string(),
+            "glob".to_string(),
+            "grep".to_string(),
+            "exec".to_string(),
+            "toolsets_list".to_string(),
+            "sessions_list".to_string(),
+            "sessions_history".to_string(),
+            "sessions_spawn".to_string(),
+            "sessions_send".to_string(),
+            "sessions_status".to_string(),
+            "session_search".to_string(),
+            "memory_search".to_string(),
+            "memory_get".to_string(),
+            "memory_write".to_string(),
+            "delegate_session".to_string(),
+            "checkpoints_list".to_string(),
+            "checkpoint_restore".to_string(),
+        ];
+        let mut tool_policy = AgentToolPolicyConfig::default();
+        tool_policy.agent_overrides.insert(
+            "default".to_string(),
+            AgentToolScopeOverride {
+                allow: default_tools.clone(),
+                deny: Vec::new(),
+            },
+        );
+
         Self {
             provider: default_agent_provider(),
             model_id: default_agent_model(),
@@ -144,14 +290,20 @@ impl Default for AgentUiConfig {
             temperature: Some(0.1),
             aggressive_tool_filtering: true,
             enable_tool_call_fallback: true,
+            runtime_variant: default_agent_runtime_variant(),
+            persist_tool_events: false,
+            memory_profile: default_memory_profile(),
+            session_search_enabled: true,
+            memory_snapshot_mode: default_agent_memory_snapshot_mode(),
             enabled_skills: Vec::new(),
-            enabled_tools: vec![
-                "read_file".to_string(),
-                "write_file".to_string(),
-                "edit_file".to_string(),
-                "list_dir".to_string(),
-                "exec".to_string(),
-            ],
+            node_package_manager: default_agent_node_manager(),
+            skill_overrides: BTreeMap::new(),
+            enabled_tools: default_tools,
+            default_toolset_id: default_toolset_id(),
+            provider_profile_id: "ollama-local".to_string(),
+            gateway_mode: default_gateway_mode(),
+            provider_profiles: vec![AgentProviderProfileConfig::default()],
+            tool_policy,
             workspace_root: None,
             security: AgentSecurityConfig::default(),
         }
@@ -159,7 +311,195 @@ impl Default for AgentUiConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginPersistedState {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_config_object")]
+    pub config: Value,
+}
+
+impl PluginPersistedState {
+    pub fn is_configured(&self) -> bool {
+        json_value_is_configured(&self.config)
+    }
+}
+
+impl Default for PluginPersistedState {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            config: default_config_object(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelPersistedState {
+    #[serde(default)]
+    pub default_account_id: Option<String>,
+    #[serde(default)]
+    pub accounts: BTreeMap<String, ChannelAccountPersistedState>,
+    #[serde(default)]
+    pub alias: Option<String>,
+    #[serde(default = "default_config_object")]
+    pub config: Value,
+    #[serde(default)]
+    pub metadata: BTreeMap<String, String>,
+}
+
+impl ChannelPersistedState {
+    #[allow(dead_code)]
+    pub fn is_configured(&self) -> bool {
+        !self.accounts.is_empty()
+            || self
+                .default_account_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .is_some()
+            || self
+                .accounts
+                .values()
+                .any(ChannelAccountPersistedState::is_configured)
+            || self.accounts.values().any(|account| account.enabled)
+            || json_value_is_configured(&self.config)
+            || self.metadata.values().any(|value| !value.trim().is_empty())
+            || self
+                .alias
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .is_some()
+    }
+}
+
+impl Default for ChannelPersistedState {
+    fn default() -> Self {
+        Self {
+            default_account_id: None,
+            accounts: BTreeMap::new(),
+            alias: None,
+            config: default_config_object(),
+            metadata: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelAccountPersistedState {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub credentials_ref: Option<String>,
+    #[serde(default)]
+    pub metadata: BTreeMap<String, String>,
+    #[serde(default)]
+    pub routing_defaults: BTreeMap<String, String>,
+    #[serde(default)]
+    pub health_state: ChannelAccountHealthState,
+    #[serde(default)]
+    pub limits: ChannelAccountPolicy,
+    #[serde(default = "default_config_object")]
+    pub adapter_config: Value,
+}
+
+impl ChannelAccountPersistedState {
+    pub fn is_configured(&self) -> bool {
+        self.credentials_ref
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_some()
+            || !self.metadata.is_empty()
+            || !self.routing_defaults.is_empty()
+            || json_value_is_configured(&self.adapter_config)
+    }
+}
+
+impl Default for ChannelAccountPersistedState {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            credentials_ref: None,
+            metadata: BTreeMap::new(),
+            routing_defaults: BTreeMap::new(),
+            health_state: ChannelAccountHealthState::default(),
+            limits: ChannelAccountPolicy::default(),
+            adapter_config: default_config_object(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelAccountHealthState {
+    #[serde(default = "default_channel_health_status")]
+    pub status: String,
+    #[serde(default)]
+    pub last_error: Option<String>,
+    #[serde(default)]
+    pub failure_count: u32,
+    #[serde(default)]
+    pub circuit_open_until_epoch_ms: Option<u128>,
+    #[serde(default)]
+    pub last_checked_epoch_ms: Option<u128>,
+    #[serde(default)]
+    pub last_connected_epoch_ms: Option<u128>,
+}
+
+impl Default for ChannelAccountHealthState {
+    fn default() -> Self {
+        Self {
+            status: default_channel_health_status(),
+            last_error: None,
+            failure_count: 0,
+            circuit_open_until_epoch_ms: None,
+            last_checked_epoch_ms: None,
+            last_connected_epoch_ms: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelAccountPolicy {
+    #[serde(default = "default_rate_limit_per_minute")]
+    pub rate_limit_per_minute: u32,
+    #[serde(default = "default_operation_timeout_ms")]
+    pub timeout_ms: u64,
+    #[serde(default = "default_retry_count")]
+    pub max_retries: u32,
+    #[serde(default = "default_backoff_base_ms")]
+    pub backoff_base_ms: u64,
+    #[serde(default = "default_circuit_breaker_threshold")]
+    pub circuit_breaker_threshold: u32,
+    #[serde(default = "default_circuit_breaker_open_ms")]
+    pub circuit_breaker_open_ms: u64,
+}
+
+impl Default for ChannelAccountPolicy {
+    fn default() -> Self {
+        Self {
+            rate_limit_per_minute: default_rate_limit_per_minute(),
+            timeout_ms: default_operation_timeout_ms(),
+            max_retries: default_retry_count(),
+            backoff_base_ms: default_backoff_base_ms(),
+            circuit_breaker_threshold: default_circuit_breaker_threshold(),
+            circuit_breaker_open_ms: default_circuit_breaker_open_ms(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CompatibilityConfig {
+    #[serde(default)]
+    pub plugins: BTreeMap<String, PluginPersistedState>,
+    #[serde(default)]
+    pub channels: BTreeMap<String, ChannelPersistedState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
+    #[serde(default = "default_app_config_schema_version")]
+    pub schema_version: u32,
     pub bind_addr: SocketAddr,
     pub local_provider: String,
     pub models_dir: PathBuf,
@@ -167,6 +507,18 @@ pub struct AppConfig {
     pub mlx_prefix_args: Vec<String>,
     pub mlx_suffix_args: Vec<String>,
     pub mlx_timeout: Duration,
+    #[serde(default = "default_true")]
+    pub mlx_airllm_enabled: bool,
+    #[serde(default = "default_mlx_airllm_threshold_percent")]
+    pub mlx_airllm_threshold_percent: u8,
+    #[serde(default = "default_true")]
+    pub mlx_airllm_safe_mode: bool,
+    #[serde(default = "default_mlx_airllm_python_command")]
+    pub mlx_airllm_python_command: String,
+    #[serde(default = "default_mlx_airllm_runner")]
+    pub mlx_airllm_runner: String,
+    #[serde(default = "default_mlx_airllm_backend")]
+    pub mlx_airllm_backend: String,
     pub llamacpp_server_binary: String,
     pub llamacpp_base_url: String,
     pub llamacpp_timeout: Duration,
@@ -187,29 +539,17 @@ pub struct AppConfig {
     pub brave_api_key: Option<String>,
     pub catalog_search_limit: usize,
     pub catalog_download_timeout: Duration,
-    pub openclaw_node_command: String,
-    pub openclaw_cli_path: PathBuf,
-    pub openclaw_state_dir: PathBuf,
-    pub openclaw_gateway_token: String,
-    pub openclaw_session_key: String,
-    pub openclaw_timeout: Duration,
-    pub openclaw_gateway_log: PathBuf,
-    pub openclaw_error_log: PathBuf,
-    pub openclaw_sync_log: PathBuf,
-    pub nanobot_cli_path: PathBuf,
-    pub active_agent_framework: String,
     #[serde(default)]
     pub agent: AgentUiConfig,
+    #[serde(default)]
+    pub compatibility: CompatibilityConfig,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         let models_dir = default_models_dir();
-        let app_data_dir = default_app_data_dir();
-        let openclaw_state_dir = default_openclaw_state_dir();
-        let openclaw_logs_dir = openclaw_state_dir.join("logs");
-
         Self {
+            schema_version: default_app_config_schema_version(),
             bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 11435),
             local_provider: "auto".to_string(),
             models_dir: models_dir.clone(),
@@ -217,6 +557,12 @@ impl Default for AppConfig {
             mlx_prefix_args: Vec::new(),
             mlx_suffix_args: Vec::new(),
             mlx_timeout: Duration::from_secs(900),
+            mlx_airllm_enabled: true,
+            mlx_airllm_threshold_percent: default_mlx_airllm_threshold_percent(),
+            mlx_airllm_safe_mode: true,
+            mlx_airllm_python_command: default_mlx_airllm_python_command(),
+            mlx_airllm_runner: default_mlx_airllm_runner(),
+            mlx_airllm_backend: default_mlx_airllm_backend(),
             llamacpp_server_binary: default_llamacpp_server_binary(),
             llamacpp_base_url: "http://127.0.0.1:11439".to_string(),
             llamacpp_timeout: Duration::from_secs(900),
@@ -237,28 +583,26 @@ impl Default for AppConfig {
             brave_api_key: None,
             catalog_search_limit: 18,
             catalog_download_timeout: Duration::from_secs(21600),
-            openclaw_node_command: "node".to_string(),
-            openclaw_cli_path: app_data_dir.join("openclaw").join("openclaw.mjs"),
-            openclaw_state_dir: openclaw_state_dir.clone(),
-            openclaw_gateway_token: "openclaw-local-token".to_string(),
-            openclaw_session_key: "agent:main:main".to_string(),
-            openclaw_timeout: Duration::from_secs(120),
-            openclaw_gateway_log: openclaw_logs_dir.join("gateway.log"),
-            openclaw_error_log: openclaw_logs_dir.join("gateway.err.log"),
-            openclaw_sync_log: app_data_dir.join("logs").join("openclaw-mlx-sync.log"),
-            nanobot_cli_path: app_data_dir.join("nanobot"),
-            active_agent_framework: "openclaw".to_string(),
             agent: AgentUiConfig::default(),
+            compatibility: CompatibilityConfig::default(),
         }
     }
 }
 
 impl AppConfig {
     pub fn get_settings_path() -> PathBuf {
-        // Use home dir via env instead of the `dirs` crate
-        let base = if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"))
-        {
-            PathBuf::from(home).join(".config")
+        if let Ok(path) = env::var("APP_SETTINGS_PATH") {
+            let trimmed = path.trim();
+            if !trimmed.is_empty() {
+                let path = PathBuf::from(trimmed);
+                if let Some(parent) = path.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                return path;
+            }
+        }
+        let base = if let Some(home) = home_dir() {
+            home.join(".config")
         } else if let Ok(app_data) = std::env::var("APPDATA") {
             PathBuf::from(app_data)
         } else {
@@ -272,20 +616,37 @@ impl AppConfig {
     }
 
     pub fn load_settings() -> Self {
-        let path = Self::get_settings_path();
+        Self::load_settings_from(&Self::get_settings_path())
+    }
+
+    pub fn save_settings(&self) -> Result<(), std::io::Error> {
+        self.save_settings_to(&Self::get_settings_path())
+    }
+
+    pub fn load_settings_from(path: &std::path::Path) -> Self {
         if path.exists() {
-            if let Ok(content) = fs::read_to_string(&path) {
-                if let Ok(config) = serde_json::from_str::<AppConfig>(&content) {
-                    return config;
+            if let Ok(content) = fs::read_to_string(path) {
+                if let Ok(raw) = serde_json::from_str::<Value>(&content) {
+                    if let Ok(mut config) =
+                        serde_json::from_value::<AppConfig>(migrate_app_config_value(raw))
+                    {
+                        normalize_loaded_config(&mut config);
+                        return config;
+                    }
                 }
             }
         }
         Self::default()
     }
 
-    pub fn save_settings(&self) -> Result<(), std::io::Error> {
-        let path = Self::get_settings_path();
-        let content = serde_json::to_string_pretty(self)?;
+    pub fn save_settings_to(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut normalized = self.clone();
+        normalize_loaded_config(&mut normalized);
+        normalized.schema_version = default_app_config_schema_version();
+        let content = serde_json::to_string_pretty(&normalized)?;
         fs::write(path, content)?;
         Ok(())
     }
@@ -345,6 +706,38 @@ impl AppConfig {
         if let Ok(value) = env::var("APP_MLX_TIMEOUT_SECS") {
             if let Ok(seconds) = value.parse::<u64>() {
                 self.mlx_timeout = Duration::from_secs(seconds.max(1));
+            }
+        }
+
+        if let Ok(value) = env::var("APP_MLX_AIRLLM_ENABLED") {
+            self.mlx_airllm_enabled = parse_bool(&value, self.mlx_airllm_enabled);
+        }
+
+        if let Ok(value) = env::var("APP_MLX_AIRLLM_THRESHOLD_PERCENT") {
+            if let Ok(parsed) = value.parse::<u8>() {
+                self.mlx_airllm_threshold_percent = parsed.clamp(1, 100);
+            }
+        }
+
+        if let Ok(value) = env::var("APP_MLX_AIRLLM_SAFE_MODE") {
+            self.mlx_airllm_safe_mode = parse_bool(&value, self.mlx_airllm_safe_mode);
+        }
+
+        if let Ok(value) = env::var("APP_MLX_AIRLLM_PYTHON_COMMAND") {
+            if !value.trim().is_empty() {
+                self.mlx_airllm_python_command = value;
+            }
+        }
+
+        if let Ok(value) = env::var("APP_MLX_AIRLLM_RUNNER") {
+            if !value.trim().is_empty() {
+                self.mlx_airllm_runner = value;
+            }
+        }
+
+        if let Ok(value) = env::var("APP_MLX_AIRLLM_BACKEND") {
+            if !value.trim().is_empty() {
+                self.mlx_airllm_backend = value;
             }
         }
 
@@ -475,82 +868,6 @@ impl AppConfig {
             }
         }
 
-        if let Ok(value) = env::var("APP_OPENCLAW_NODE_COMMAND") {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                self.openclaw_node_command = trimmed.to_string();
-            }
-        }
-
-        if let Ok(value) = env::var("APP_OPENCLAW_CLI_PATH") {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                self.openclaw_cli_path = PathBuf::from(trimmed);
-            }
-        }
-
-        if let Ok(value) = env::var("APP_OPENCLAW_STATE_DIR") {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                self.openclaw_state_dir = PathBuf::from(trimmed);
-            }
-        }
-
-        if let Ok(value) = env::var("APP_OPENCLAW_GATEWAY_TOKEN") {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                self.openclaw_gateway_token = trimmed.to_string();
-            }
-        }
-
-        if let Ok(value) = env::var("APP_OPENCLAW_SESSION_KEY") {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                self.openclaw_session_key = trimmed.to_string();
-            }
-        }
-
-        if let Ok(value) = env::var("APP_OPENCLAW_TIMEOUT_SECS") {
-            if let Ok(seconds) = value.parse::<u64>() {
-                self.openclaw_timeout = Duration::from_secs(seconds.max(5));
-            }
-        }
-
-        if let Ok(value) = env::var("APP_OPENCLAW_GATEWAY_LOG") {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                self.openclaw_gateway_log = PathBuf::from(trimmed);
-            }
-        }
-
-        if let Ok(value) = env::var("APP_OPENCLAW_ERROR_LOG") {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                self.openclaw_error_log = PathBuf::from(trimmed);
-            }
-        }
-
-        if let Ok(value) = env::var("APP_OPENCLAW_SYNC_LOG") {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                self.openclaw_sync_log = PathBuf::from(trimmed);
-            }
-        }
-
-        if let Ok(value) = env::var("APP_NANOBOT_CLI_PATH") {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                self.nanobot_cli_path = PathBuf::from(trimmed);
-            }
-        }
-
-        if let Ok(value) = env::var("APP_ACTIVE_AGENT_FRAMEWORK") {
-            let normalized = value.trim().to_ascii_lowercase();
-            if matches!(normalized.as_str(), "openclaw" | "nanobot") {
-                self.active_agent_framework = normalized;
-            }
-        }
-
         if let Ok(value) = env::var("APP_AGENT_PROVIDER") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
@@ -599,9 +916,260 @@ impl AppConfig {
             self.agent.security.owner_only = parse_bool(&value, self.agent.security.owner_only);
         }
 
+        self.mlx_airllm_runner = resolve_mlx_airllm_runner(&self.mlx_airllm_runner);
+        self.mlx_airllm_backend = normalize_mlx_airllm_backend(&self.mlx_airllm_backend);
+        if cfg!(target_os = "windows") {
+            // AIRLLM safe mode exists to mitigate MLX/Metal pressure on macOS.
+            // On Windows the AIRLLM path should keep its native behavior.
+            self.mlx_airllm_safe_mode = false;
+        }
+
+        normalize_mlx_airllm_python_command(&mut self);
         normalize_mlx_command(&mut self);
 
         self
+    }
+}
+
+fn default_config_object() -> Value {
+    Value::Object(Map::new())
+}
+
+fn default_app_config_schema_version() -> u32 {
+    APP_CONFIG_SCHEMA_VERSION
+}
+
+fn migrate_app_config_value(raw: Value) -> Value {
+    let mut base =
+        serde_json::to_value(AppConfig::default()).unwrap_or_else(|_| Value::Object(Map::new()));
+    let mut incoming = match raw {
+        Value::Object(map) => Value::Object(map),
+        _ => return base,
+    };
+
+    let version = incoming
+        .get("schema_version")
+        .and_then(Value::as_u64)
+        .map(|value| value as u32)
+        .unwrap_or(1);
+
+    if version < 2 {
+        migrate_config_v1_to_v2(&mut incoming);
+    }
+
+    merge_json_value(&mut base, &incoming);
+    if let Some(map) = base.as_object_mut() {
+        map.insert(
+            "schema_version".to_string(),
+            Value::from(default_app_config_schema_version()),
+        );
+    }
+    base
+}
+
+fn migrate_config_v1_to_v2(raw: &mut Value) {
+    let Some(root) = raw.as_object_mut() else {
+        return;
+    };
+
+    root.insert(
+        "schema_version".to_string(),
+        Value::from(default_app_config_schema_version()),
+    );
+
+    let agent = root
+        .entry("agent".to_string())
+        .or_insert_with(|| serde_json::to_value(AgentUiConfig::default()).unwrap_or_default());
+    let Some(agent_map) = agent.as_object_mut() else {
+        return;
+    };
+
+    if !agent_map.contains_key("tool_policy") {
+        let enabled_tools = agent_map
+            .get("enabled_tools")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let mut tool_policy = AgentToolPolicyConfig::default();
+        if !enabled_tools.is_empty() {
+            tool_policy.agent_overrides.insert(
+                "default".to_string(),
+                AgentToolScopeOverride {
+                    allow: enabled_tools,
+                    deny: Vec::new(),
+                },
+            );
+        }
+        agent_map.insert(
+            "tool_policy".to_string(),
+            serde_json::to_value(tool_policy).unwrap_or_default(),
+        );
+    }
+
+    if !agent_map.contains_key("security") {
+        agent_map.insert(
+            "security".to_string(),
+            serde_json::to_value(AgentSecurityConfig::default()).unwrap_or_default(),
+        );
+    }
+
+    if !root.contains_key("compatibility") {
+        root.insert(
+            "compatibility".to_string(),
+            serde_json::to_value(CompatibilityConfig::default()).unwrap_or_default(),
+        );
+    }
+}
+
+fn merge_json_value(base: &mut Value, overlay: &Value) {
+    match (base, overlay) {
+        (Value::Object(base_map), Value::Object(overlay_map)) => {
+            for (key, value) in overlay_map {
+                match base_map.get_mut(key) {
+                    Some(existing) => merge_json_value(existing, value),
+                    None => {
+                        base_map.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+        }
+        (base_value, overlay_value) => *base_value = overlay_value.clone(),
+    }
+}
+
+fn normalize_loaded_config(cfg: &mut AppConfig) {
+    cfg.schema_version = default_app_config_schema_version();
+
+    if cfg.agent.tool_policy.profile.trim().is_empty() {
+        cfg.agent.tool_policy.profile = default_tool_profile();
+    }
+
+    if cfg
+        .agent
+        .tool_policy
+        .agent_overrides
+        .get("default")
+        .map(|entry| entry.allow.is_empty() && entry.deny.is_empty())
+        .unwrap_or(true)
+        && !cfg.agent.enabled_tools.is_empty()
+    {
+        cfg.agent.tool_policy.agent_overrides.insert(
+            "default".to_string(),
+            AgentToolScopeOverride {
+                allow: cfg.agent.enabled_tools.clone(),
+                deny: Vec::new(),
+            },
+        );
+    }
+
+    seed_agent_tool_defaults(&mut cfg.agent);
+    upgrade_legacy_agent_model_default(&mut cfg.agent);
+    normalize_mlx_airllm_python_command(cfg);
+    normalize_mlx_command(cfg);
+}
+
+fn seed_agent_tool_defaults(agent: &mut AgentUiConfig) {
+    for tool_name in ["glob", "grep"] {
+        if !agent.enabled_tools.iter().any(|entry| entry == tool_name) {
+            agent.enabled_tools.push(tool_name.to_string());
+        }
+    }
+
+    let default_override = agent
+        .tool_policy
+        .agent_overrides
+        .entry("default".to_string())
+        .or_default();
+
+    for tool_name in ["glob", "grep"] {
+        if default_override.deny.iter().any(|entry| entry == tool_name) {
+            continue;
+        }
+        if !default_override
+            .allow
+            .iter()
+            .any(|entry| entry == tool_name)
+        {
+            default_override.allow.push(tool_name.to_string());
+        }
+    }
+
+    if agent.default_toolset_id.trim().is_empty() {
+        agent.default_toolset_id = default_toolset_id();
+    }
+    if agent.gateway_mode.trim().is_empty() {
+        agent.gateway_mode = default_gateway_mode();
+    }
+    if agent.memory_snapshot_mode.trim().is_empty() {
+        agent.memory_snapshot_mode = default_agent_memory_snapshot_mode();
+    }
+    if agent.provider_profiles.is_empty() {
+        agent
+            .provider_profiles
+            .push(AgentProviderProfileConfig::default());
+    }
+    if agent.provider_profile_id.trim().is_empty() {
+        agent.provider_profile_id = "ollama-local".to_string();
+    }
+}
+
+fn upgrade_legacy_agent_model_default(agent: &mut AgentUiConfig) {
+    if !agent.provider.trim().eq_ignore_ascii_case("ollama") {
+        return;
+    }
+
+    let normalized = agent
+        .model_id
+        .trim()
+        .strip_prefix("ollama::")
+        .unwrap_or(agent.model_id.trim())
+        .strip_suffix(" [Ollama]")
+        .or_else(|| agent.model_id.trim().strip_suffix(" [ollama]"))
+        .unwrap_or_else(|| {
+            agent
+                .model_id
+                .trim()
+                .strip_prefix("ollama::")
+                .unwrap_or(agent.model_id.trim())
+        })
+        .trim()
+        .to_ascii_lowercase();
+
+    if normalized == "qwen2.5:7b" {
+        agent.model_id = default_agent_model();
+    }
+}
+
+fn first_existing_path(candidates: Vec<PathBuf>) -> Option<PathBuf> {
+    dedupe_paths(candidates)
+        .into_iter()
+        .find(|candidate| candidate.exists())
+}
+
+fn dedupe_paths(candidates: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut seen = BTreeMap::<String, PathBuf>::new();
+    for candidate in candidates {
+        let key = candidate.to_string_lossy().to_ascii_lowercase();
+        seen.entry(key).or_insert(candidate);
+    }
+
+    seen.into_values().collect()
+}
+
+fn json_value_is_configured(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Object(map) => !map.is_empty(),
+        Value::Array(items) => !items.is_empty(),
+        Value::String(text) => !text.trim().is_empty(),
+        Value::Bool(flag) => *flag,
+        Value::Number(_) => true,
     }
 }
 
@@ -610,10 +1178,32 @@ fn parse_shell_args(value: &str) -> Option<Vec<String>> {
 }
 
 fn home_dir() -> Option<PathBuf> {
-    std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .ok()
-        .map(PathBuf::from)
+    if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
+        let trimmed = home.trim();
+        if !trimmed.is_empty() {
+            return Some(PathBuf::from(trimmed));
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        if let Ok(user) = std::env::var("USER").or_else(|_| std::env::var("LOGNAME")) {
+            let trimmed = user.trim();
+            if !trimmed.is_empty() {
+                let mac_home = PathBuf::from("/Users").join(trimmed);
+                if mac_home.exists() {
+                    return Some(mac_home);
+                }
+
+                let linux_home = PathBuf::from("/home").join(trimmed);
+                if linux_home.exists() {
+                    return Some(linux_home);
+                }
+            }
+        }
+    }
+
+    None
 }
 
 fn default_app_data_dir() -> PathBuf {
@@ -630,19 +1220,64 @@ fn default_models_dir() -> PathBuf {
     PathBuf::from(".").join("models")
 }
 
-fn default_openclaw_state_dir() -> PathBuf {
-    default_app_data_dir().join("openclaw").join("state")
-}
-
 fn default_mlx_command() -> String {
     let preferred = home_dir()
-        .map(|home| home.join("mlx-env").join("bin").join("mlx_lm.generate"))
+        .map(|home| {
+            if cfg!(windows) {
+                home.join("mlx-env")
+                    .join("Scripts")
+                    .join("mlx_lm.generate.exe")
+            } else {
+                home.join("mlx-env").join("bin").join("mlx_lm.generate")
+            }
+        })
         .unwrap_or_else(|| PathBuf::from("mlx_lm.generate"));
     if preferred.exists() {
         preferred.display().to_string()
+    } else if cfg!(windows) {
+        "mlx_lm.generate.exe".to_string()
     } else {
         "mlx_lm.generate".to_string()
     }
+}
+
+fn default_mlx_airllm_python_command() -> String {
+    let preferred = home_dir()
+        .map(|home| {
+            if cfg!(windows) {
+                home.join("mlx-env").join("Scripts").join("python.exe")
+            } else {
+                home.join("mlx-env").join("bin").join("python")
+            }
+        })
+        .unwrap_or_else(|| {
+            if cfg!(windows) {
+                PathBuf::from("python")
+            } else {
+                PathBuf::from("python3")
+            }
+        });
+    if preferred.exists() {
+        preferred.display().to_string()
+    } else {
+        if cfg!(windows) {
+            "py".to_string()
+        } else {
+            "python3".to_string()
+        }
+    }
+}
+
+fn default_mlx_airllm_runner() -> String {
+    resolve_mlx_airllm_runner("scripts/mlx_airllm_bridge.py")
+}
+
+fn default_mlx_airllm_backend() -> String {
+    "auto".to_string()
+}
+
+fn default_mlx_airllm_threshold_percent() -> u8 {
+    70
 }
 
 fn default_llamacpp_server_binary() -> String {
@@ -685,7 +1320,7 @@ fn normalize_mlx_command(cfg: &mut AppConfig) {
         }
     }
 
-    let is_python = matches!(cfg.mlx_command.as_str(), "python" | "python3");
+    let is_python = matches!(cfg.mlx_command.as_str(), "python" | "python3" | "py");
     if !is_python {
         return;
     }
@@ -702,6 +1337,136 @@ fn normalize_mlx_command(cfg: &mut AppConfig) {
     }
 }
 
+fn normalize_mlx_airllm_python_command(cfg: &mut AppConfig) {
+    let trimmed = cfg.mlx_airllm_python_command.trim();
+    if trimmed.is_empty() {
+        cfg.mlx_airllm_python_command = default_mlx_airllm_python_command();
+        return;
+    }
+
+    if cfg!(windows) && matches!(trimmed, "python" | "python3") {
+        cfg.mlx_airllm_python_command = default_mlx_airllm_python_command();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn compatibility_state_roundtrips_via_custom_settings_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("settings.json");
+        let mut cfg = AppConfig::default();
+        cfg.compatibility.plugins.insert(
+            "memory".to_string(),
+            PluginPersistedState {
+                enabled: true,
+                config: serde_json::json!({"backend": "local"}),
+            },
+        );
+        cfg.compatibility.channels.insert(
+            "telegram".to_string(),
+            ChannelPersistedState {
+                default_account_id: Some("tg".to_string()),
+                accounts: BTreeMap::from([(
+                    "tg".to_string(),
+                    ChannelAccountPersistedState {
+                        enabled: true,
+                        credentials_ref: Some("channels.telegram.tg.credentials".to_string()),
+                        metadata: BTreeMap::from([("owner".to_string(), "local".to_string())]),
+                        routing_defaults: BTreeMap::new(),
+                        health_state: ChannelAccountHealthState::default(),
+                        limits: ChannelAccountPolicy::default(),
+                        adapter_config: serde_json::json!({"token": "secret"}),
+                    },
+                )]),
+                alias: Some("tg".to_string()),
+                config: serde_json::json!({"token": "secret"}),
+                metadata: BTreeMap::new(),
+            },
+        );
+
+        cfg.save_settings_to(&path).expect("save settings");
+        let loaded = AppConfig::load_settings_from(&path);
+
+        assert!(loaded
+            .compatibility
+            .plugins
+            .get("memory")
+            .expect("plugin state")
+            .is_configured());
+        assert!(loaded
+            .compatibility
+            .channels
+            .get("telegram")
+            .expect("channel state")
+            .is_configured());
+        assert_eq!(loaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn legacy_settings_without_schema_version_are_migrated() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("settings.json");
+        let legacy = json!({
+            "mlx_command": "python -m mlx_lm.generate",
+            "mlx_prefix_args": [],
+            "agent": {
+                "provider": "ollama",
+                "model_id": "qwen2.5-coder:7b",
+                "enabled_tools": ["read_file", "exec"],
+                "enabled_skills": ["weather"]
+            }
+        });
+
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&legacy).expect("serialize legacy"),
+        )
+        .expect("write legacy settings");
+
+        let loaded = AppConfig::load_settings_from(&path);
+
+        assert_eq!(loaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
+        assert_eq!(loaded.mlx_command, default_mlx_command());
+        assert_eq!(
+            loaded.agent.tool_policy.agent_overrides["default"].allow,
+            vec![
+                "read_file".to_string(),
+                "exec".to_string(),
+                "glob".to_string(),
+                "grep".to_string(),
+            ]
+        );
+        assert!(loaded.compatibility.channels.is_empty());
+        assert_eq!(loaded.agent.security.security_mode, default_security_mode());
+    }
+
+    #[test]
+    fn legacy_agent_default_model_is_upgraded_to_qwen35() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("settings.json");
+        let legacy = json!({
+            "schema_version": APP_CONFIG_SCHEMA_VERSION,
+            "agent": {
+                "provider": "ollama",
+                "model_id": "qwen2.5:7b"
+            }
+        });
+
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&legacy).expect("serialize legacy"),
+        )
+        .expect("write legacy settings");
+
+        let loaded = AppConfig::load_settings_from(&path);
+        assert_eq!(loaded.agent.model_id, "qwen3.5:9b");
+    }
+}
+
 fn starts_with_legacy_module(values: &[String], expected: &[&str]) -> bool {
     if values.len() < expected.len() {
         return false;
@@ -711,6 +1476,86 @@ fn starts_with_legacy_module(values: &[String], expected: &[&str]) -> bool {
         .iter()
         .zip(expected.iter())
         .all(|(left, right)| left == right)
+}
+
+fn resolve_mlx_airllm_runner(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return "scripts/mlx_airllm_bridge.py".to_string();
+    }
+
+    let input = PathBuf::from(trimmed);
+    if input.is_absolute() && input.exists() {
+        return input.display().to_string();
+    }
+
+    let script_name = input
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| "mlx_airllm_bridge.py".to_string());
+    let relative = if input.is_absolute() {
+        PathBuf::from("scripts").join(script_name.as_str())
+    } else if input.components().count() > 1 {
+        input.clone()
+    } else {
+        PathBuf::from("scripts").join(script_name.as_str())
+    };
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if input.is_absolute() {
+        if let Some(parent) = input.parent() {
+            candidates.push(parent.join(script_name.as_str()));
+            candidates.push(parent.join("scripts").join(script_name.as_str()));
+        }
+    }
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join(&relative));
+            candidates.push(exe_dir.join("scripts").join(script_name.as_str()));
+            candidates.push(exe_dir.join("../Resources").join(&relative));
+            candidates.push(
+                exe_dir
+                    .join("../Resources")
+                    .join("scripts")
+                    .join(script_name.as_str()),
+            );
+            candidates.push(exe_dir.join("../Resources").join(script_name.as_str()));
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join(&relative));
+    }
+
+    let workspace_hint = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join(&relative);
+    candidates.push(workspace_hint);
+
+    if let Some(home) = home_dir() {
+        candidates.push(home.join("mlx-ollama-pilot").join(&relative));
+    }
+
+    for candidate in candidates {
+        if candidate.exists() {
+            return candidate.display().to_string();
+        }
+    }
+
+    relative.display().to_string()
+}
+
+fn normalize_mlx_airllm_backend(raw: &str) -> String {
+    let normalized = raw.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "airllm" | "original" | "airllm-original" => "original".to_string(),
+        "legacy" | "legacy-bridge" | "mlx-lm" => "legacy".to_string(),
+        "auto" => "auto".to_string(),
+        _ => "auto".to_string(),
+    }
 }
 
 fn parse_bool(value: &str, fallback: bool) -> bool {
@@ -723,6 +1568,34 @@ fn parse_bool(value: &str, fallback: bool) -> bool {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_channel_health_status() -> String {
+    "not_configured".to_string()
+}
+
+fn default_rate_limit_per_minute() -> u32 {
+    60
+}
+
+fn default_operation_timeout_ms() -> u64 {
+    5_000
+}
+
+fn default_retry_count() -> u32 {
+    2
+}
+
+fn default_backoff_base_ms() -> u64 {
+    250
+}
+
+fn default_circuit_breaker_threshold() -> u32 {
+    3
+}
+
+fn default_circuit_breaker_open_ms() -> u64 {
+    30_000
 }
 
 fn default_security_mode() -> String {
@@ -738,7 +1611,7 @@ fn default_agent_fallback_provider() -> String {
 }
 
 fn default_agent_model() -> String {
-    "qwen2.5:7b".to_string()
+    "qwen3.5:9b".to_string()
 }
 
 fn default_agent_execution_mode() -> String {
@@ -747,4 +1620,32 @@ fn default_agent_execution_mode() -> String {
 
 fn default_agent_approval_mode() -> String {
     "ask".to_string()
+}
+
+fn default_agent_node_manager() -> String {
+    "npm".to_string()
+}
+
+fn default_agent_runtime_variant() -> String {
+    "classic".to_string()
+}
+
+fn default_memory_profile() -> String {
+    "balanced".to_string()
+}
+
+fn default_agent_memory_snapshot_mode() -> String {
+    "session".to_string()
+}
+
+fn default_toolset_id() -> String {
+    "general".to_string()
+}
+
+fn default_gateway_mode() -> String {
+    "local_only".to_string()
+}
+
+fn default_tool_profile() -> String {
+    "coding".to_string()
 }

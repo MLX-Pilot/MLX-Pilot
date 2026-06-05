@@ -15,9 +15,23 @@ pub enum AgentEvent {
         session_id: String,
         model: String,
     },
+    SessionIngress {
+        session_id: String,
+        origin_kind: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_channel: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        thread_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        correlation_id: Option<String>,
+    },
     RunCompleted {
         session_id: String,
         latency_ms: u64,
+    },
+    SessionSummaryUpdated {
+        session_id: String,
+        summary: String,
     },
     RunFailed {
         session_id: String,
@@ -38,17 +52,25 @@ pub enum AgentEvent {
     ToolCallStarted {
         session_id: String,
         tool: String,
+        call_id: String,
         params: serde_json::Value,
     },
     ToolCallCompleted {
         session_id: String,
         tool: String,
+        call_id: String,
+        result: String,
         result_preview: String,
     },
     ToolCallDenied {
         session_id: String,
         tool: String,
         reason: String,
+    },
+    SessionHandoff {
+        parent_session_id: String,
+        child_session_id: String,
+        handoff_summary: String,
     },
 
     // ── Approvals ──

@@ -3,16 +3,18 @@
 
 use crate::approval::ApprovalService;
 use crate::audit::AuditLog;
-use crate::events::EventBus;
-use crate::policy::PolicyEngine;
-use crate::prompt_builder::{
-    select_model_prompt_profile, ModelPromptProfile, PromptBuildInput, PromptBuilder,
+use crate::context_budget::{
+    ContextBudgetInput, ContextBudgetManager, ContextBudgetTelemetry, ContextSummaryArtifact,
 };
+use crate::events::{AgentEvent, EventBus};
+use crate::policy::PolicyEngine;
+use crate::prompt_builder::{select_model_prompt_profile, ModelPromptProfile, PromptBuilder};
 use crate::registry::ToolRegistry;
+use crate::tool_catalog::ToolProfileName;
 use mlx_agent_tools::ExecutionMode;
 use mlx_ollama_core::{
-    ChatMessage, ChatToolsRequest, FunctionDef, GenerationOptions, MessageRole, ModelProvider,
-    ProviderError, RuntimeProviderConfig, TokenUsage, ToolCallRequest,
+    ChatMessage, ChatRequest, ChatToolsRequest, FunctionDef, GenerationOptions, MessageRole,
+    ModelProvider, ProviderError, RuntimeProviderConfig, TokenUsage, ToolCallRequest,
 };
 use sha2::{Digest, Sha256};
 use std::borrow::Cow;
@@ -23,8 +25,10 @@ use tracing::{debug, info, warn};
 /// Configuration for an `AgentLoop` instance.
 #[derive(Debug, Clone)]
 pub struct AgentLoopConfig {
+    pub session_id: String,
     pub model_id: String,
     pub workspace_root: std::path::PathBuf,
+    pub initial_history: Vec<ChatMessage>,
     pub system_prompt: Option<String>,
     pub max_iterations: usize,
     pub max_prompt_tokens: Option<usize>,
@@ -36,14 +40,17 @@ pub struct AgentLoopConfig {
     pub aggressive_tool_filtering: bool,
     pub enable_tool_call_fallback: bool,
     pub mode: ExecutionMode,
+    pub tool_profile: ToolProfileName,
     pub skill_filter: Option<Vec<String>>,
 }
 
 impl Default for AgentLoopConfig {
     fn default() -> Self {
         Self {
+            session_id: String::new(),
             model_id: String::new(),
             workspace_root: std::path::PathBuf::new(),
+            initial_history: Vec::new(),
             system_prompt: None,
             max_iterations: 25,
             max_prompt_tokens: None,
@@ -55,6 +62,7 @@ impl Default for AgentLoopConfig {
             aggressive_tool_filtering: false,
             enable_tool_call_fallback: true,
             mode: ExecutionMode::Full,
+            tool_profile: ToolProfileName::default(),
             skill_filter: None,
         }
     }
@@ -69,6 +77,8 @@ pub struct AgentResponse {
     pub tool_calls_made: usize,
     pub usage: TokenUsage,
     pub latency_ms: u64,
+    pub budget: ContextBudgetTelemetry,
+    pub summary_artifacts: Vec<ContextSummaryArtifact>,
 }
 
 /// Errors during agent execution.
@@ -115,7 +125,7 @@ pub struct AgentLoop {
     #[allow(dead_code)]
     audit: Arc<AuditLog>,
     skill_runtime: crate::runtime::SkillRuntime,
-    prompt_builder: PromptBuilder,
+    context_budget: ContextBudgetManager,
     /// In-memory conversation history for the current run.
     history: Vec<ChatMessage>,
 }
@@ -133,6 +143,7 @@ impl AgentLoop {
         event_bus: Arc<EventBus>,
         audit: Arc<AuditLog>,
     ) -> Self {
+        let history = config.initial_history.clone();
         Self {
             config,
             provider,
@@ -142,8 +153,8 @@ impl AgentLoop {
             approval,
             event_bus,
             audit,
-            history: Vec::new(),
-            prompt_builder: PromptBuilder,
+            history,
+            context_budget: ContextBudgetManager,
         }
     }
 
@@ -157,7 +168,15 @@ impl AgentLoop {
     /// 5. Guard: stop after `max_iterations`
     pub async fn run(&mut self, user_message: &str) -> Result<AgentResponse, AgentError> {
         let started = Instant::now();
-        let session_id = uuid::Uuid::new_v4().to_string();
+        let session_id = if self.config.session_id.trim().is_empty() {
+            uuid::Uuid::new_v4().to_string()
+        } else {
+            self.config.session_id.clone()
+        };
+        self.event_bus.emit(AgentEvent::RunStarted {
+            session_id: session_id.clone(),
+            model: self.config.model_id.clone(),
+        });
 
         use crate::audit::{AuditEventType, AuditLogEntry};
         self.log_audit(AuditLogEntry {
@@ -175,6 +194,9 @@ impl AgentLoop {
             duration_ms: None,
             decision: None,
             reason: None,
+            policy_rule: None,
+            policy_trace: Vec::new(),
+            tool_risk: None,
             error: None,
             error_summary: None,
         })
@@ -207,6 +229,8 @@ impl AgentLoop {
             completion_tokens: 0,
             total_tokens: 0,
         };
+        let mut last_budget: ContextBudgetTelemetry;
+        let mut last_summary_artifacts: Vec<ContextSummaryArtifact>;
 
         loop {
             iterations += 1;
@@ -217,17 +241,25 @@ impl AgentLoop {
                     iterations,
                     "agent loop exceeded max iterations"
                 );
+                self.event_bus.emit(AgentEvent::RunFailed {
+                    session_id: session_id.clone(),
+                    error: format!("agent exceeded {} iterations", self.config.max_iterations),
+                });
                 return Err(AgentError::MaxIterations {
                     max: self.config.max_iterations,
                 });
             }
 
             let prompt = self.build_prompt_context(
+                &session_id,
+                provider_id,
                 &profile,
                 &conversation,
                 &all_tool_defs,
                 &skill_summaries,
             );
+            last_budget = prompt.telemetry.clone();
+            last_summary_artifacts = prompt.summary_artifacts.clone();
 
             debug!(
                 session = %session_id,
@@ -239,6 +271,10 @@ impl AgentLoop {
                 prompt_estimate = prompt.estimated_prompt_tokens,
                 "calling provider"
             );
+            self.event_bus.emit(AgentEvent::ThinkingDelta {
+                session_id: session_id.clone(),
+                delta: format!("Iteracao {iterations}: consultando provider...\n"),
+            });
 
             // Call provider with tools.
             let should_force_reprompt = self.config.enable_tool_call_fallback
@@ -253,26 +289,68 @@ impl AgentLoop {
                     .collect::<Vec<_>>()
             });
 
-            let response = self
+            let options = GenerationOptions {
+                temperature: Some(
+                    self.config
+                        .temperature
+                        .unwrap_or(profile.temperature_default),
+                ),
+                max_tokens: Some(self.config.max_tokens_per_turn),
+                top_p: None,
+                airllm_enabled: None,
+            };
+            let tool_request = ChatToolsRequest {
+                model_id: self.config.model_id.clone(),
+                messages: prompt.messages.clone(),
+                tools: prompt.tools,
+                options: options.clone(),
+            };
+            let direct_request = ChatRequest {
+                model_id: self.config.model_id.clone(),
+                messages: prompt.messages,
+                options,
+            };
+
+            let (response, used_direct_fallback) = match self
                 .provider
-                .chat_with_tools_with_runtime(
-                    ChatToolsRequest {
-                        model_id: self.config.model_id.clone(),
-                        messages: prompt.messages,
-                        tools: prompt.tools,
-                        options: GenerationOptions {
-                            temperature: Some(
-                                self.config
-                                    .temperature
-                                    .unwrap_or(profile.temperature_default),
-                            ),
-                            max_tokens: Some(self.config.max_tokens_per_turn),
-                            top_p: None,
-                        },
-                    },
-                    self.config.provider_runtime.clone(),
-                )
-                .await?;
+                .chat_with_tools_with_runtime(tool_request, self.config.provider_runtime.clone())
+                .await
+            {
+                Ok(response) => (response, false),
+                Err(error)
+                    if self.config.enable_tool_call_fallback
+                        && should_fallback_to_direct_chat(&error) =>
+                {
+                    self.event_bus.emit(AgentEvent::ThinkingDelta {
+                        session_id: session_id.clone(),
+                        delta:
+                            "Modelo atual nao suporta tools; seguindo em modo de resposta direta.\n"
+                                .to_string(),
+                    });
+
+                    match self
+                        .provider
+                        .chat_with_runtime(direct_request, self.config.provider_runtime.clone())
+                        .await
+                    {
+                        Ok(response) => (response, true),
+                        Err(fallback_error) => {
+                            self.event_bus.emit(AgentEvent::RunFailed {
+                                session_id: session_id.clone(),
+                                error: fallback_error.to_string(),
+                            });
+                            return Err(fallback_error.into());
+                        }
+                    }
+                }
+                Err(error) => {
+                    self.event_bus.emit(AgentEvent::RunFailed {
+                        session_id: session_id.clone(),
+                        error: error.to_string(),
+                    });
+                    return Err(error.into());
+                }
+            };
 
             // Accumulate usage.
             total_usage.prompt_tokens += response.usage.prompt_tokens;
@@ -283,14 +361,16 @@ impl AgentLoop {
 
             // Check if there are tool calls.
             if assistant_msg.tool_calls.is_empty() {
-                if let Some(tool_names) = tool_names_for_reprompt {
-                    fallback_attempted = true;
-                    conversation.push(assistant_msg.clone());
-                    conversation.push(ChatMessage::text(
-                        MessageRole::User,
-                        PromptBuilder::tool_call_reprompt(&tool_names),
-                    ));
-                    continue;
+                if !used_direct_fallback {
+                    if let Some(tool_names) = tool_names_for_reprompt {
+                        fallback_attempted = true;
+                        conversation.push(assistant_msg.clone());
+                        conversation.push(ChatMessage::text(
+                            MessageRole::User,
+                            PromptBuilder::tool_call_reprompt(&tool_names),
+                        ));
+                        continue;
+                    }
                 }
 
                 // Final response — no more tool calls.
@@ -306,6 +386,14 @@ impl AgentLoop {
                 self.history
                     .push(ChatMessage::text(MessageRole::User, user_message));
                 self.history.push(assistant_msg.clone());
+                self.event_bus.emit(AgentEvent::TextDelta {
+                    session_id: session_id.clone(),
+                    delta: assistant_msg.content.clone(),
+                });
+                self.event_bus.emit(AgentEvent::RunCompleted {
+                    session_id: session_id.clone(),
+                    latency_ms: elapsed_ms_u64(started),
+                });
 
                 self.log_audit(AuditLogEntry {
                     id: uuid::Uuid::new_v4().to_string(),
@@ -322,6 +410,9 @@ impl AgentLoop {
                     duration_ms: Some(elapsed_ms_u64(started)),
                     decision: None,
                     reason: None,
+                    policy_rule: None,
+                    policy_trace: Vec::new(),
+                    tool_risk: None,
                     error: None,
                     error_summary: None,
                 })
@@ -334,6 +425,8 @@ impl AgentLoop {
                     tool_calls_made: total_tool_calls,
                     usage: total_usage,
                     latency_ms: elapsed_ms_u64(started),
+                    budget: last_budget,
+                    summary_artifacts: last_summary_artifacts,
                 });
             }
 
@@ -349,12 +442,37 @@ impl AgentLoop {
                     call_id = %tool_call.id,
                     "executing tool call"
                 );
+                self.event_bus.emit(AgentEvent::ToolCallStarted {
+                    session_id: session_id.clone(),
+                    tool: tool_call.name.clone(),
+                    call_id: tool_call.id.clone(),
+                    params: serde_json::from_str(&tool_call.arguments).unwrap_or_default(),
+                });
+                self.event_bus.emit(AgentEvent::ThinkingDelta {
+                    session_id: session_id.clone(),
+                    delta: format!("Executando tool '{}'\n", tool_call.name),
+                });
 
                 let result = self.execute_tool_call(tool_call, &session_id).await;
 
                 let tool_output = match result {
-                    Ok(output) => output,
-                    Err(e) => format!("Error: {e}"),
+                    Ok(output) => {
+                        self.event_bus.emit(AgentEvent::ToolCallCompleted {
+                            session_id: session_id.clone(),
+                            tool: tool_call.name.clone(),
+                            call_id: tool_call.id.clone(),
+                            result: output.clone(),
+                            result_preview: output.chars().take(240).collect(),
+                        });
+                        output
+                    }
+                    Err(e) => {
+                        self.event_bus.emit(AgentEvent::ThinkingDelta {
+                            session_id: session_id.clone(),
+                            delta: format!("Tool '{}' retornou erro: {e}\n", tool_call.name),
+                        });
+                        format!("Error: {e}")
+                    }
                 };
 
                 // Inject tool result.
@@ -365,20 +483,195 @@ impl AgentLoop {
 
     fn build_prompt_context(
         &self,
+        session_id: &str,
+        provider_id: &str,
         profile: &ModelPromptProfile,
         conversation: &[ChatMessage],
         all_tool_defs: &[FunctionDef],
         skill_summaries: &[String],
-    ) -> crate::prompt_builder::PromptBuildOutput {
-        self.prompt_builder.build(PromptBuildInput {
-            system_prompt_override: self.config.system_prompt.as_deref(),
+    ) -> crate::context_budget::ContextBudgetOutput {
+        self.context_budget.build(ContextBudgetInput {
+            session_id,
+            provider_id,
+            model_id: &self.config.model_id,
+            tool_profile: self.config.tool_profile,
             execution_mode: self.config.mode,
             profile,
+            system_prompt_override: self.config.system_prompt.as_deref(),
             conversation,
             skill_summaries,
             tools: all_tool_defs,
             aggressive_tool_filtering: self.config.aggressive_tool_filtering,
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn request_tool_approval(
+        &self,
+        session_id: &str,
+        tool_name: &str,
+        skill_name: Option<String>,
+        params_hash: String,
+        params_summary: String,
+        tool_started: Instant,
+        prompt: String,
+        approval_id: String,
+        policy_rule: String,
+        policy_trace: Vec<crate::tool_catalog::ToolRuleTrace>,
+        tool_risk: Option<String>,
+    ) -> Result<(), AgentError> {
+        use crate::approval::{ApprovalDecision, ApprovalRequest};
+        use crate::audit::{AuditEventType, AuditLogEntry};
+
+        let req = ApprovalRequest {
+            id: approval_id,
+            skill_name: skill_name.clone(),
+            tool_name: tool_name.to_string(),
+            description: prompt,
+            params_summary: params_summary.clone(),
+            created_at: chrono::Utc::now(),
+            expires_at: chrono::Utc::now() + std::time::Duration::from_secs(300),
+        };
+
+        self.event_bus
+            .emit(crate::events::AgentEvent::ApprovalRequired {
+                request: req.clone(),
+            });
+
+        self.log_audit(AuditLogEntry {
+            id: uuid::Uuid::new_v4().to_string(),
+            timestamp: chrono::Utc::now(),
+            session_id: session_id.into(),
+            event_type: AuditEventType::ApprovalPending,
+            provider: None,
+            model: None,
+            tool_name: Some(tool_name.to_string()),
+            skill_name: skill_name.clone(),
+            params_hash: Some(params_hash.clone()),
+            params_summary: Some(params_summary),
+            result_summary: None,
+            duration_ms: Some(tool_started.elapsed().as_millis() as u64),
+            decision: None,
+            reason: None,
+            policy_rule: Some(policy_rule.clone()),
+            policy_trace: policy_trace.clone(),
+            tool_risk: tool_risk.clone(),
+            error: None,
+            error_summary: None,
+        })
+        .await;
+
+        match self
+            .approval
+            .request_approval(req, std::time::Duration::from_secs(300))
+            .await
+        {
+            Ok(ApprovalDecision::AllowOnce) | Ok(ApprovalDecision::AllowSession) => {
+                self.log_audit(AuditLogEntry {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    timestamp: chrono::Utc::now(),
+                    session_id: session_id.into(),
+                    event_type: AuditEventType::ApprovalDecision,
+                    provider: None,
+                    model: None,
+                    tool_name: Some(tool_name.to_string()),
+                    skill_name,
+                    params_hash: Some(params_hash),
+                    params_summary: None,
+                    result_summary: None,
+                    duration_ms: Some(tool_started.elapsed().as_millis() as u64),
+                    decision: Some("allow".into()),
+                    reason: None,
+                    policy_rule: Some(policy_rule),
+                    policy_trace,
+                    tool_risk,
+                    error: None,
+                    error_summary: None,
+                })
+                .await;
+                Ok(())
+            }
+            Ok(ApprovalDecision::AllowAlways { pattern }) => {
+                self.approval.add_allowlist_entry(tool_name, pattern);
+                self.log_audit(AuditLogEntry {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    timestamp: chrono::Utc::now(),
+                    session_id: session_id.into(),
+                    event_type: AuditEventType::ApprovalDecision,
+                    provider: None,
+                    model: None,
+                    tool_name: Some(tool_name.to_string()),
+                    skill_name,
+                    params_hash: Some(params_hash),
+                    params_summary: None,
+                    result_summary: None,
+                    duration_ms: Some(tool_started.elapsed().as_millis() as u64),
+                    decision: Some("allow_always".into()),
+                    reason: None,
+                    policy_rule: Some(policy_rule),
+                    policy_trace,
+                    tool_risk,
+                    error: None,
+                    error_summary: None,
+                })
+                .await;
+                Ok(())
+            }
+            Ok(ApprovalDecision::Deny) => {
+                self.log_audit(AuditLogEntry {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    timestamp: chrono::Utc::now(),
+                    session_id: session_id.into(),
+                    event_type: AuditEventType::ApprovalDecision,
+                    provider: None,
+                    model: None,
+                    tool_name: Some(tool_name.to_string()),
+                    skill_name,
+                    params_hash: Some(params_hash),
+                    params_summary: None,
+                    result_summary: None,
+                    duration_ms: Some(tool_started.elapsed().as_millis() as u64),
+                    decision: Some("deny".into()),
+                    reason: Some("User denied execution".into()),
+                    policy_rule: Some(policy_rule),
+                    policy_trace,
+                    tool_risk,
+                    error: None,
+                    error_summary: None,
+                })
+                .await;
+                Err(AgentError::PolicyDenied {
+                    reason: "User denied execution".into(),
+                })
+            }
+            Err(error) => {
+                self.log_audit(AuditLogEntry {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    timestamp: chrono::Utc::now(),
+                    session_id: session_id.into(),
+                    event_type: AuditEventType::ApprovalDecision,
+                    provider: None,
+                    model: None,
+                    tool_name: Some(tool_name.to_string()),
+                    skill_name,
+                    params_hash: Some(params_hash),
+                    params_summary: None,
+                    result_summary: None,
+                    duration_ms: Some(tool_started.elapsed().as_millis() as u64),
+                    decision: Some("error".into()),
+                    reason: None,
+                    policy_rule: Some(policy_rule),
+                    policy_trace,
+                    tool_risk,
+                    error: Some(error.to_string()),
+                    error_summary: None,
+                })
+                .await;
+                Err(AgentError::PolicyDenied {
+                    reason: format!("Approval failed: {}", error),
+                })
+            }
+        }
     }
 
     /// Execute a single tool call through the registry.
@@ -418,11 +711,13 @@ impl AgentLoop {
             .active_skill
             .as_deref()
             .and_then(|name| self.skill_runtime.get(name));
-        match self
+        let inspection = self
             .policy
-            .check_tool_call(&tool_call.name, &params, active_skill_pkg, self.config.mode)
-            .await
-        {
+            .inspect_tool_call(&tool_call.name, &params, active_skill_pkg, self.config.mode)
+            .await;
+        let tool_risk = inspection.risk.map(format_tool_risk);
+
+        match inspection.decision {
             PolicyDecision::Deny { reason } => {
                 self.event_bus
                     .emit(crate::events::AgentEvent::ToolCallDenied {
@@ -446,6 +741,9 @@ impl AgentLoop {
                     duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                     decision: Some("deny".into()),
                     reason: Some(reason.clone()),
+                    policy_rule: Some(inspection.final_rule.clone()),
+                    policy_trace: inspection.trace.clone(),
+                    tool_risk: tool_risk.clone(),
                     error: Some(reason.clone()),
                     error_summary: None,
                 })
@@ -457,142 +755,50 @@ impl AgentLoop {
                 prompt,
                 approval_id,
             } => {
-                use crate::approval::{ApprovalDecision, ApprovalRequest};
-                let req = ApprovalRequest {
-                    id: approval_id,
-                    skill_name: ctx.active_skill.clone(),
-                    tool_name: tool_call.name.clone(),
-                    description: prompt,
-                    params_summary: params_summary.clone(),
-                    created_at: chrono::Utc::now(),
-                    // 5 minutes expiry
-                    expires_at: chrono::Utc::now() + std::time::Duration::from_secs(300),
-                };
+                self.request_tool_approval(
+                    session_id,
+                    &tool_call.name,
+                    ctx.active_skill.clone(),
+                    params_hash.clone(),
+                    params_summary.clone(),
+                    tool_started,
+                    prompt,
+                    approval_id,
+                    inspection.final_rule.clone(),
+                    inspection.trace.clone(),
+                    tool_risk.clone(),
+                )
+                .await?;
+            }
+            PolicyDecision::Allow => {
+                let approval_pattern = params_hash.clone();
+                let risk_requires_approval = inspection
+                    .risk
+                    .map(|risk| risk.requires_approval())
+                    .unwrap_or(false)
+                    && !self.approval.is_allowed(&tool_call.name, &approval_pattern);
 
-                self.event_bus
-                    .emit(crate::events::AgentEvent::ApprovalRequired {
-                        request: req.clone(),
-                    });
-
-                self.log_audit(AuditLogEntry {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    timestamp: chrono::Utc::now(),
-                    session_id: session_id.into(),
-                    event_type: AuditEventType::ApprovalPending,
-                    provider: None,
-                    model: None,
-                    tool_name: Some(tool_call.name.clone()),
-                    skill_name: ctx.active_skill.clone(),
-                    params_hash: Some(params_hash.clone()),
-                    params_summary: Some(params_summary.clone()),
-                    result_summary: None,
-                    duration_ms: Some(tool_started.elapsed().as_millis() as u64),
-                    decision: None,
-                    reason: None,
-                    error: None,
-                    error_summary: None,
-                })
-                .await;
-
-                match self
-                    .approval
-                    .request_approval(req, std::time::Duration::from_secs(300))
-                    .await
-                {
-                    Ok(ApprovalDecision::AllowOnce) | Ok(ApprovalDecision::AllowSession) => {
-                        self.log_audit(AuditLogEntry {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            timestamp: chrono::Utc::now(),
-                            session_id: session_id.into(),
-                            event_type: AuditEventType::ApprovalDecision,
-                            provider: None,
-                            model: None,
-                            tool_name: Some(tool_call.name.clone()),
-                            skill_name: ctx.active_skill.clone(),
-                            params_hash: Some(params_hash.clone()),
-                            params_summary: None,
-                            result_summary: None,
-                            duration_ms: Some(tool_started.elapsed().as_millis() as u64),
-                            decision: Some("allow".into()),
-                            reason: None,
-                            error: None,
-                            error_summary: None,
-                        })
-                        .await;
-                    }
-                    Ok(ApprovalDecision::AllowAlways { pattern }) => {
-                        self.approval.add_allowlist_entry(&tool_call.name, pattern);
-                        self.log_audit(AuditLogEntry {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            timestamp: chrono::Utc::now(),
-                            session_id: session_id.into(),
-                            event_type: AuditEventType::ApprovalDecision,
-                            provider: None,
-                            model: None,
-                            tool_name: Some(tool_call.name.clone()),
-                            skill_name: ctx.active_skill.clone(),
-                            params_hash: Some(params_hash.clone()),
-                            params_summary: None,
-                            result_summary: None,
-                            duration_ms: Some(tool_started.elapsed().as_millis() as u64),
-                            decision: Some("allow_always".into()),
-                            reason: None,
-                            error: None,
-                            error_summary: None,
-                        })
-                        .await;
-                    }
-                    Ok(ApprovalDecision::Deny) => {
-                        self.log_audit(AuditLogEntry {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            timestamp: chrono::Utc::now(),
-                            session_id: session_id.into(),
-                            event_type: AuditEventType::ApprovalDecision,
-                            provider: None,
-                            model: None,
-                            tool_name: Some(tool_call.name.clone()),
-                            skill_name: ctx.active_skill.clone(),
-                            params_hash: Some(params_hash.clone()),
-                            params_summary: None,
-                            result_summary: None,
-                            duration_ms: Some(tool_started.elapsed().as_millis() as u64),
-                            decision: Some("deny".into()),
-                            reason: Some("User denied execution".into()),
-                            error: None,
-                            error_summary: None,
-                        })
-                        .await;
-                        return Err(AgentError::PolicyDenied {
-                            reason: "User denied execution".into(),
-                        });
-                    }
-                    Err(e) => {
-                        self.log_audit(AuditLogEntry {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            timestamp: chrono::Utc::now(),
-                            session_id: session_id.into(),
-                            event_type: AuditEventType::ApprovalDecision,
-                            provider: None,
-                            model: None,
-                            tool_name: Some(tool_call.name.clone()),
-                            skill_name: ctx.active_skill.clone(),
-                            params_hash: Some(params_hash.clone()),
-                            params_summary: None,
-                            result_summary: None,
-                            duration_ms: Some(tool_started.elapsed().as_millis() as u64),
-                            decision: Some("error".into()),
-                            reason: None,
-                            error: Some(e.to_string()),
-                            error_summary: None,
-                        })
-                        .await;
-                        return Err(AgentError::PolicyDenied {
-                            reason: format!("Approval failed: {}", e),
-                        });
-                    }
+                if risk_requires_approval {
+                    let risk_label = tool_risk.clone().unwrap_or_else(|| "high".to_string());
+                    self.request_tool_approval(
+                        session_id,
+                        &tool_call.name,
+                        ctx.active_skill.clone(),
+                        params_hash.clone(),
+                        params_summary.clone(),
+                        tool_started,
+                        format!(
+                            "Tool '{}' has risk '{}'; approve execution?",
+                            tool_call.name, risk_label
+                        ),
+                        uuid::Uuid::new_v4().to_string(),
+                        inspection.final_rule.clone(),
+                        inspection.trace.clone(),
+                        tool_risk.clone(),
+                    )
+                    .await?;
                 }
             }
-            PolicyDecision::Allow => {}
         }
 
         let result = match self
@@ -616,6 +822,9 @@ impl AgentLoop {
                     duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                     decision: None,
                     reason: None,
+                    policy_rule: Some(inspection.final_rule.clone()),
+                    policy_trace: inspection.trace.clone(),
+                    tool_risk: tool_risk.clone(),
                     error: None,
                     error_summary: None,
                 })
@@ -638,6 +847,9 @@ impl AgentLoop {
                     duration_ms: Some(tool_started.elapsed().as_millis() as u64),
                     decision: None,
                     reason: None,
+                    policy_rule: Some(inspection.final_rule),
+                    policy_trace: inspection.trace,
+                    tool_risk,
                     error: Some(e.to_string()),
                     error_summary: None,
                 })
@@ -677,6 +889,16 @@ fn elapsed_ms_u64(started: Instant) -> u64 {
     u64::try_from(started.elapsed().as_millis())
         .unwrap_or(u64::MAX)
         .max(1)
+}
+
+fn should_fallback_to_direct_chat(error: &ProviderError) -> bool {
+    let message = error.to_string().to_ascii_lowercase();
+    message.contains("does not support tools")
+        || message.contains("does not support tool-calling")
+        || message.contains("does not support tool calling")
+        || message.contains("tools are not supported")
+        || message.contains("tool calling")
+        || message.contains("tool-calling")
 }
 
 fn hash_sha256_hex(input: &str) -> String {
@@ -770,6 +992,16 @@ fn compact_whitespace_preview(input: &str, max_chars: usize) -> Cow<'_, str> {
         preview.push_str("...");
     }
     Cow::Owned(preview)
+}
+
+fn format_tool_risk(risk: crate::tool_catalog::ToolRisk) -> String {
+    match risk {
+        crate::tool_catalog::ToolRisk::Low => "low",
+        crate::tool_catalog::ToolRisk::Medium => "medium",
+        crate::tool_catalog::ToolRisk::High => "high",
+        crate::tool_catalog::ToolRisk::Critical => "critical",
+    }
+    .to_string()
 }
 
 #[cfg(test)]
@@ -942,8 +1174,10 @@ mod tests {
 
         AgentLoop::new(
             AgentLoopConfig {
+                session_id: "test-session".into(),
                 model_id: "mock-model".into(),
                 workspace_root: tmp,
+                initial_history: Vec::new(),
                 system_prompt: Some("You are a helpful assistant.".into()),
                 max_iterations: 10,
                 max_prompt_tokens: None,
@@ -955,6 +1189,7 @@ mod tests {
                 aggressive_tool_filtering: false,
                 enable_tool_call_fallback: true,
                 mode: ExecutionMode::Full,
+                tool_profile: ToolProfileName::Coding,
                 skill_filter: None,
             },
             provider,
@@ -1191,5 +1426,69 @@ mod tests {
         assert_eq!(response.tool_calls_made, 1);
         assert_eq!(response.iterations, 3);
         assert!(response.content.contains("listed"));
+    }
+
+    #[tokio::test]
+    async fn agent_loop_falls_back_to_direct_chat_when_tools_are_unsupported() {
+        struct NoToolsProvider {
+            tool_calls: AtomicUsize,
+            direct_calls: AtomicUsize,
+        }
+
+        #[async_trait::async_trait]
+        impl ModelProvider for NoToolsProvider {
+            fn provider_id(&self) -> &'static str {
+                "ollama"
+            }
+
+            async fn list_models(&self) -> Result<Vec<ModelDescriptor>, ProviderError> {
+                Ok(vec![])
+            }
+
+            async fn chat(&self, _r: ChatRequest) -> Result<ChatResponse, ProviderError> {
+                self.direct_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(ChatResponse {
+                    model_id: "mock-model".into(),
+                    provider: "ollama".into(),
+                    message: ChatMessage::text(
+                        MessageRole::Assistant,
+                        "Resposta direta sem uso de tools.",
+                    ),
+                    usage: TokenUsage {
+                        prompt_tokens: 10,
+                        completion_tokens: 8,
+                        total_tokens: 18,
+                    },
+                    latency_ms: 15,
+                    raw_output: None,
+                })
+            }
+
+            async fn chat_with_tools(
+                &self,
+                _req: ChatToolsRequest,
+            ) -> Result<ChatResponse, ProviderError> {
+                self.tool_calls.fetch_add(1, Ordering::SeqCst);
+                Err(ProviderError::Unavailable {
+                    details: "registry.ollama.ai/library/deepseek-r1:8b does not support tools"
+                        .into(),
+                })
+            }
+        }
+
+        let provider = Arc::new(NoToolsProvider {
+            tool_calls: AtomicUsize::new(0),
+            direct_calls: AtomicUsize::new(0),
+        });
+        let mut agent = create_test_loop(provider.clone());
+        agent.config.enable_tool_call_fallback = true;
+
+        let response = agent.run("explique o estado atual").await.unwrap();
+
+        assert_eq!(response.iterations, 1);
+        assert_eq!(response.tool_calls_made, 0);
+        assert!(response.content.contains("Resposta direta"));
+        assert_eq!(provider.tool_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(provider.direct_calls.load(Ordering::SeqCst), 1);
     }
 }

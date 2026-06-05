@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use mlx_ollama_core::{
     ChatMessage, ChatRequest, ChatResponse, ChatToolsRequest, GenerationOptions, MessageRole,
-    ModelDescriptor, ModelProvider, ProviderError, TokenUsage,
+    ModelDescriptor, ModelProvider, ProviderError, RuntimeProviderConfig, TokenUsage,
 };
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -57,8 +57,23 @@ impl OllamaProvider {
         }
     }
 
+    pub fn config(&self) -> &OllamaProviderConfig {
+        &self.cfg
+    }
+
     fn endpoint(&self, path: &str) -> Result<String, ProviderError> {
-        let base = self.cfg.base_url.trim();
+        self.endpoint_with_runtime(path, None)
+    }
+
+    fn endpoint_with_runtime(
+        &self,
+        path: &str,
+        runtime: Option<&RuntimeProviderConfig>,
+    ) -> Result<String, ProviderError> {
+        let base = runtime
+            .and_then(|cfg| cfg.base_url.as_deref())
+            .unwrap_or(self.cfg.base_url.as_str())
+            .trim();
         if base.is_empty() {
             return Err(ProviderError::InvalidRequest {
                 details: "APP_OLLAMA_BASE_URL nao pode ser vazio".to_string(),
@@ -130,16 +145,40 @@ impl OllamaProvider {
         self.wait_until_ready().await
     }
 
-    async fn ping_server(&self) -> bool {
-        let endpoint = match self.endpoint("/api/version") {
+    async fn ensure_ready_with_runtime(
+        &self,
+        runtime: Option<&RuntimeProviderConfig>,
+    ) -> Result<(), ProviderError> {
+        if runtime
+            .and_then(|cfg| cfg.base_url.as_deref())
+            .filter(|value| !value.trim().is_empty())
+            .is_some()
+        {
+            if self
+                .ping_server_with_timeout(Duration::from_secs(2), runtime)
+                .await
+            {
+                return Ok(());
+            }
+            return Err(ProviderError::Unavailable {
+                details: "runtime Ollama base_url did not respond".to_string(),
+            });
+        }
+
+        self.ensure_ready().await
+    }
+
+    async fn ping_server_with_timeout(
+        &self,
+        timeout: Duration,
+        runtime: Option<&RuntimeProviderConfig>,
+    ) -> bool {
+        let endpoint = match self.endpoint_with_runtime("/api/version", runtime) {
             Ok(value) => value,
             Err(_) => return false,
         };
 
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(2))
-            .build()
-        {
+        let client = match reqwest::Client::builder().timeout(timeout).build() {
             Ok(client) => client,
             Err(_) => return false,
         };
@@ -150,6 +189,32 @@ impl OllamaProvider {
             .await
             .map(|response| response.status().is_success())
             .unwrap_or(false)
+    }
+
+    async fn ping_server(&self) -> bool {
+        self.ping_server_with_timeout(Duration::from_secs(2), None)
+            .await
+    }
+
+    fn apply_runtime_headers(
+        &self,
+        builder: reqwest::RequestBuilder,
+        runtime: Option<&RuntimeProviderConfig>,
+    ) -> reqwest::RequestBuilder {
+        let mut out = builder;
+        if let Some(runtime) = runtime {
+            for (key, value) in &runtime.headers {
+                out = out.header(key, value);
+            }
+            if let Some(api_key) = runtime
+                .api_key
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+            {
+                out = out.bearer_auth(api_key);
+            }
+        }
+        out
     }
 
     async fn wait_until_ready(&self) -> Result<(), ProviderError> {
@@ -320,6 +385,8 @@ struct OllamaChatRequestBody {
     messages: Vec<OllamaChatMessage>,
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    think: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     options: Option<OllamaOptions>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     tools: Vec<OllamaTool>,
@@ -403,12 +470,23 @@ impl ModelProvider for OllamaProvider {
     }
 
     async fn list_models(&self) -> Result<Vec<ModelDescriptor>, ProviderError> {
-        self.ensure_ready().await?;
+        self.list_models_with_runtime(None).await
+    }
 
-        let endpoint = self.endpoint("/api/tags")?;
+    async fn list_models_with_runtime(
+        &self,
+        runtime: Option<RuntimeProviderConfig>,
+    ) -> Result<Vec<ModelDescriptor>, ProviderError> {
+        if !self
+            .ping_server_with_timeout(Duration::from_millis(400), runtime.as_ref())
+            .await
+        {
+            return Ok(Vec::new());
+        }
+
+        let endpoint = self.endpoint_with_runtime("/api/tags", runtime.as_ref())?;
         let response = self
-            .client
-            .get(&endpoint)
+            .apply_runtime_headers(self.client.get(&endpoint), runtime.as_ref())
             .send()
             .await
             .map_err(Self::map_network_error)?;
@@ -451,6 +529,9 @@ impl ModelProvider for OllamaProvider {
                     provider: self.provider_id().to_string(),
                     path: id,
                     is_available: true,
+                    agent_tool_mode: None,
+                    agent_tool_reason: None,
+                    agent_recommended: false,
                 })
             })
             .collect::<Vec<_>>();
@@ -460,8 +541,29 @@ impl ModelProvider for OllamaProvider {
     }
 
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, ProviderError> {
-        self.do_chat(&request.model_id, &request.messages, &request.options, None)
-            .await
+        self.do_chat(
+            &request.model_id,
+            &request.messages,
+            &request.options,
+            None,
+            None,
+        )
+        .await
+    }
+
+    async fn chat_with_runtime(
+        &self,
+        request: ChatRequest,
+        runtime: Option<RuntimeProviderConfig>,
+    ) -> Result<ChatResponse, ProviderError> {
+        self.do_chat(
+            &request.model_id,
+            &request.messages,
+            &request.options,
+            None,
+            runtime.as_ref(),
+        )
+        .await
     }
 
     async fn chat_with_tools(
@@ -473,18 +575,55 @@ impl ModelProvider for OllamaProvider {
             &request.messages,
             &request.options,
             Some(request.tools),
+            None,
+        )
+        .await
+    }
+
+    async fn chat_with_tools_with_runtime(
+        &self,
+        request: ChatToolsRequest,
+        runtime: Option<RuntimeProviderConfig>,
+    ) -> Result<ChatResponse, ProviderError> {
+        self.do_chat(
+            &request.model_id,
+            &request.messages,
+            &request.options,
+            Some(request.tools),
+            runtime.as_ref(),
         )
         .await
     }
 }
 
 impl OllamaProvider {
+    pub async fn begin_chat_stream(
+        &self,
+        model_id: &str,
+        messages: &[ChatMessage],
+        options: &GenerationOptions,
+    ) -> Result<reqwest::Response, ProviderError> {
+        let mut body = self.build_chat_request(model_id, messages, options, None)?;
+        body.stream = true;
+        body.think = Some(true);
+        self.ensure_ready().await?;
+
+        let endpoint = self.endpoint("/api/chat")?;
+        self.client
+            .post(&endpoint)
+            .json(&body)
+            .send()
+            .await
+            .map_err(Self::map_network_error)
+    }
+
     async fn do_chat(
         &self,
         model_id: &str,
         messages: &[ChatMessage],
         options: &GenerationOptions,
         tools: Option<Vec<mlx_ollama_core::FunctionDef>>,
+        runtime: Option<&RuntimeProviderConfig>,
     ) -> Result<ChatResponse, ProviderError> {
         if messages.is_empty() {
             return Err(ProviderError::InvalidRequest {
@@ -492,66 +631,14 @@ impl OllamaProvider {
             });
         }
 
-        self.ensure_ready().await?;
+        let body = self.build_chat_request(model_id, messages, options, tools)?;
+        self.ensure_ready_with_runtime(runtime).await?;
 
-        let endpoint = self.endpoint("/api/chat")?;
+        let endpoint = self.endpoint_with_runtime("/api/chat", runtime)?;
         let started = Instant::now();
 
-        let mut mapped_messages = Vec::with_capacity(messages.len());
-        for message in messages {
-            let role = match message.role {
-                MessageRole::System => "system".to_string(),
-                MessageRole::User => "user".to_string(),
-                MessageRole::Assistant => "assistant".to_string(),
-                MessageRole::Tool => "tool".to_string(),
-            };
-
-            let tool_calls = message
-                .tool_calls
-                .iter()
-                .map(|tc| OllamaToolCall {
-                    function: OllamaToolCallFunction {
-                        name: tc.name.clone(),
-                        arguments: serde_json::from_str(&tc.arguments).unwrap_or_default(),
-                    },
-                })
-                .collect();
-
-            mapped_messages.push(OllamaChatMessage {
-                role,
-                content: message.content.clone(),
-                tool_calls,
-            });
-        }
-
-        let mapped_tools = tools
-            .unwrap_or_default()
-            .into_iter()
-            .map(|f| OllamaTool {
-                tool_type: "function".to_string(),
-                function: OllamaFunction {
-                    name: f.name,
-                    description: f.description,
-                    parameters: f.parameters,
-                },
-            })
-            .collect();
-
-        let body = OllamaChatRequestBody {
-            model: model_id.to_string(),
-            messages: mapped_messages,
-            stream: false,
-            options: Some(OllamaOptions {
-                temperature: options.temperature,
-                max_tokens: options.max_tokens,
-                top_p: options.top_p,
-            }),
-            tools: mapped_tools,
-        };
-
         let response = self
-            .client
-            .post(&endpoint)
+            .apply_runtime_headers(self.client.post(&endpoint), runtime)
             .json(&body)
             .send()
             .await
@@ -629,6 +716,73 @@ impl OllamaProvider {
             usage,
             latency_ms,
             raw_output,
+        })
+    }
+
+    fn build_chat_request(
+        &self,
+        model_id: &str,
+        messages: &[ChatMessage],
+        options: &GenerationOptions,
+        tools: Option<Vec<mlx_ollama_core::FunctionDef>>,
+    ) -> Result<OllamaChatRequestBody, ProviderError> {
+        if messages.is_empty() {
+            return Err(ProviderError::InvalidRequest {
+                details: "messages cannot be empty".to_string(),
+            });
+        }
+
+        let mut mapped_messages = Vec::with_capacity(messages.len());
+        for message in messages {
+            let role = match message.role {
+                MessageRole::System => "system".to_string(),
+                MessageRole::User => "user".to_string(),
+                MessageRole::Assistant => "assistant".to_string(),
+                MessageRole::Tool => "tool".to_string(),
+            };
+
+            let tool_calls = message
+                .tool_calls
+                .iter()
+                .map(|tc| OllamaToolCall {
+                    function: OllamaToolCallFunction {
+                        name: tc.name.clone(),
+                        arguments: serde_json::from_str(&tc.arguments).unwrap_or_default(),
+                    },
+                })
+                .collect();
+
+            mapped_messages.push(OllamaChatMessage {
+                role,
+                content: message.content.clone(),
+                tool_calls,
+            });
+        }
+
+        let mapped_tools = tools
+            .unwrap_or_default()
+            .into_iter()
+            .map(|f| OllamaTool {
+                tool_type: "function".to_string(),
+                function: OllamaFunction {
+                    name: f.name,
+                    description: f.description,
+                    parameters: f.parameters,
+                },
+            })
+            .collect();
+
+        Ok(OllamaChatRequestBody {
+            model: model_id.to_string(),
+            messages: mapped_messages,
+            stream: false,
+            think: None,
+            options: Some(OllamaOptions {
+                temperature: options.temperature,
+                max_tokens: options.max_tokens,
+                top_p: options.top_p,
+            }),
+            tools: mapped_tools,
         })
     }
 }
@@ -747,5 +901,19 @@ mod tests {
                 .unwrap(),
             "San Francisco"
         );
+    }
+
+    #[test]
+    fn runtime_endpoint_override_uses_runtime_base_url() {
+        let provider = OllamaProvider::new(OllamaProviderConfig::default());
+        let runtime = RuntimeProviderConfig {
+            base_url: Some("http://127.0.0.1:22445".to_string()),
+            api_key: None,
+            headers: Default::default(),
+        };
+        let endpoint = provider
+            .endpoint_with_runtime("/api/chat", Some(&runtime))
+            .unwrap();
+        assert_eq!(endpoint, "http://127.0.0.1:22445/api/chat");
     }
 }

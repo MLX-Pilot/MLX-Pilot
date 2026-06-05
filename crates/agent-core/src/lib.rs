@@ -5,26 +5,60 @@
 //! audit logging, and session persistence.
 
 pub mod agent_loop;
+pub mod agent_runtime;
 pub mod approval;
 pub mod audit;
+pub mod capabilities;
+pub mod context_budget;
 pub mod events;
+pub mod memory;
+pub mod memory_manager;
 pub mod policy;
 pub mod prompt_builder;
 pub mod registry;
 pub mod runtime;
 pub mod session;
+pub mod session_recall;
+pub mod state_store;
+pub mod tool_catalog;
 
 // Re-exports for convenience.
 pub use agent_loop::{AgentError, AgentLoop, AgentLoopConfig, AgentResponse};
+pub use agent_runtime::{
+    AgentRuntime, AgentRuntimeConfig, AgentRuntimeResponse, AgentTurnEvent, DelegateTaskRequest,
+    GatewayContext, MemoryQuery, MemorySnapshotMode, RuntimeVariant, SessionContextEnvelope,
+    StopReason,
+};
 pub use approval::{
     ApprovalDecision, ApprovalError, ApprovalMode, ApprovalRequest, ApprovalService,
 };
 pub use audit::{AuditEventType, AuditLog, AuditLogEntry};
+pub use capabilities::{
+    CapabilityAuthority, CapabilityBinding, CapabilityContextKind, CapabilityError,
+    CapabilityManifest, CapabilityScopeRules, CapabilityScopes, CapabilitySubject,
+};
+pub use context_budget::{
+    ContextBudgetInput, ContextBudgetManager, ContextBudgetOutput, ContextBudgetTelemetry,
+    ContextSummaryArtifact, ResponseStyle,
+};
 pub use events::{AgentEvent, EventBus};
-pub use policy::{PolicyConfig, PolicyDecision, PolicyEngine};
+pub use memory::{MemoryPromotionDecision, MemoryRecord, MemorySearchHit, MemoryStore};
+pub use memory_manager::{MemoryContextBlock, MemoryLifecycleResult, MemoryManager};
+pub use policy::{PolicyConfig, PolicyDecision, PolicyEngine, PolicyToolInspection};
 pub use prompt_builder::{
     select_model_prompt_profile, ModelPromptProfile, ModelPromptProfileKind, PromptBuildInput,
     PromptBuildOutput, PromptBuilder, VerbosityLevel,
 };
-pub use registry::ToolRegistry;
-pub use session::{SessionMessage, SessionStore};
+pub use registry::{
+    ChannelDescriptor, ChannelRegistry, HelpMetadata, PluginClass, PluginDescriptor,
+    PluginRegistry, ToolRegistry,
+};
+pub use runtime::{LazyRuntimeRegistry, RuntimeHealth, RuntimeStatus, SkillRuntime};
+pub use session::{SessionMessage, SessionMeta, SessionSnapshot, SessionStore};
+pub use session_recall::{SessionRecall, SessionRecallHit};
+pub use tool_catalog::{
+    catalog_entry, profile_tool_names, resolve_effective_tool_policy, resolve_tool_access,
+    tool_catalog, toolset_profile, toolset_profiles, EffectiveToolPolicy, EffectiveToolPolicyEntry,
+    ToolAccessDecision, ToolCatalogEntry, ToolPolicyState, ToolProfileName, ToolRisk, ToolRuleSet,
+    ToolRuleTrace, ToolSection, ToolsetDelegationPolicy, ToolsetProfile,
+};

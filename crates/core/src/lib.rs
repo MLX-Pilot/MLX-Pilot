@@ -100,6 +100,8 @@ pub struct GenerationOptions {
     pub max_tokens: Option<u32>,
     #[serde(default)]
     pub top_p: Option<f32>,
+    #[serde(default)]
+    pub airllm_enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,6 +136,12 @@ pub struct ModelDescriptor {
     pub provider: String,
     pub path: String,
     pub is_available: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_tool_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_tool_reason: Option<String>,
+    #[serde(default)]
+    pub agent_recommended: bool,
 }
 
 #[derive(Debug, Error)]

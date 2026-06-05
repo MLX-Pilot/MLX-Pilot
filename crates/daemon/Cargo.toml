@@ -31,3 +31,7 @@ llamacpp-provider = { path = "../providers/llamacpp" }
 ollama-provider = { path = "../providers/ollama" }
 http-llm-provider = { path = "../providers/http_llm_provider" }
 chrono.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile = "3.25.0"
