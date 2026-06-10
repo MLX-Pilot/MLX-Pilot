@@ -966,7 +966,7 @@
       loadSessions(),
     ]);
 
-    void Promise.allSettled([
+    Promise.allSettled([
       loadModels({ force: true }),
       loadPlugins(),
       loadSkills(),
@@ -974,7 +974,7 @@
       loadChannels(),
       loadAudit(),
       loadEnvironment(),
-    ]);
+    ]).catch(e => console.error('Background load failed:', e));
   }
 
   async function startApp() {
@@ -984,7 +984,7 @@
     revealApp();
   }
 
-  void startApp();
+  startApp().catch(e => console.error('Boot failed:', e));
 
   function updateStatusBadge(online) {
     const badge = document.getElementById('status-badge');
@@ -1185,7 +1185,7 @@
       if (configuredModel) {
         const configuredEntry = state.models.find(model => model.id === configuredModel);
         if (configuredEntry && isLocalProvider(config?.provider) && !isToolReadyModel(configuredEntry)) {
-          void ensureAgentCompatibleModel({ persist: true });
+          ensureAgentCompatibleModel({ persist: true }).catch(e => console.error('Agent compat check failed:', e));
         }
       }
       updateAgentWorkspaceSummary();
@@ -1402,7 +1402,7 @@
   });
 
   document.getElementById('agent-save-provider-profiles')?.addEventListener('click', () => {
-    void saveAgentProviderProfiles();
+    saveAgentProviderProfiles().catch(e => console.error('Save provider profiles failed:', e));
   });
 
   // -- Models -------------------------------------------------
@@ -1421,7 +1421,7 @@
         if (state.currentModel) state.currentModel = resolveModelId(state.currentModel, state.agentConfig?.provider);
         if (state.currentModel) ensureVisibleModel(state.currentModel, state.agentConfig?.provider);
         if (state.agentConfig && (!state.agentConfig.model_id || isAgentPanelActive())) {
-          void ensureAgentCompatibleModel({ persist: isAgentPanelActive() });
+          ensureAgentCompatibleModel({ persist: isAgentPanelActive() }).catch(e => console.error('Agent compat check failed:', e));
         }
         state.modelsLoaded = true;
         state.modelsStale = false;
@@ -1694,13 +1694,16 @@
             metrics = { ...metrics, ...evt };
             addMetrics(assistantEl, metrics);
             const rendered = renderAssistantOutput(assistantEl, { rawAnswer, streamedThinking, finalize: true });
-            if (rendered.answer) {
-              state.messages.push({ role: 'assistant', content: rendered.answer });
-            }
+            state.messages.push({ role: 'assistant', content: rendered.answer || rawAnswer || '' });
           } else if (evt.event === 'error') {
             throw new Error(evt.message || 'Erro desconhecido');
           }
         }
+      }
+      // Stream ended without 'done' event — finalize partial response
+      if (rawAnswer && !metrics?.total_tokens) {
+        const rendered = renderAssistantOutput(assistantEl, { rawAnswer, streamedThinking, finalize: true });
+        state.messages.push({ role: 'assistant', content: rendered.answer || rawAnswer });
       }
     } catch (e) {
       if (e.name === 'AbortError') addSystemMsg('Geração interrompida.');
@@ -1717,9 +1720,7 @@
       const res = await api('/chat', { method: 'POST', body: JSON.stringify(payload) });
       const content = res?.message?.content || res?.final_response || 'Sem resposta.';
       const rendered = renderAssistantOutput(el, { rawAnswer: content, finalize: true });
-      if (rendered.answer) {
-        state.messages.push({ role: 'assistant', content: rendered.answer });
-      }
+      state.messages.push({ role: 'assistant', content: rendered.answer || content });
       if (res?.usage) addMetrics(el, { prompt_tokens: res.usage.prompt_tokens, completion_tokens: res.usage.completion_tokens, total_tokens: res.usage.total_tokens, latency_ms: res.latency_ms });
     } catch (e) {
       updateAnswer(el, `Erro: ${e.message}`);
@@ -1859,11 +1860,23 @@
     let rawAnswer = '';
     let metrics = {};
 
-    const res = await fetch(state.daemonUrl + '/agent/stream', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...payload, streaming: true }),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+    let res;
+    try {
+      res = await fetch(state.daemonUrl + '/agent/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, streaming: true }),
+        signal: controller.signal,
+      });
+    } catch (e) {
+      clearTimeout(timeoutId);
+      if (e.name === 'AbortError') return null;
+      return null;
+    }
+    clearTimeout(timeoutId);
 
     if (!res.ok) {
       if (res.status === 404 || res.status === 405 || res.status === 501) return null;
@@ -1884,7 +1897,8 @@
         const line = buffer.slice(0, idx).trim();
         buffer = buffer.slice(idx + 1);
         if (!line) continue;
-        const evt = JSON.parse(line);
+        let evt;
+        try { evt = JSON.parse(line); } catch { continue; }
         if (evt.event === 'status') {
           updateStreamStatus(assistantEl, evt.status);
         } else if (evt.event === 'thinking_delta') {
@@ -1913,11 +1927,11 @@
     }
 
     const rendered = renderAssistantOutput(assistantEl, { rawAnswer, streamedThinking, finalize: true });
-    if (rendered.answer) {
-      state.messages.push({ role: 'assistant', content: rendered.answer });
+    if (rendered.answer || rawAnswer) {
+      state.messages.push({ role: 'assistant', content: rendered.answer || rawAnswer });
     }
     if (metrics?.total_tokens) addMetrics(assistantEl, metrics);
-    return { answer: rendered.answer, metrics, session_id: metrics?.session_id || payload.session_id || null };
+    return { answer: rendered.answer || rawAnswer, metrics, session_id: metrics?.session_id || payload.session_id || null };
   }
 
   function addMetrics(el, m) {
@@ -1937,6 +1951,8 @@
   }
 
   // -- Sessions (sidebar history) -----------------------------
+  let _sessionLoadCounter = 0;
+
   async function loadSessions() {
     try {
       const sessions = await api('/agent/sessions');
@@ -1983,10 +1999,51 @@
         item.className = 'history-item' + (active ? ' active' : '');
         item.innerHTML = `<span class="history-icon">&#9679;</span><span class="history-label" title="${esc(name)}">${esc(name)} <span style="opacity:0.5;font-size:11px">(${count})</span></span>`;
       }
-      item.addEventListener('click', () => {
+      item.addEventListener('click', async () => {
+        const loadId = ++_sessionLoadCounter;
         state.currentSessionId = s.id;
-        renderAgentChatEmptyState();
         renderSidebarHistory();
+        try {
+          const msgs = await api(`/agent/sessions/${s.id}`);
+          if (loadId !== _sessionLoadCounter) return;
+          if (Array.isArray(msgs)) {
+            if (variant === 'sidebar') {
+              const chatMessages = msgs
+                .filter(m => m.role === 'user' || m.role === 'assistant')
+                .map(m => ({ role: m.role, content: m.content }));
+              state.messages = chatMessages;
+              const container = document.getElementById('chat-messages');
+              if (container) {
+                if (chatMessages.length === 0) {
+                  container.innerHTML = '<div class="welcome-message" style="text-align:center;padding:60px 20px;max-width:500px;margin:0 auto"><h3 style="font-family:var(--font-heading);font-size:20px;margin-bottom:8px">MLX Pilot Chat</h3><p style="font-size:14px;color:var(--text-tertiary)">Selecione um modelo e envie sua mensagem.</p></div>';
+                } else {
+                  container.innerHTML = '';
+                  chatMessages.forEach(m => addMessage(m.role, m.content));
+                }
+              }
+            } else {
+              const box = document.getElementById('agent-chat-messages');
+              if (box) {
+                if (msgs.length === 0) {
+                  renderAgentChatEmptyState();
+                } else {
+                  box.innerHTML = '';
+                  msgs.forEach(m => {
+                    if (m.role === 'user') {
+                      box.insertAdjacentHTML('beforeend', `<div class="message user-message"><div class="msg-avatar">U</div><div class="msg-body"><div class="msg-content">${esc(m.content)}</div></div></div>`);
+                    } else if (m.role === 'assistant') {
+                      box.insertAdjacentHTML('beforeend', `<div class="message assistant-message"><div class="msg-avatar assistant">AG</div><div class="msg-body"><div class="msg-content markdown-body">${esc(m.content)}</div></div></div>`);
+                    }
+                  });
+                  box.scrollTop = box.scrollHeight;
+                }
+              }
+            }
+          }
+        } catch (e) {
+          if (loadId === _sessionLoadCounter && variant === 'agent') renderAgentChatEmptyState();
+          if (loadId === _sessionLoadCounter) console.error('Failed to load session messages:', e);
+        }
       });
       container.appendChild(item);
     });
@@ -2405,7 +2462,7 @@
       if (state.activeDiscoverTab === 'installed') showInstalledModels();
     }
     if (target === 'agent') {
-      void ensureAgentCompatibleModel({ persist: true });
+      ensureAgentCompatibleModel({ persist: true }).catch(e => console.error('Agent compat check failed:', e));
       updateAgentWorkspaceSummary();
     }
     if (target === 'ai-interaction') initAICanvas();
@@ -2500,6 +2557,10 @@
     try {
       const modelId = activeAgentModelId();
       if (!modelId) throw new Error('Selecione um modelo valido antes de executar o agent.');
+      if (!state.currentSessionId) {
+        const session = await api('/agent/sessions', { method: 'POST', body: JSON.stringify({}) });
+        if (session?.id) state.currentSessionId = session.id;
+      }
       const payload = {
         session_id: state.currentSessionId,
         message: msg,
@@ -2676,7 +2737,7 @@
 
   document.getElementById('btn-export-session')?.addEventListener('click', () => {
     if (!state.currentSessionId) { alert('Nenhuma sessão selecionada'); return; }
-    window.open(state.daemonUrl + '/agent/sessions/' + state.currentSessionId + '/export', '_blank');
+    window.open(state.daemonUrl + '/agent/sessions/' + encodeURIComponent(state.currentSessionId) + '/export', '_blank');
   });
 
   // -- Agent: New Channel -------------------------------------
@@ -2776,8 +2837,8 @@
 
   // -- Utilities ----------------------------------------------
   function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
-  function fmtBytes(b) { if (b >= 1e9) return (b / 1e9).toFixed(1) + ' GB'; if (b >= 1e6) return (b / 1e6).toFixed(1) + ' MB'; return (b / 1e3).toFixed(0) + ' KB'; }
-  function fmtNum(n) { if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'; if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K'; return String(n); }
+  function fmtBytes(b) { if (b == null || isNaN(b)) return 'N/A'; if (b >= 1e9) return (b / 1e9).toFixed(1) + ' GB'; if (b >= 1e6) return (b / 1e6).toFixed(1) + ' MB'; return (b / 1e3).toFixed(0) + ' KB'; }
+  function fmtNum(n) { if (n == null || isNaN(n)) return 'N/A'; if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'; if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K'; return String(n); }
   function fmtDuration(s) { if (s < 60) return s + 's'; if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`; return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`; }
   function modelIcon(id) { const l = (id || '').toLowerCase(); if (l.includes('llama')) return 'llama'; if (l.includes('mistral')) return 'mistral'; if (l.includes('qwen')) return 'qwen'; if (l.includes('deepseek')) return 'deepseek'; if (l.includes('phi')) return 'phi'; return 'llama'; }
 
