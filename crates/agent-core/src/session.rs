@@ -301,6 +301,10 @@ impl SessionStore {
         self.state.load_session_events(session_id).await
     }
 
+    pub async fn get_meta(&self, session_id: &str) -> Result<Option<SessionMeta>, std::io::Error> {
+        self.state.get_session_meta(session_id).await
+    }
+
     pub async fn list_sessions(&self) -> Result<Vec<SessionMeta>, std::io::Error> {
         self.state.list_sessions().await
     }
