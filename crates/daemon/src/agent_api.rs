@@ -24,7 +24,7 @@ use mlx_agent_core::{
 };
 use mlx_agent_tools::ExecutionMode;
 use mlx_ollama_core::{
-    ChatMessage, FunctionDef, MessageRole, ModelProvider, RuntimeProviderConfig,
+    ChatMessage, FunctionDef, MessageRole, ModelProvider, RuntimeProviderConfig, ToolCallRequest,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -1066,10 +1066,34 @@ fn session_messages_to_chat_history(
         .filter(|message| {
             matches!(
                 message.kind.trim().to_ascii_lowercase().as_str(),
-                "user" | "assistant" | "tool_result" | "message"
+                "user" | "assistant" | "tool_result" | "message" | "tool_call"
             )
         })
         .map(|message| {
+            let kind = message.kind.trim().to_ascii_lowercase();
+            if kind == "tool_call" {
+                let mut tool_calls = Vec::new();
+                if let (Some(ref call_id), Some(ref tool_name)) =
+                    (message.tool_call_id.as_deref(), message.tool_name.as_deref())
+                {
+                    let arguments = message
+                        .content_json
+                        .as_ref()
+                        .map(|v| v.to_string())
+                        .unwrap_or_default();
+                    tool_calls.push(ToolCallRequest {
+                        id: call_id.to_string(),
+                        name: tool_name.to_string(),
+                        arguments,
+                    });
+                }
+                return ChatMessage {
+                    role: MessageRole::Assistant,
+                    content: String::new(),
+                    tool_calls,
+                    tool_call_id: None,
+                };
+            }
             let role = match message.role.trim().to_ascii_lowercase().as_str() {
                 "system" => mlx_ollama_core::MessageRole::System,
                 "assistant" => mlx_ollama_core::MessageRole::Assistant,
@@ -3866,6 +3890,10 @@ pub async fn agent_stream(
                     }
                     break;
                 }
+                _ = tx.closed() => {
+                    run_task.abort();
+                    break;
+                }
                 event = subscription.recv() => {
                     let Ok(event) = event else { continue; };
                     let frame = match event {
@@ -3896,12 +3924,14 @@ pub async fn agent_stream(
 
                     if let Some(frame) = frame {
                         if tx.send(frame).await.is_err() {
+                            run_task.abort();
                             break;
                         }
                     }
                 }
             }
         }
+        run_task.abort();
     });
 
     let stream = ReceiverStream::new(rx).map(|event| {
@@ -5039,6 +5069,20 @@ pub async fn agent_get_session(
     State(state): State<super::AppState>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> Result<Json<Vec<mlx_agent_core::session::SessionMessage>>, AgentApiError> {
+    let meta = state.session_store.get_meta(&id).await.map_err(|e| {
+        AgentApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "session_error",
+            Some(format!("Failed to check session: {e}")),
+        )
+    })?;
+    if meta.is_none() {
+        return Err(AgentApiError::new(
+            StatusCode::NOT_FOUND,
+            "session_not_found",
+            Some(format!("Session {id} not found")),
+        ));
+    }
     let messages = state.session_store.load(&id).await.map_err(|e| {
         AgentApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -5059,8 +5103,13 @@ pub async fn agent_rename_session(
         .rename(&id, &req.name)
         .await
         .map_err(|e| {
+            let status = if e.kind() == std::io::ErrorKind::NotFound {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
             AgentApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
+                status,
                 "session_error",
                 Some(format!("Failed to rename session: {e}")),
             )
