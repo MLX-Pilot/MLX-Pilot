@@ -198,8 +198,7 @@ impl StateStore {
                     summary = excluded.summary,
                     source_channel = excluded.source_channel,
                     thread_id = excluded.thread_id,
-                    correlation_id = excluded.correlation_id,
-                    message_count = excluded.message_count
+                    correlation_id = excluded.correlation_id
                 "#,
                 params![
                     meta.id,
