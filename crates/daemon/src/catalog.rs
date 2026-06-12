@@ -289,6 +289,7 @@ impl CatalogService {
         self.patch_job(job_id, |entry| {
             entry.status = DownloadStatus::Cancelling;
             entry.output = Some("cancelamento solicitado".to_string());
+            entry.can_cancel = false;
         })
         .await;
 
@@ -659,7 +660,7 @@ pub struct DownloadJob {
     pub can_cancel: bool,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DownloadStatus {
     Queued,
@@ -882,5 +883,76 @@ fn wildcard_match_impl(pattern: &[char], p_idx: usize, value: &[char], v_idx: us
                 false
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_service() -> CatalogService {
+        CatalogService::new(CatalogConfig {
+            hf_api_base: "http://127.0.0.1:9".to_string(),
+            hf_token: None,
+            downloads_root: std::env::temp_dir().join("mlx-pilot-catalog-tests"),
+            search_limit_default: 10,
+            download_timeout: Duration::from_secs(1),
+        })
+        .expect("catalog service")
+    }
+
+    #[tokio::test]
+    async fn cancelling_job_disables_repeated_cancellation() {
+        let service = test_service();
+        let job_id = "dl-test-cancel".to_string();
+        let flag = Arc::new(AtomicBool::new(false));
+
+        service.jobs.write().await.insert(
+            job_id.clone(),
+            DownloadJob {
+                id: job_id.clone(),
+                source: HF_SOURCE_ID.to_string(),
+                model_id: "acme/model".to_string(),
+                destination: "unused".to_string(),
+                status: DownloadStatus::Running,
+                created_at: 1,
+                started_at: Some(1),
+                finished_at: None,
+                output: None,
+                error: None,
+                allow_patterns: Vec::new(),
+                progress_percent: 42.0,
+                bytes_downloaded: 42,
+                bytes_total: 100,
+                total_files: 1,
+                completed_files: 0,
+                current_file: Some("model.gguf".to_string()),
+                can_cancel: true,
+            },
+        );
+        service
+            .cancel_flags
+            .write()
+            .await
+            .insert(job_id.clone(), flag.clone());
+
+        let cancelled = service
+            .cancel_download(&job_id)
+            .await
+            .expect("cancel request");
+
+        assert_eq!(cancelled.status, DownloadStatus::Cancelling);
+        assert!(!cancelled.can_cancel);
+        assert!(flag.load(Ordering::Relaxed));
+        assert!(matches!(
+            service.cancel_download(&job_id).await,
+            Err(CatalogError::BadRequest(_))
+        ));
+    }
+
+    #[test]
+    fn progress_prefers_known_byte_total() {
+        assert_eq!(calc_progress_percent(50, 100, 0, 4), 50.0);
+        assert_eq!(calc_progress_percent(0, 0, 2, 4), 50.0);
     }
 }
