@@ -229,10 +229,13 @@ impl JobRegistry {
     /// Get the current record for a job.
     pub async fn get(&self, id: &str) -> Option<JobRecord> {
         let inner = self.inner.read().await;
-        inner.get(id).map(|h| {
-            let rec = h.record.blocking_read();
-            rec.clone()
-        })
+        match inner.get(id) {
+            Some(h) => {
+                let rec = h.record.read().await;
+                Some(rec.clone())
+            }
+            None => None,
+        }
     }
 
     /// Cancel a job by id. Returns the current record if the job was cancellable.
@@ -240,7 +243,7 @@ impl JobRegistry {
         let inner = self.inner.read().await;
         if let Some(handle) = inner.get(id) {
             handle.token.cancel();
-            let rec = handle.record.blocking_read();
+            let rec = handle.record.read().await;
             if matches!(rec.status, JobStatus::Queued | JobStatus::Running) {
                 Some(rec.clone())
             } else {
@@ -254,20 +257,19 @@ impl JobRegistry {
     /// List all known jobs (active + recently finished).
     pub async fn list(&self) -> Vec<JobRecord> {
         let inner = self.inner.read().await;
-        let mut records: Vec<JobRecord> = inner
-            .values()
-            .map(|h| {
-                let rec = h.record.blocking_read();
-                rec.clone()
-            })
-            .collect();
+        let handles: Vec<_> = inner.values().cloned().collect();
+        let mut records = Vec::with_capacity(handles.len());
+        for h in handles {
+            let rec = h.record.read().await;
+            records.push(rec.clone());
+        }
         records.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         records
     }
 
     /// Subscribe to progress events for a job.
-    pub fn subscribe(&self, id: &str) -> Option<broadcast::Receiver<JobProgress>> {
-        let inner = self.inner.blocking_read();
+    pub async fn subscribe(&self, id: &str) -> Option<broadcast::Receiver<JobProgress>> {
+        let inner = self.inner.read().await;
         inner.get(id).map(|h| h.progress_tx.subscribe())
     }
 
@@ -275,20 +277,27 @@ impl JobRegistry {
     pub async fn prune(&self, max_age: Duration) {
         let now = Utc::now();
         let mut inner = self.inner.write().await;
-        inner.retain(|_, h| {
-            let rec = h.record.blocking_read();
-            match rec.status {
-                JobStatus::Done | JobStatus::Error | JobStatus::Cancelled => {
-                    if let Some(finished) = rec.finished_at {
-                        let age = (now - finished).num_seconds().max(0) as u64;
-                        age < max_age.as_secs()
-                    } else {
-                        true
+        let keys: Vec<String> = inner.keys().cloned().collect();
+        let mut to_remove = Vec::new();
+        for id in &keys {
+            if let Some(h) = inner.get(id) {
+                let rec = h.record.read().await;
+                match rec.status {
+                    JobStatus::Done | JobStatus::Error | JobStatus::Cancelled => {
+                        if let Some(finished) = rec.finished_at {
+                            let age = (now - finished).num_seconds().max(0) as u64;
+                            if age >= max_age.as_secs() {
+                                to_remove.push(id.clone());
+                            }
+                        }
                     }
+                    _ => {}
                 }
-                _ => true,
             }
-        });
+        }
+        for id in to_remove {
+            inner.remove(&id);
+        }
     }
 }
 
@@ -324,7 +333,7 @@ pub async fn job_stream(
     State(state): State<crate::AppState>,
     AxumPath(job_id): AxumPath<String>,
 ) -> Result<Sse<impl Stream<Item = Result<axum::response::sse::Event, io::Error>>>, StatusCode> {
-    let rx = state.jobs.subscribe(&job_id).ok_or(StatusCode::NOT_FOUND)?;
+    let rx = state.jobs.subscribe(&job_id).await.ok_or(StatusCode::NOT_FOUND)?;
 
     let stream = BroadcastStream::new(rx).map(|result| match result {
         Ok(progress) => {
