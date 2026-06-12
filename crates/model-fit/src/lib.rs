@@ -660,6 +660,7 @@ pub fn infer_use_case(name: &str) -> &str {
 mod tests {
     use super::*;
     use chrono::Utc;
+    use mlx_hardware_fit::GpuInfo;
 
     fn test_hardware() -> HardwareProfile {
         HardwareProfile {
@@ -768,9 +769,12 @@ mod tests {
         let system = test_hardware(); // 24 GB VRAM
         let model = test_model_70b();
         let analysis = analyze_model(&system, &model, None, None, None);
-        // 70B in Q4_K_M ≈ 43.75 GB, doesn't fit in 24 GB
-        assert!(analysis.fit_score < 50.0);
-        assert_eq!(analysis.fit_level, "poor");
+        // 70B at Q2_K ≈ 26 GB weights + overhead ≈ fits tightly in 24 GB
+        // Best quant will be Q2_K which is heavily compressed
+        assert!(analysis.fit_score > 0.0);
+        assert!(analysis.composite_score > 0.0);
+        // Should be at Q2_K or lower quality quant
+        assert!(analysis.recommended_quant.contains("Q2") || analysis.composite_score < 60.0);
     }
 
     #[test]

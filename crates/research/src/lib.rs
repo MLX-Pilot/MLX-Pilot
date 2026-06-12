@@ -765,7 +765,7 @@ pub fn render_markdown_to_html(md: &str) -> String {
     comrak::markdown_to_html(md, &options)
 }
 
-/// Sanitize HTML, allowing only safe tags.
+/// Sanitize HTML, allowing only safe tags (ammonia defaults + structural/visual extras).
 pub fn sanitize_html(html: &str) -> String {
     let mut builder = ammonia::Builder::default();
     builder
@@ -773,7 +773,6 @@ pub fn sanitize_html(html: &str) -> String {
         .add_tags(&["h1", "h2", "h3", "h4", "h5", "h6"])
         .add_tags(&["p", "br", "hr"])
         .add_tags(&["ul", "ol", "li"])
-        .add_tags(&["a"])
         .add_tags(&["strong", "em", "b", "i", "u", "s", "del", "ins"])
         .add_tags(&["code", "pre"])
         .add_tags(&["blockquote"])
@@ -782,8 +781,7 @@ pub fn sanitize_html(html: &str) -> String {
         .add_tags(&["div", "span", "section", "nav", "main", "article", "header", "footer"])
         .add_tags(&["details", "summary"])
         .add_tags(&["button"])
-        .add_tag_attributes("a", &["href", "title", "target", "rel"])
-        .add_tag_attributes("img", &["src", "alt", "title", "width", "height", "loading"])
+        .add_tag_attributes("img", &["src", "alt", "title", "width", "height", "loading", "data-hidden"])
         .add_tag_attributes("td", &["align"])
         .add_tag_attributes("th", &["align"])
         .add_tag_attributes("col", &["span", "width"])
