@@ -8,6 +8,7 @@ mod plugins;
 mod runtime_doctor;
 mod secrets_vault;
 mod startup;
+mod wave1;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -20,7 +21,7 @@ use axum::body::Body;
 use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use bytes::Bytes;
 use catalog::{
@@ -65,6 +66,8 @@ struct AppState {
     pub agent_state: agent_api::AgentState,
     pub plugin_manager: Arc<PluginManager>,
     pub channel_service: Arc<ChannelService>,
+    pub presets: Arc<mlx_agent_core::PresetStore>,
+    pub compare: Arc<mlx_agent_core::CompareStore>,
     startup: startup::StartupCoordinator,
 }
 
@@ -458,6 +461,26 @@ pub async fn run() -> anyhow::Result<()> {
         ),
         plugin_manager: Arc::new(PluginManager::new(AppConfig::get_settings_path())),
         channel_service: Arc::new(ChannelService::new(AppConfig::get_settings_path())),
+        presets: Arc::new(
+            mlx_agent_core::PresetStore::new(
+                AppConfig::get_settings_path()
+                    .parent()
+                    .unwrap_or(std::path::Path::new("."))
+                    .join("presets"),
+            )
+            .await
+            .expect("Failed to initialize preset store"),
+        ),
+        compare: Arc::new(
+            mlx_agent_core::CompareStore::new(
+                AppConfig::get_settings_path()
+                    .parent()
+                    .unwrap_or(std::path::Path::new("."))
+                    .join("compare"),
+            )
+            .await
+            .expect("Failed to initialize compare store"),
+        ),
         startup,
     };
 
@@ -586,6 +609,47 @@ pub async fn run() -> anyhow::Result<()> {
             "/agent/sessions/{id}/export",
             get(agent_api::agent_export_session),
         )
+        // ── Wave 1: Presets ──
+        .route(
+            "/agent/presets",
+            get(wave1::list_presets).post(wave1::save_preset),
+        )
+        .route(
+            "/agent/presets/{id}",
+            get(wave1::get_preset).delete(wave1::delete_preset),
+        )
+        // ── Wave 1: Persistent memory ──
+        .route(
+            "/agent/memory",
+            get(wave1::list_memory).post(wave1::add_memory),
+        )
+        .route("/agent/memory/search", get(wave1::search_memory))
+        .route(
+            "/agent/memory/{id}",
+            get(wave1::get_memory)
+                .patch(wave1::update_memory)
+                .delete(wave1::delete_memory),
+        )
+        .route("/agent/memory/{id}/pin", post(wave1::pin_memory))
+        // ── Wave 1: Session history organization + editing ──
+        .route("/agent/sessions/{id}/messages", get(wave1::session_messages))
+        .route("/agent/sessions/{id}/flags", post(wave1::session_set_flags))
+        .route("/agent/sessions/{id}/fork", post(wave1::session_fork))
+        .route("/agent/sessions/{id}/truncate", post(wave1::session_truncate))
+        .route(
+            "/agent/sessions/{id}/messages/{event_id}",
+            patch(wave1::session_edit_message).delete(wave1::session_delete_message),
+        )
+        .route("/agent/sessions/{id}/download", get(wave1::session_export))
+        // ── Wave 1: Compare ──
+        .route("/compare/run", post(wave1::compare_run))
+        .route("/compare/history", get(wave1::compare_history))
+        .route(
+            "/compare/{id}",
+            get(wave1::compare_get).delete(wave1::compare_delete),
+        )
+        .route("/compare/{id}/vote", post(wave1::compare_vote))
+        .route("/compare/{id}/synthesize", post(wave1::compare_synthesize))
         .with_state(state)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());

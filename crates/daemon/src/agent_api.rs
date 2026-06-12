@@ -3508,6 +3508,9 @@ async fn run_agent_once(
                 .as_ref()
                 .map(|context| context.correlation_id.clone())
                 .unwrap_or_default(),
+            folder: String::new(),
+            archived: false,
+            pinned: false,
         })
         .await;
 
