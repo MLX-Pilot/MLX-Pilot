@@ -37,8 +37,20 @@
         </svg>
       </div>
       <h1 class="splash-title">MLX PILOT</h1>
-      <p class="splash-sub">Initializing orbital systems...</p>
-      <div class="splash-bar"><div class="splash-bar-fill"></div></div>
+      <p class="splash-sub" id="startup-message">Iniciando o MLX Pilot</p>
+      <div class="splash-bar indeterminate" id="startup-progress" role="progressbar" aria-label="Inicializacao">
+        <div class="splash-bar-fill" id="startup-progress-fill"></div>
+      </div>
+      <div class="startup-meta" id="startup-meta">Conectando ao daemon local...</div>
+      <div class="startup-providers" id="startup-providers"></div>
+      <div class="startup-actions">
+        <button class="startup-btn danger" id="startup-cancel" type="button" hidden>Cancelar</button>
+        <button class="startup-btn" id="startup-retry" type="button" hidden>Tentar novamente</button>
+      </div>
+      <details class="startup-details">
+        <summary>Detalhes tecnicos</summary>
+        <pre id="startup-technical">Aguardando diagnostico...</pre>
+      </details>
     </div>
   </div>
 
@@ -216,6 +228,17 @@
                 </select>
               </div>
 
+              <section class="download-panel" id="catalog-download-panel" hidden>
+                <div class="download-panel-header">
+                  <div>
+                    <span class="download-panel-eyebrow">Instalacao de modelos</span>
+                    <h3>Downloads</h3>
+                  </div>
+                  <span class="download-panel-summary" id="catalog-download-summary"></span>
+                </div>
+                <div class="download-list" id="catalog-download-list"></div>
+              </section>
+
               <div id="catalog-results" class="model-cards">
                 <div style="padding:40px;text-align:center;color:var(--text-tertiary)">
                   Busque por nome para encontrar modelos no HuggingFace
@@ -248,7 +271,7 @@
                 <div class="agent-shell-copy">
                   <span class="agent-shell-eyebrow">Codex-style Workspace</span>
                   <h2 class="section-title">Agent Workspace</h2>
-                  <p class="section-subtitle">Sessoes na coluna esquerda, conversa no centro e toda a administracao concentrada em Config.</p>
+                  <p class="section-subtitle">Sessoes, conversa e administracao do agente.</p>
                 </div>
 
                 <div class="agent-shell-actions">
@@ -287,7 +310,6 @@
                     <div class="agent-prompt-panel">
                       <div class="agent-prompt-panel-head">
                         <span class="agent-summary-label">Atalhos</span>
-                        <span class="agent-meta-pill">3</span>
                       </div>
                       <div class="agent-prompt-grid">
                         <button class="agent-prompt-card" type="button" data-agent-prompt="Revise a configuracao atual do agent e sugira ajustes de runtime.">
@@ -398,14 +420,17 @@
                           <div class="filter-row">
                             <button class="action-btn" id="agent-add-provider-profile" type="button">+ Novo profile</button>
                             <button class="primary-btn" id="agent-save-provider-profiles" type="button">Salvar profiles</button>
+                            <button class="action-btn" id="agent-toggle-provider-profiles" type="button" title="Mostrar/ocultar profiles avancados">&#9660; Colapsar</button>
                           </div>
                         </div>
+                        <div id="agent-provider-profile-container">
                         <div class="plugin-list" id="agent-provider-profile-list">
                           <div style="padding:16px;text-align:center;color:var(--text-tertiary)">Carregando profiles...</div>
                         </div>
                         <p class="meta-note" id="agent-provider-profiles-note">
                           Edite provider, modelo, endpoint e refer&ecirc;ncia de secret. Use o profile desejado para tornar esse backend ativo no Agent.
                         </p>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -466,6 +491,11 @@
                         Observabilidade
                       </h3>
                       <div class="filter-row">
+                        <button class="action-btn audit-filter-pill active" data-audit-filter="all">Todas</button>
+                        <button class="action-btn audit-filter-pill" data-audit-filter="tool">Ferramentas</button>
+                        <button class="action-btn audit-filter-pill" data-audit-filter="bash">Bash</button>
+                        <button class="action-btn audit-filter-pill" data-audit-filter="approval">Aprovacoes</button>
+                        <button class="action-btn audit-filter-pill" data-audit-filter="error">Erros</button>
                         <button class="action-btn" id="refresh-audit">Atualizar</button>
                       </div>
                     </div>

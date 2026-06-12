@@ -107,13 +107,17 @@
     airllmEnabled: false,
     healthOk: false,
     provider: '',
+    runtimeStartup: null,
     daemonConfig: null,
     catalogModels: [],
     downloads: [],
+    downloadsLoading: false,
+    downloadRefreshTimer: null,
     agentConfig: null,
     agentSessions: [],
     currentSessionId: null,
     auditEntries: [],
+    auditFilter: 'all',
     plugins: [],
     skills: [],
     tools: [],
@@ -193,6 +197,24 @@
     if (raw.startsWith('mlx::') || fallbackPrefix === 'mlx::') return 'mlx';
     if (raw.startsWith('llama::') || fallbackPrefix === 'llama::') return 'llamacpp';
     return fallback || state.agentConfig?.provider || state.provider || 'configured';
+  }
+
+  function startupProviderLabel(provider) {
+    return { ollama: 'Ollama', llamacpp: 'llama.cpp', mlx: 'MLX' }[provider] || provider;
+  }
+
+  function runtimeProviderStatus(modelId, fallbackProvider = '') {
+    const provider = inferModelProvider(modelId, fallbackProvider);
+    const normalized = provider === 'llama' || provider === 'llama.cpp' ? 'llamacpp' : provider;
+    return state.runtimeStartup?.providers?.find(entry => entry.provider === normalized) || null;
+  }
+
+  function ensureRuntimeReadyForModel(modelId, fallbackProvider = '') {
+    const provider = inferModelProvider(modelId, fallbackProvider);
+    if (!isLocalProvider(provider)) return;
+    const runtime = runtimeProviderStatus(modelId, fallbackProvider);
+    if (!runtime || runtime.ready) return;
+    throw new Error(`${startupProviderLabel(runtime.provider)} nao esta pronto: ${runtime.error || runtime.message || 'provider local indisponivel'}`);
   }
 
   function resolveModelId(candidate, provider = '') {
@@ -786,6 +808,100 @@
     }, remaining);
   }
 
+  function renderStartupStatus(snapshot) {
+    if (!snapshot) return;
+    state.runtimeStartup = snapshot;
+    const message = document.getElementById('startup-message');
+    const meta = document.getElementById('startup-meta');
+    const progress = document.getElementById('startup-progress');
+    const fill = document.getElementById('startup-progress-fill');
+    const providers = document.getElementById('startup-providers');
+    const cancel = document.getElementById('startup-cancel');
+    const retry = document.getElementById('startup-retry');
+    const technical = document.getElementById('startup-technical');
+    const percent = Number(snapshot.progress_percent);
+    const determinate = snapshot.progress_percent != null && Number.isFinite(percent);
+    if (message) message.textContent = snapshot.message || 'Preparando providers locais';
+    if (progress && fill) {
+      progress.classList.toggle('indeterminate', !determinate);
+      if (determinate) {
+        const normalized = Math.max(0, Math.min(100, percent));
+        fill.style.width = `${normalized}%`;
+        fill.style.transform = 'none';
+        progress.setAttribute('aria-valuenow', String(Math.round(normalized)));
+      } else {
+        fill.style.width = '';
+        fill.style.transform = '';
+        progress.removeAttribute('aria-valuenow');
+      }
+    }
+    if (meta) {
+      if (determinate && snapshot.bytes_total) {
+        const speed = snapshot.bytes_per_second ? ` · ${fmtBytes(snapshot.bytes_per_second)}/s` : '';
+        meta.textContent = `${Math.round(percent)}% · ${fmtBytes(snapshot.bytes_downloaded)} de ${fmtBytes(snapshot.bytes_total)}${speed}`;
+      } else {
+        meta.textContent = snapshot.step ? snapshot.step.replaceAll('_', ' ') : 'Verificando';
+      }
+    }
+    if (providers) {
+      providers.innerHTML = (snapshot.providers || []).map(provider => `
+        <span class="startup-provider ${esc(provider.phase)}" title="${esc(provider.error || provider.message || '')}">
+          ${esc(startupProviderLabel(provider.provider))}: ${provider.ready ? 'pronto' : provider.phase === 'unsupported' ? 'nao aplicavel' : esc(provider.phase)}
+        </span>
+      `).join('');
+    }
+    if (cancel) cancel.hidden = !snapshot.can_cancel;
+    if (retry) retry.hidden = !['failed', 'cancelled', 'degraded'].includes(snapshot.phase);
+    if (technical) technical.textContent = JSON.stringify(snapshot, null, 2);
+  }
+
+  async function waitForRuntimeStartup() {
+    let consecutiveErrors = 0;
+    while (true) {
+      try {
+        const snapshot = await api('/runtime/startup', { timeoutMs: 5000 });
+        consecutiveErrors = 0;
+        renderStartupStatus(snapshot);
+        if (snapshot?.app_ready || ['failed', 'cancelled'].includes(snapshot?.phase)) return snapshot;
+      } catch (error) {
+        consecutiveErrors += 1;
+        if (consecutiveErrors >= 4) {
+          const failed = {
+            phase: 'failed',
+            step: 'failed',
+            message: 'Falha ao consultar a inicializacao',
+            app_ready: true,
+            degraded: true,
+            providers: [],
+            error: error.message,
+          };
+          renderStartupStatus(failed);
+          return failed;
+        }
+      }
+      await new Promise(resolve => setTimeout(resolve, 450));
+    }
+  }
+
+  document.getElementById('startup-cancel')?.addEventListener('click', async () => {
+    try {
+      renderStartupStatus(await api('/runtime/startup/cancel', { method: 'POST' }));
+    } catch (error) {
+      console.error(error);
+    }
+  });
+
+  document.getElementById('startup-retry')?.addEventListener('click', async () => {
+    try {
+      renderStartupStatus(await api('/runtime/startup/retry', { method: 'POST' }));
+      const snapshot = await waitForRuntimeStartup();
+      updateStatusBadge(snapshot?.phase === 'ready', snapshot?.phase);
+      if (snapshot?.app_ready) revealApp();
+    } catch (error) {
+      console.error(error);
+    }
+  });
+
   function updateSidebarDaemonUrl(label) {
     const sidebarUrl = document.getElementById('sidebar-daemon-url');
     if (!sidebarUrl) return;
@@ -944,7 +1060,7 @@
       state.provider = health?.provider || 'auto';
       localStorage.setItem('mlxPilotDaemonUrl', candidate);
       updateSidebarDaemonUrl();
-      updateStatusBadge(state.healthOk);
+      updateStatusBadge(state.healthOk, health?.status);
       return health;
     }
 
@@ -952,13 +1068,29 @@
     state.healthOk = false;
     state.provider = '';
     updateSidebarDaemonUrl(`Daemon ${state.daemonUrl.replace(/^https?:\/\//, '')} indisponivel`);
-    updateStatusBadge(false);
+    updateStatusBadge(false, 'offline');
     return null;
   }
 
   async function bootSequence() {
     const health = await resolveDaemonConnection();
-    if (!health) return;
+    if (!health) {
+      renderStartupStatus({
+        phase: 'failed',
+        step: 'failed',
+        message: 'Daemon local indisponivel',
+        app_ready: true,
+        degraded: true,
+        providers: [],
+      });
+      revealApp();
+      return;
+    }
+
+    const startup = await waitForRuntimeStartup();
+    state.healthOk = startup?.phase === 'ready';
+    updateStatusBadge(state.healthOk, startup?.phase);
+    revealApp();
 
     await Promise.allSettled([
       loadDaemonConfig(),
@@ -981,24 +1113,25 @@
     syncShellLayout(document.querySelector('.tab.active')?.dataset.panel || 'chat');
     hydrateModelShell();
     await bootSequence();
-    revealApp();
   }
 
   startApp().catch(e => console.error('Boot failed:', e));
 
-  function updateStatusBadge(online) {
+  function updateStatusBadge(online, phase = online ? 'ready' : 'offline') {
+    const degraded = phase === 'degraded';
+    const starting = phase === 'starting'
+      || ['checking', 'downloading', 'installing', 'updating', 'validating'].includes(phase);
+    const label = online ? 'Online' : degraded ? 'Degradado' : starting ? 'Iniciando' : 'Offline';
     const badge = document.getElementById('status-badge');
     if (badge) {
-      badge.innerHTML = online
-        ? '<span class="badge-dot online"></span><span>Online</span>'
-        : '<span class="badge-dot offline"></span><span>Offline</span>';
-      badge.style.background = online ? 'var(--green-soft)' : 'var(--rose-soft)';
-      badge.style.color = online ? 'var(--green)' : 'var(--rose)';
+      badge.innerHTML = `<span class="badge-dot ${online ? 'online' : 'offline'}"></span><span>${label}</span>`;
+      badge.style.background = online ? 'var(--green-soft)' : degraded || starting ? 'var(--amber-soft)' : 'var(--rose-soft)';
+      badge.style.color = online ? 'var(--green)' : degraded || starting ? 'var(--amber)' : 'var(--rose)';
     }
 
     const runtimeBadge = document.getElementById('agent-daemon-status');
     if (runtimeBadge) {
-      runtimeBadge.textContent = online ? 'Online' : 'Offline';
+      runtimeBadge.textContent = label;
       runtimeBadge.classList.toggle('status-online', online);
       runtimeBadge.classList.toggle('status-offline', !online);
     }
@@ -1405,6 +1538,16 @@
     saveAgentProviderProfiles().catch(e => console.error('Save provider profiles failed:', e));
   });
 
+  // Provider profiles collapse toggle
+  document.getElementById('agent-toggle-provider-profiles')?.addEventListener('click', () => {
+    const container = document.getElementById('agent-provider-profile-container');
+    const btn = document.getElementById('agent-toggle-provider-profiles');
+    if (!container || !btn) return;
+    const hidden = container.style.display === 'none';
+    container.style.display = hidden ? '' : 'none';
+    btn.innerHTML = hidden ? '&#9660; Colapsar' : '&#9654; Expandir';
+  });
+
   // -- Models -------------------------------------------------
   async function loadModels({ force = false } = {}) {
     if (state.modelsLoading) return state.modelsPromise;
@@ -1568,6 +1711,147 @@
   }
 
   // -- Catalog ------------------------------------------------
+  const ACTIVE_DOWNLOAD_STATUSES = new Set(['queued', 'running', 'cancelling']);
+
+  function downloadPercent(job) {
+    const percent = Number(job?.progress_percent || 0);
+    return Math.round(Math.max(0, Math.min(100, Number.isFinite(percent) ? percent : 0)));
+  }
+
+  function downloadStatusLabel(status) {
+    return {
+      queued: 'Na fila',
+      running: 'Baixando',
+      cancelling: 'Cancelando',
+      completed: 'Concluido',
+      failed: 'Falhou',
+      cancelled: 'Cancelado',
+    }[status] || String(status || 'Aguardando');
+  }
+
+  function activeDownloadForModel(source, modelId) {
+    return state.downloads.find(job =>
+      job.source === source
+      && job.model_id === modelId
+      && ACTIVE_DOWNLOAD_STATUSES.has(job.status)
+    );
+  }
+
+  function upsertDownload(job) {
+    state.downloads = [
+      job,
+      ...state.downloads.filter(entry => entry.id !== job.id),
+    ];
+  }
+
+  function scheduleDownloadRefresh() {
+    if (state.downloadRefreshTimer) {
+      clearTimeout(state.downloadRefreshTimer);
+      state.downloadRefreshTimer = null;
+    }
+    if (!state.downloads.some(job => ACTIVE_DOWNLOAD_STATUSES.has(job.status))) return;
+    state.downloadRefreshTimer = setTimeout(() => {
+      state.downloadRefreshTimer = null;
+      void loadDownloads();
+    }, 800);
+  }
+
+  async function loadDownloads() {
+    if (state.downloadsLoading) return;
+    state.downloadsLoading = true;
+    const previous = new Map(state.downloads.map(job => [job.id, job.status]));
+    try {
+      const jobs = await api('/catalog/downloads');
+      state.downloads = Array.isArray(jobs) ? jobs : [];
+      const completedNow = state.downloads.some(job =>
+        job.status === 'completed' && ACTIVE_DOWNLOAD_STATUSES.has(previous.get(job.id))
+      );
+      renderDownloads();
+      renderCatalog();
+      if (completedNow) {
+        invalidateModels();
+        refreshModelsInBackground();
+      }
+    } catch (error) {
+      console.error('Download refresh failed:', error);
+    } finally {
+      state.downloadsLoading = false;
+      scheduleDownloadRefresh();
+    }
+  }
+
+  async function cancelDownload(jobId) {
+    const current = state.downloads.find(job => job.id === jobId);
+    if (current) {
+      current.status = 'cancelling';
+      current.can_cancel = false;
+      renderDownloads();
+      renderCatalog();
+    }
+    try {
+      const job = await api(`/catalog/downloads/${encodeURIComponent(jobId)}/cancel`, {
+        method: 'POST',
+      });
+      upsertDownload(job);
+      renderDownloads();
+      renderCatalog();
+      scheduleDownloadRefresh();
+    } catch (error) {
+      await loadDownloads();
+      alert('Erro ao cancelar download: ' + error.message);
+    }
+  }
+
+  function renderDownloads() {
+    const panel = document.getElementById('catalog-download-panel');
+    const list = document.getElementById('catalog-download-list');
+    const summary = document.getElementById('catalog-download-summary');
+    if (!panel || !list) return;
+
+    panel.hidden = state.downloads.length === 0;
+    if (state.downloads.length === 0) {
+      list.innerHTML = '';
+      if (summary) summary.textContent = '';
+      return;
+    }
+
+    const activeCount = state.downloads.filter(job => ACTIVE_DOWNLOAD_STATUSES.has(job.status)).length;
+    if (summary) {
+      summary.textContent = activeCount > 0
+        ? `${activeCount} em andamento`
+        : `${state.downloads.length} recente${state.downloads.length === 1 ? '' : 's'}`;
+    }
+
+    list.innerHTML = '';
+    state.downloads.slice(0, 6).forEach(job => {
+      const percent = downloadPercent(job);
+      const row = document.createElement('div');
+      row.className = `download-row ${esc(job.status)}`;
+      const byteProgress = job.bytes_total > 0
+        ? `${fmtBytes(job.bytes_downloaded || 0)} de ${fmtBytes(job.bytes_total)}`
+        : `${job.completed_files || 0} de ${job.total_files || 0} arquivos`;
+      const detail = job.error || job.current_file || byteProgress;
+      const canCancel = Boolean(job.can_cancel) && ACTIVE_DOWNLOAD_STATUSES.has(job.status);
+      row.innerHTML = `
+        <div class="download-row-header">
+          <span class="download-row-name" title="${esc(job.model_id)}">${esc(job.model_id)}</span>
+          <span class="download-status ${esc(job.status)}">${downloadStatusLabel(job.status)} ${percent}%</span>
+        </div>
+        <div class="download-progress-track" role="progressbar" aria-label="Download de ${esc(job.model_id)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}">
+          <div class="download-progress-fill" style="width:${percent}%"></div>
+        </div>
+        <div class="download-row-meta">
+          <span class="download-current-file" title="${esc(detail)}">${esc(detail)}</span>
+          ${canCancel ? `<button class="download-cancel-btn" type="button" data-download-cancel="${esc(job.id)}">Cancelar</button>` : ''}
+        </div>`;
+      list.appendChild(row);
+    });
+
+    list.querySelectorAll('[data-download-cancel]').forEach(button => {
+      button.addEventListener('click', () => void cancelDownload(button.dataset.downloadCancel));
+    });
+  }
+
   async function searchCatalog(query) {
     try {
       const models = await api(`/catalog/models?source=huggingface&query=${encodeURIComponent(query)}&limit=20`);
@@ -1581,10 +1865,14 @@
   }
 
   async function startDownload(source, modelId) {
+    if (activeDownloadForModel(source, modelId)) return;
     try {
-      await api('/catalog/downloads', { method: 'POST', body: JSON.stringify({ source, model_id: modelId }) });
+      const job = await api('/catalog/downloads', { method: 'POST', body: JSON.stringify({ source, model_id: modelId }) });
+      upsertDownload(job);
       invalidateModels();
-      alert('Download iniciado: ' + modelId);
+      renderDownloads();
+      renderCatalog();
+      scheduleDownloadRefresh();
     } catch (e) { alert('Erro no download: ' + e.message); }
   }
 
@@ -1603,6 +1891,10 @@
       const size = m.size_bytes ? fmtBytes(m.size_bytes) : 'N/A';
       const dl = m.downloads ? fmtNum(m.downloads) : '0';
       const lk = m.likes ? fmtNum(m.likes) : '0';
+      const activeDownload = activeDownloadForModel('huggingface', m.model_id);
+      const downloadLabel = activeDownload
+        ? `${downloadStatusLabel(activeDownload.status)} ${downloadPercent(activeDownload)}%`
+        : 'Baixar';
       card.innerHTML = `
         <div class="model-card-header">
           <div class="model-card-icon ${ic}">${(m.name || m.model_id || 'M')[0].toUpperCase()}</div>
@@ -1610,9 +1902,9 @@
             <h3>${esc(m.name || m.model_id)}</h3>
             <span class="model-card-source">${esc(m.author || m.source || '')}</span>
           </div>
-          <button class="download-btn" data-src="huggingface" data-mid="${esc(m.model_id)}">
+          <button class="download-btn" data-src="huggingface" data-mid="${esc(m.model_id)}" ${activeDownload ? 'disabled' : ''}>
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 2v9M4 8l4 4 4-4M2 14h12"/></svg>
-            Baixar
+            ${downloadLabel}
           </button>
         </div>
         <div class="model-card-stats">
@@ -1630,6 +1922,12 @@
     if (!text.trim() || state.isStreaming) return;
     const modelId = activeModelId();
     if (!modelId) { addSystemMsg('Selecione um modelo primeiro.'); return; }
+    try {
+      ensureRuntimeReadyForModel(modelId);
+    } catch (error) {
+      addSystemMsg(error.message);
+      return;
+    }
 
     addMessage('user', text);
     const input = document.getElementById('chat-input');
@@ -2171,10 +2469,9 @@
     }
     state.tools.forEach(t => {
       const chip = document.createElement('div');
-      chip.className = 'tool-chip';
+      chip.className = t.enabled ? 'tool-chip' : 'tool-chip disabled';
       chip.textContent = t.name;
       chip.title = t.description || '';
-      chip.style.opacity = t.enabled ? '1' : '0.4';
       grid.appendChild(chip);
     });
     updateAgentWorkspaceSummary();
@@ -2197,7 +2494,7 @@
     }
     list.innerHTML = '';
     if (state.channels.length === 0) {
-      list.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-tertiary)">Nenhum channel configurado</div>';
+      list.innerHTML = '<div class="agent-empty-copy" style="display:flex;flex-direction:column;align-items:center;gap:8px"><svg viewBox="0 0 20 20" width="24" height="24" fill="none" stroke="var(--text-tertiary)" stroke-width="1.5" opacity="0.5"><path d="M3 5h14v10H3z"/><path d="M7 5V3h6v2"/></svg><span>Nenhum channel conectado. Clique em + Novo Channel para começar.</span></div>';
       updateAgentWorkspaceSummary();
       return;
     }
@@ -2219,15 +2516,29 @@
     const card = document.createElement('div');
     card.className = 'channel-card';
     const connected = account?.status === 'connected' || account?.enabled;
+    card.classList.add(connected ? 'connected' : 'disconnected');
     card.innerHTML = `
-      <div class="channel-status"><span class="status-dot ${connected ? 'online' : 'offline'}"></span></div>
+      <div class="channel-status">
+        <span class="channel-status-badge ${connected ? 'connected' : 'disconnected'}">${connected ? 'Conectado' : 'Desconectado'}</span>
+      </div>
       <div class="channel-info">
         <span class="channel-name">${esc(displayName)}</span>
-        <span class="channel-meta">${esc(channelId)} · ${connected ? 'Conectado' : 'Desconectado'}</span>
+        <span class="channel-meta">${esc(channelId)}</span>
       </div>
       <div class="channel-actions">
+        ${connected ? '' : `<button class="action-btn" data-reconnect data-ch="${esc(channelId)}" data-acc="${esc(account?.account_id || account?.id || '')}">Reconectar</button>`}
         <button class="action-btn danger" data-ch="${esc(channelId)}" data-acc="${esc(account?.account_id || account?.id || '')}">Remover</button>
       </div>`;
+    card.querySelectorAll('.action-btn[data-reconnect]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        try {
+          const body = { channel: btn.dataset.ch };
+          if (btn.dataset.acc) body.account_id = btn.dataset.acc;
+          await api('/agent/channels/connect', { method: 'POST', headers: { 'x-channel-protocol-version': 'v1' }, body: JSON.stringify(body) });
+          loadChannels();
+        } catch (e) { alert('Erro: ' + e.message); }
+      });
+    });
     card.querySelectorAll('.action-btn.danger').forEach(btn => {
       btn.addEventListener('click', async () => {
         if (!confirm('Remover channel?')) return;
@@ -2263,10 +2574,39 @@
       updateAgentWorkspaceSummary();
       return;
     }
-    state.auditEntries.forEach(entry => {
+    const entriesWithType = state.auditEntries.map(entry => {
+      let dot = 'success';
+      let typeClass = 'type-success';
+      if (entry.status === 'denied' || entry.status === 'error') { dot = 'error'; typeClass = 'type-error'; }
+      else if (entry.event_type === 'approval' || entry.status === 'ask') { dot = 'approval'; typeClass = 'type-approval'; }
+      else if (entry.tool_name) {
+        const tn = String(entry.tool_name).toLowerCase();
+        if (tn.includes('bash') || tn.includes('exec') || tn.includes('shell')) { dot = 'tool'; typeClass = 'type-bash'; }
+        else { dot = 'tool'; typeClass = 'type-tool'; }
+      }
+      return { entry, dot, typeClass };
+    });
+
+    const filter = state.auditFilter || 'all';
+    const filtered = filter === 'all'
+      ? entriesWithType
+      : entriesWithType.filter(e => {
+          if (filter === 'tool') return e.typeClass === 'type-tool';
+          if (filter === 'bash') return e.typeClass === 'type-bash';
+          if (filter === 'approval') return e.typeClass === 'type-approval';
+          if (filter === 'error') return e.typeClass === 'type-error';
+          return true;
+        });
+
+    if (filtered.length === 0) {
+      feed.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-tertiary)">Nenhum evento para este filtro</div>';
+      updateAgentWorkspaceSummary();
+      return;
+    }
+
+    filtered.forEach(({ entry, dot, typeClass }) => {
       const item = document.createElement('div');
-      item.className = 'audit-item';
-      const dot = entry.status === 'denied' ? 'error' : entry.tool_name ? 'tool' : 'success';
+      item.className = `audit-item ${typeClass}`;
       let time = '';
       if (entry.timestamp) { try { time = new Date(entry.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); } catch { /* ok */ } }
       item.innerHTML = `
@@ -2459,6 +2799,7 @@
 
     if (target === 'discover') {
       searchCatalog('llama');
+      void loadDownloads();
       if (state.activeDiscoverTab === 'installed') showInstalledModels();
     }
     if (target === 'agent') {
@@ -2509,6 +2850,7 @@
       document.getElementById('dtab-catalog').style.display = d === 'catalog' ? 'block' : 'none';
       document.getElementById('dtab-installed').style.display = d === 'installed' ? 'block' : 'none';
       if (d === 'installed') showInstalledModels();
+      if (d === 'catalog') void loadDownloads();
     });
   });
 
@@ -2557,6 +2899,7 @@
     try {
       const modelId = activeAgentModelId();
       if (!modelId) throw new Error('Selecione um modelo valido antes de executar o agent.');
+      ensureRuntimeReadyForModel(modelId, state.agentConfig?.provider || 'ollama');
       if (!state.currentSessionId) {
         const session = await api('/agent/sessions', { method: 'POST', body: JSON.stringify({}) });
         if (session?.id) state.currentSessionId = session.id;
@@ -2602,7 +2945,23 @@
   });
 
   // -- Audit Refresh ------------------------------------------
-  document.getElementById('refresh-audit')?.addEventListener('click', () => loadAudit());
+  document.getElementById('refresh-audit')?.addEventListener('click', async () => {
+    const btn = document.getElementById('refresh-audit');
+    btn.textContent = 'Carregando...';
+    btn.disabled = true;
+    await loadAudit();
+    btn.textContent = 'Atualizar';
+    btn.disabled = false;
+  });
+
+  document.querySelectorAll('.audit-filter-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      document.querySelectorAll('.audit-filter-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      state.auditFilter = pill.dataset.auditFilter || 'all';
+      renderAuditFeed();
+    });
+  });
 
   // -- Settings Save ------------------------------------------
   document.getElementById('save-settings-btn')?.addEventListener('click', async () => {
