@@ -37,8 +37,20 @@
         </svg>
       </div>
       <h1 class="splash-title">MLX PILOT</h1>
-      <p class="splash-sub">Initializing orbital systems...</p>
-      <div class="splash-bar"><div class="splash-bar-fill"></div></div>
+      <p class="splash-sub" id="startup-message">Iniciando o MLX Pilot</p>
+      <div class="splash-bar indeterminate" id="startup-progress" role="progressbar" aria-label="Inicializacao">
+        <div class="splash-bar-fill" id="startup-progress-fill"></div>
+      </div>
+      <div class="startup-meta" id="startup-meta">Conectando ao daemon local...</div>
+      <div class="startup-providers" id="startup-providers"></div>
+      <div class="startup-actions">
+        <button class="startup-btn danger" id="startup-cancel" type="button" hidden>Cancelar</button>
+        <button class="startup-btn" id="startup-retry" type="button" hidden>Tentar novamente</button>
+      </div>
+      <details class="startup-details" id="startup-details">
+        <summary>Detalhes tecnicos</summary>
+        <pre id="startup-technical">Aguardando diagnostico...</pre>
+      </details>
     </div>
   </div>
 
@@ -225,6 +237,17 @@
                 </select>
               </div>
 
+              <section class="download-panel" id="catalog-download-panel" hidden>
+                <div class="download-panel-header">
+                  <div>
+                    <span class="download-panel-eyebrow">Instalacao de modelos</span>
+                    <h3>Downloads</h3>
+                  </div>
+                  <span class="download-panel-summary" id="catalog-download-summary"></span>
+                </div>
+                <div class="download-list" id="catalog-download-list"></div>
+              </section>
+
               <div id="catalog-results" class="model-cards">
                 <div style="padding:40px;text-align:center;color:var(--text-tertiary)">
                   Busque por nome para encontrar modelos no HuggingFace
@@ -257,7 +280,7 @@
                 <div class="agent-shell-copy">
                   <span class="agent-shell-eyebrow">Codex-style Workspace</span>
                   <h2 class="section-title">Agent Workspace</h2>
-                  <p class="section-subtitle">Sessoes na coluna esquerda, conversa no centro e toda a administracao concentrada em Config.</p>
+                  <p class="section-subtitle">Sessoes, conversa e administracao do agente.</p>
                 </div>
 
                 <div class="agent-shell-actions">
@@ -296,7 +319,6 @@
                     <div class="agent-prompt-panel">
                       <div class="agent-prompt-panel-head">
                         <span class="agent-summary-label">Atalhos</span>
-                        <span class="agent-meta-pill">3</span>
                       </div>
                       <div class="agent-prompt-grid">
                         <button class="agent-prompt-card" type="button" data-agent-shortcut="runtime" data-agent-prompt="Revise a configuracao atual do agent e sugira ajustes de runtime.">
@@ -355,18 +377,30 @@
               </div>
 
               <div class="agent-view" id="agent-view-config" style="display:none;">
-                <div class="agent-config-grid">
-                  <div class="agent-section agent-section-span">
-                    <div class="agent-section-head">
-                      <h3>
-                        <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5">
-                          <path d="M10 2v4m0 8v4M2 10h4m8 0h4" />
-                          <circle cx="10" cy="10" r="3" />
-                        </svg>
-                        Tools &amp; Policies
-                      </h3>
-                    </div>
-                    <div class="policy-grid">
+                <div class="agent-config-shell">
+                  <nav class="agent-config-nav" role="tablist" aria-label="Configuracao do agente">
+                    <button class="agent-config-tab active" type="button" data-config-section="runtime" role="tab" aria-selected="true">
+                      <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="3" /><path d="M10 2v3m0 10v3M2 10h3m10 0h3" /></svg>
+                      <span>Runtime &amp; Pol&iacute;ticas</span>
+                    </button>
+                    <button class="agent-config-tab" type="button" data-config-section="capabilities" role="tab" aria-selected="false">
+                      <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 10h12M10 4v12" /><circle cx="10" cy="10" r="7" /></svg>
+                      <span>Ferramentas &amp; Skills</span>
+                    </button>
+                    <button class="agent-config-tab" type="button" data-config-section="integrations" role="tab" aria-selected="false">
+                      <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 5h14v10H3z" /><path d="M7 5V3h6v2" /></svg>
+                      <span>Canais</span>
+                    </button>
+                    <button class="agent-config-tab" type="button" data-config-section="observability" role="tab" aria-selected="false">
+                      <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 16l4-4 3 3 4-6 5 5" /><circle cx="17" cy="3" r="2" /></svg>
+                      <span>Observabilidade</span>
+                    </button>
+                  </nav>
+
+                  <div class="agent-config-body">
+                    <section class="agent-config-pane active" data-config-pane="runtime">
+                      <p class="agent-config-pane-hint">Defina o backend de infer&ecirc;ncia, o n&iacute;vel de autonomia e os profiles de provider do agente.</p>
+                      <div class="policy-grid">
                       <div class="policy-card">
                         <h4>Provider do Agent</h4>
                         <div class="settings-field">
@@ -407,82 +441,74 @@
                           <div class="filter-row">
                             <button class="action-btn" id="agent-add-provider-profile" type="button">+ Novo profile</button>
                             <button class="primary-btn" id="agent-save-provider-profiles" type="button">Salvar profiles</button>
+                            <button class="action-btn" id="agent-toggle-provider-profiles" type="button" title="Mostrar/ocultar profiles avancados">&#9660; Colapsar</button>
                           </div>
                         </div>
+                        <div id="agent-provider-profile-container">
                         <div class="plugin-list" id="agent-provider-profile-list">
                           <div style="padding:16px;text-align:center;color:var(--text-tertiary)">Carregando profiles...</div>
                         </div>
                         <p class="meta-note" id="agent-provider-profiles-note">
                           Edite provider, modelo, endpoint e refer&ecirc;ncia de secret. Use o profile desejado para tornar esse backend ativo no Agent.
                         </p>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-
-                  <div class="agent-section">
-                    <div class="agent-section-head">
-                      <h3>
-                        <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5">
-                          <path d="M4 10h12M10 4v12" />
-                          <circle cx="10" cy="10" r="7" />
-                        </svg>
-                        Skills
-                      </h3>
-                    </div>
-                    <div class="skills-cloud" id="skills-list">
-                      <div class="agent-empty-copy">Carregando skills...</div>
-                    </div>
-                  </div>
-
-                  <div class="agent-section">
-                    <div class="agent-section-head">
-                      <h3>
-                        <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5">
-                          <rect x="3" y="3" width="14" height="14" rx="2" />
-                          <path d="M7 3v14M3 7h14" />
-                        </svg>
-                        Plugins
-                      </h3>
-                    </div>
-                    <div class="plugin-list" id="plugin-list">
-                      <div style="padding:16px;text-align:center;color:var(--text-tertiary)">Carregando plugins...</div>
-                    </div>
-                  </div>
-
-                  <div class="agent-section">
-                    <div class="agent-section-head">
-                      <h3>
-                        <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5">
-                          <path d="M3 5h14v10H3z" />
-                          <path d="M7 5V3h6v2" />
-                        </svg>
-                        Channels
-                      </h3>
-                      <button class="add-btn" id="btn-new-channel">+ Novo Channel</button>
-                    </div>
-                    <div class="channel-cards" id="channel-list">
-                      <div style="padding:16px;text-align:center;color:var(--text-tertiary)">Carregando channels...</div>
-                    </div>
-                  </div>
-
-                  <div class="agent-section agent-section-span">
-                    <div class="agent-section-head">
-                      <h3>
-                        <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5">
-                          <path d="M2 16l4-4 3 3 4-6 5 5" />
-                          <circle cx="17" cy="3" r="2" />
-                        </svg>
-                        Observabilidade
-                      </h3>
-                      <div class="filter-row">
-                        <button class="action-btn" id="refresh-audit">Atualizar</button>
                       </div>
-                    </div>
-                    <div class="audit-feed" id="audit-feed">
-                      <div style="padding:16px;text-align:center;color:var(--text-tertiary)">Carregando auditoria...</div>
-                    </div>
+                    </section>
+
+                    <section class="agent-config-pane" data-config-pane="capabilities">
+                      <p class="agent-config-pane-hint">Skills instaladas, plugins ativos e capacidades de execucao do agente.</p>
+                      <div class="agent-config-two-col">
+                        <div class="agent-config-sub">
+                          <div class="agent-section-head">
+                            <h4>Skills</h4>
+                          </div>
+                          <p class="meta-note" style="margin-bottom:12px">Habilidades ativas do agente. Clique para ativar/desativar.</p>
+                          <div class="skills-cloud" id="skills-list">
+                            <div class="agent-empty-copy">Carregando skills...</div>
+                          </div>
+                        </div>
+                        <div class="agent-config-sub">
+                          <div class="agent-section-head">
+                            <h4>Plugins</h4>
+                          </div>
+                          <p class="meta-note" style="margin-bottom:12px">Extensoes e backends. Use o toggle para ativar/desativar.</p>
+                          <div class="plugin-list" id="plugin-list">
+                            <div style="padding:16px;text-align:center;color:var(--text-tertiary)">Carregando plugins...</div>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section class="agent-config-pane" data-config-pane="integrations">
+                      <p class="agent-config-pane-hint">Canais conectados ao agente (Slack, GitHub, webhooks, etc).</p>
+                      <div class="agent-section-head" style="margin-bottom:12px">
+                        <h4>Channels</h4>
+                        <button class="add-btn" id="btn-new-channel">+ Novo Channel</button>
+                      </div>
+                      <div class="channel-cards" id="channel-list">
+                        <div style="padding:16px;text-align:center;color:var(--text-tertiary)">Carregando channels...</div>
+                      </div>
+                    </section>
+
+                    <section class="agent-config-pane" data-config-pane="observability">
+                      <p class="agent-config-pane-hint">Fluxo de auditoria e metricas de uso do agente.</p>
+                      <div class="agent-section-head" style="margin-bottom:12px">
+                        <h4>Audit Trail</h4>
+                        <div class="filter-row">
+                          <button class="action-btn audit-filter-pill active" data-audit-filter="all">Todas</button>
+                          <button class="action-btn audit-filter-pill" data-audit-filter="tool">Ferramentas</button>
+                          <button class="action-btn audit-filter-pill" data-audit-filter="bash">Bash</button>
+                          <button class="action-btn audit-filter-pill" data-audit-filter="approval">Aprovacoes</button>
+                          <button class="action-btn audit-filter-pill" data-audit-filter="error">Erros</button>
+                          <button class="action-btn" id="refresh-audit">Atualizar</button>
+                        </div>
+                      </div>
+                      <div class="audit-feed" id="audit-feed">
+                        <div style="padding:16px;text-align:center;color:var(--text-tertiary)">Carregando auditoria...</div>
+                      </div>
+                    </section>
                   </div>
-                </div>
                 </div>
               </div>
 
