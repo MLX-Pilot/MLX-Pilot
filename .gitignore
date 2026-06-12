@@ -14,3 +14,9 @@ clippy.txt
 
 # Bundled llama.cpp engine binaries — fetched by scripts/fetch-llama-engine.ps1, not committed
 apps/desktop-ui/src-tauri/binaries/
+
+# Local scratch: cloned reference repos and preview/static-server helpers
+temp/
+
+# Stray editor backups
+*.html.backup
