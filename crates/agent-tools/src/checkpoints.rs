@@ -279,12 +279,10 @@ async fn capture_git_state(workspace_root: &Path) -> Option<GitState> {
 }
 
 async fn capture_git_output(workspace_root: &Path, args: &[&str]) -> Option<String> {
-    let output = tokio::process::Command::new("git")
-        .args(args)
-        .current_dir(workspace_root)
-        .output()
-        .await
-        .ok()?;
+    let mut command = tokio::process::Command::new("git");
+    command.args(args).current_dir(workspace_root);
+    crate::silence_console(&mut command);
+    let output = command.output().await.ok()?;
     if !output.status.success() {
         return None;
     }

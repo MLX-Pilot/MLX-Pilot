@@ -355,6 +355,7 @@ async fn run_chat_stream(
 
         let command_future = async {
             let mut command = Command::new(&cfg.command);
+            crate::silence_console(&mut command);
             command
                 .args(&args)
                 .stdout(Stdio::piped())
@@ -865,6 +866,7 @@ async fn run_airllm_bridge_once(
     }
 
     let mut command = Command::new(&cfg.airllm_python_command);
+    crate::silence_console(&mut command);
     command
         .args(&args)
         .stdout(Stdio::piped())

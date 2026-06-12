@@ -240,6 +240,7 @@ async fn ensure_whatsapp_helper_ready() -> Result<(), String> {
     } else {
         command.arg("install");
     }
+    crate::silence_console(&mut command);
     command
         .arg("--omit=dev")
         .arg("--no-audit")
@@ -284,6 +285,7 @@ where
     ensure_whatsapp_helper_ready().await?;
 
     let mut command = Command::new(helper_node_command(ctx));
+    crate::silence_console(&mut command);
     command
         .arg(helper_entry())
         .arg(command_name)

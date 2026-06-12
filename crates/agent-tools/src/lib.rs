@@ -25,3 +25,15 @@ pub use types::{
     ExecutionDomain, ExecutionMode, ExecutionPriority, ParamSchema, ToolContext, ToolDefinition,
     ToolError, ToolResult,
 };
+
+pub(crate) fn silence_console(command: &mut tokio::process::Command) {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+    }
+}

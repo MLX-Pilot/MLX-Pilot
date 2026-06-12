@@ -941,6 +941,7 @@ async fn run_capture(program: &str, args: &[&str], timeout_secs: u64) -> ProbeRe
     }
 
     let mut command = Command::new(program);
+    crate::silence_console(&mut command);
     command
         .args(args)
         .stdout(Stdio::piped())

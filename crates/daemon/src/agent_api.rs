@@ -1073,9 +1073,10 @@ fn session_messages_to_chat_history(
             let kind = message.kind.trim().to_ascii_lowercase();
             if kind == "tool_call" {
                 let mut tool_calls = Vec::new();
-                if let (Some(ref call_id), Some(ref tool_name)) =
-                    (message.tool_call_id.as_deref(), message.tool_name.as_deref())
-                {
+                if let (Some(ref call_id), Some(ref tool_name)) = (
+                    message.tool_call_id.as_deref(),
+                    message.tool_name.as_deref(),
+                ) {
                     let arguments = message
                         .content_json
                         .as_ref()
@@ -2348,9 +2349,12 @@ fn build_install_command(
 
 async fn run_install_command(program: &str, args: &[String]) -> AgentSkillInstallExecution {
     let timeout_secs = install_command_timeout_secs();
+    let mut command = Command::new(program);
+    command.args(args);
+    crate::silence_console(&mut command);
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(timeout_secs),
-        Command::new(program).args(args).output(),
+        command.output(),
     )
     .await;
     match output {

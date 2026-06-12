@@ -227,16 +227,17 @@ async fn execute_direct_process(
         })?;
     let args = argv.iter().skip(1).cloned().collect::<Vec<_>>();
 
-    let mut child = tokio::process::Command::new(&program)
+    let mut command = tokio::process::Command::new(&program);
+    command
         .args(&args)
         .current_dir(&workspace_root)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| ToolError::ExecutionFailed {
-            message: format!("failed to spawn command '{}': {e}", program),
-        })?;
+        .kill_on_drop(true);
+    crate::silence_console(&mut command);
+    let mut child = command.spawn().map_err(|e| ToolError::ExecutionFailed {
+        message: format!("failed to spawn command '{}': {e}", program),
+    })?;
 
     let stdout_handle = child.stdout.take();
     let stderr_handle = child.stderr.take();
