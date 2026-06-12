@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-pub const APP_CONFIG_SCHEMA_VERSION: u32 = 2;
+pub const APP_CONFIG_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AgentToolScopeOverride {
@@ -158,7 +158,7 @@ impl Default for AgentProviderProfileConfig {
             description: "Default local Ollama profile".to_string(),
             provider: "ollama".to_string(),
             model_id: default_agent_model(),
-            base_url: "http://127.0.0.1:11434".to_string(),
+            base_url: String::new(),
             api_key_ref: None,
             custom_headers: BTreeMap::new(),
             runtime_variant: default_agent_runtime_variant(),
@@ -572,7 +572,7 @@ impl Default for AppConfig {
             llamacpp_context_size: 16384,
             llamacpp_gpu_layers: 999,
             llamacpp_extra_args: Vec::new(),
-            ollama_base_url: "http://127.0.0.1:11434".to_string(),
+            ollama_base_url: "http://127.0.0.1:11438".to_string(),
             ollama_timeout: Duration::from_secs(900),
             ollama_startup_timeout: Duration::from_secs(30),
             ollama_auto_start: true,
@@ -956,6 +956,9 @@ fn migrate_app_config_value(raw: Value) -> Value {
     if version < 2 {
         migrate_config_v1_to_v2(&mut incoming);
     }
+    if version < 3 {
+        migrate_config_v2_to_v3(&mut incoming);
+    }
 
     merge_json_value(&mut base, &incoming);
     if let Some(map) = base.as_object_mut() {
@@ -965,6 +968,57 @@ fn migrate_app_config_value(raw: Value) -> Value {
         );
     }
     base
+}
+
+fn migrate_config_v2_to_v3(raw: &mut Value) {
+    let Some(root) = raw.as_object_mut() else {
+        return;
+    };
+    if root
+        .get("ollama_base_url")
+        .and_then(Value::as_str)
+        .map(|value| value.trim() == "http://127.0.0.1:11434")
+        .unwrap_or(true)
+    {
+        root.insert(
+            "ollama_base_url".to_string(),
+            Value::String("http://127.0.0.1:11438".to_string()),
+        );
+    }
+    if let Some(agent) = root.get_mut("agent").and_then(Value::as_object_mut) {
+        if let Some(profiles) = agent
+            .get_mut("provider_profiles")
+            .and_then(Value::as_array_mut)
+        {
+            for profile in profiles {
+                let Some(profile) = profile.as_object_mut() else {
+                    continue;
+                };
+                let is_managed_default = profile
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(|value| value == "ollama-local")
+                    .unwrap_or(false)
+                    && profile
+                        .get("provider")
+                        .and_then(Value::as_str)
+                        .map(|value| value.eq_ignore_ascii_case("ollama"))
+                        .unwrap_or(false);
+                let uses_desktop_port = profile
+                    .get("base_url")
+                    .and_then(Value::as_str)
+                    .map(|value| value.trim() == "http://127.0.0.1:11434")
+                    .unwrap_or(false);
+                if is_managed_default && uses_desktop_port {
+                    profile.insert("base_url".to_string(), Value::String(String::new()));
+                }
+            }
+        }
+    }
+    root.insert(
+        "schema_version".to_string(),
+        Value::from(default_app_config_schema_version()),
+    );
 }
 
 fn migrate_config_v1_to_v2(raw: &mut Value) {
@@ -1442,6 +1496,34 @@ mod tests {
         );
         assert!(loaded.compatibility.channels.is_empty());
         assert_eq!(loaded.agent.security.security_mode, default_security_mode());
+    }
+
+    #[test]
+    fn v2_ollama_desktop_endpoint_migrates_to_managed_runtime() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("settings.json");
+        let legacy = json!({
+            "schema_version": 2,
+            "ollama_base_url": "http://127.0.0.1:11434",
+            "agent": {
+                "provider": "ollama",
+                "model_id": "qwen3.5:9b",
+                "provider_profile_id": "ollama-local",
+                "provider_profiles": [{
+                    "id": "ollama-local",
+                    "provider": "ollama",
+                    "model_id": "qwen3.5:9b",
+                    "base_url": "http://127.0.0.1:11434"
+                }]
+            }
+        });
+        fs::write(&path, serde_json::to_vec_pretty(&legacy).unwrap()).unwrap();
+
+        let loaded = AppConfig::load_settings_from(&path);
+
+        assert_eq!(loaded.schema_version, APP_CONFIG_SCHEMA_VERSION);
+        assert_eq!(loaded.ollama_base_url, "http://127.0.0.1:11438");
+        assert_eq!(loaded.agent.provider_profiles[0].base_url, "");
     }
 
     #[test]
