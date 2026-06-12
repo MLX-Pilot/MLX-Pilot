@@ -4,6 +4,7 @@ mod catalog;
 mod channels;
 mod chat_stream;
 mod config;
+mod jobs;
 mod plugins;
 mod runtime_doctor;
 mod secrets_vault;
@@ -68,6 +69,8 @@ struct AppState {
     pub channel_service: Arc<ChannelService>,
     pub presets: Arc<mlx_agent_core::PresetStore>,
     pub compare: Arc<mlx_agent_core::CompareStore>,
+    pub jobs: Arc<jobs::JobRegistry>,
+    pub state_db_path: FsPathBuf,
     startup: startup::StartupCoordinator,
 }
 
@@ -120,6 +123,14 @@ fn find_workspace_root_from(start: &FsPath) -> Option<FsPathBuf> {
         .ancestors()
         .find(|candidate| has_workspace_marker(candidate))
         .map(FsPath::to_path_buf)
+}
+
+fn resolve_state_db_path() -> FsPathBuf {
+    AppConfig::get_settings_path()
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join("agent")
+        .join("state.sqlite")
 }
 
 fn resolve_default_agent_workspace() -> FsPathBuf {
@@ -410,6 +421,8 @@ pub async fn run() -> anyhow::Result<()> {
         download_timeout: cfg.catalog_download_timeout,
     })?);
 
+    let state_db_path = resolve_state_db_path();
+
     let state = AppState {
         provider_mode,
         mlx_provider: mlx_provider.clone(),
@@ -481,6 +494,8 @@ pub async fn run() -> anyhow::Result<()> {
             .await
             .expect("Failed to initialize compare store"),
         ),
+        jobs: Arc::new(jobs::JobRegistry::new(4)),
+        state_db_path: state_db_path.clone(),
         startup,
     };
 
@@ -490,6 +505,14 @@ pub async fn run() -> anyhow::Result<()> {
         state.ollama_provider.clone(),
         selected_startup_ollama_model(&cfg),
     );
+
+    // Initialize scheduler tables and start the background scheduler.
+    jobs::ensure_scheduler_tables(&state.state_db_path)
+        .await
+        .expect("Failed to create scheduler tables");
+    let scheduler = jobs::Scheduler::new(state.state_db_path.clone(), state.jobs.clone());
+    let scheduler_shutdown = tokio_util::sync::CancellationToken::new();
+    scheduler.start(scheduler_shutdown);
 
     let app = Router::new()
         .route("/config", get(get_config).post(update_config))
@@ -650,6 +673,24 @@ pub async fn run() -> anyhow::Result<()> {
         )
         .route("/compare/{id}/vote", post(wave1::compare_vote))
         .route("/compare/{id}/synthesize", post(wave1::compare_synthesize))
+        // ── Jobs / Scheduler ──
+        .route("/jobs", get(jobs::job_list))
+        .route("/jobs/test", post(jobs::job_test))
+        .route("/jobs/{job_id}", get(jobs::job_get))
+        .route("/jobs/{job_id}/stream", get(jobs::job_stream))
+        .route("/jobs/{job_id}/cancel", post(jobs::job_cancel))
+        .route(
+            "/scheduler/tasks",
+            get(jobs::scheduler_list_tasks).post(jobs::scheduler_create_task),
+        )
+        .route(
+            "/scheduler/tasks/{task_id}",
+            delete(jobs::scheduler_delete_task),
+        )
+        .route(
+            "/scheduler/tasks/{task_id}/runs",
+            get(jobs::scheduler_task_runs),
+        )
         .with_state(state)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
