@@ -15,7 +15,10 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::task;
 use tokio::time::sleep;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
+
+mod provision;
+use provision::EngineVariant;
 
 #[derive(Debug, Clone)]
 pub struct LlamaCppProviderConfig {
@@ -80,6 +83,12 @@ impl LlamaCppProvider {
         &self.cfg
     }
 
+    /// Prepare and validate the engine binary without starting a model server.
+    /// A llama.cpp server is started lazily only after the user selects a GGUF model.
+    pub async fn prepare_runtime(&self) -> Result<String, ProviderError> {
+        self.ensure_server_binary().await
+    }
+
     async fn ensure_ready_for_model(&self, model_path: &Path) -> Result<String, ProviderError> {
         let mut state = self.state.lock().await;
         self.refresh_child_state_locked(&mut state).await?;
@@ -117,9 +126,61 @@ impl LlamaCppProvider {
     }
 
     async fn ensure_server_binary(&self) -> Result<String, ProviderError> {
-        let configured = self.cfg.server_binary.trim();
-        if !configured.is_empty() && command_available(configured).await {
-            return Ok(configured.to_string());
+        let configured = self.cfg.server_binary.trim().to_string();
+        let variant = provision::detect_variant();
+
+        // On a GPU-capable host, prefer the accelerated engine: use the cached build or
+        // download it once. Any failure transparently falls back to the CPU path below.
+        if variant != EngineVariant::Cpu {
+            if let Some(path) = provision::cached_binary(variant) {
+                let candidate = path.display().to_string();
+                if command_available(&candidate).await {
+                    info!(
+                        "usando engine acelerado '{}' em {candidate}",
+                        variant.slug()
+                    );
+                    return Ok(candidate);
+                }
+            }
+
+            if self.cfg.auto_install {
+                match provision::provision_variant(variant).await {
+                    Ok(path) => {
+                        let candidate = path.display().to_string();
+                        if command_available(&candidate).await {
+                            info!(
+                                "engine acelerado '{}' provisionado em {candidate}",
+                                variant.slug()
+                            );
+                            return Ok(candidate);
+                        }
+                        warn!(
+                            "engine '{}' provisionado mas nao executavel; caindo para CPU",
+                            variant.slug()
+                        );
+                    }
+                    Err(error) => warn!(
+                        "provisionamento do engine '{}' falhou ({error}); caindo para CPU",
+                        variant.slug()
+                    ),
+                }
+            }
+        }
+
+        // CPU path: bundled binary next to the app, PATH, cached download, or fresh download.
+        if !configured.is_empty() && command_available(&configured).await {
+            return Ok(configured);
+        }
+
+        if command_available("llama-server").await {
+            return Ok("llama-server".to_string());
+        }
+
+        if let Some(path) = provision::cached_binary(EngineVariant::Cpu) {
+            let candidate = path.display().to_string();
+            if command_available(&candidate).await {
+                return Ok(candidate);
+            }
         }
 
         if !self.cfg.auto_install {
@@ -131,19 +192,22 @@ impl LlamaCppProvider {
             });
         }
 
-        self.install_llamacpp().await?;
-
-        if !configured.is_empty() && command_available(configured).await {
-            return Ok(configured.to_string());
+        if let Ok(path) = provision::provision_variant(EngineVariant::Cpu).await {
+            let candidate = path.display().to_string();
+            if command_available(&candidate).await {
+                info!("engine CPU provisionado em {candidate}");
+                return Ok(candidate);
+            }
         }
 
+        // Last resort for platforms without prebuilt auto-provisioning (e.g. brew on macOS).
+        self.install_llamacpp().await?;
         if command_available("llama-server").await {
             return Ok("llama-server".to_string());
         }
 
         Err(ProviderError::Unavailable {
-            details: "instalacao automatica concluiu sem binario 'llama-server' disponivel"
-                .to_string(),
+            details: "nao foi possivel obter um binario llama-server (CPU ou GPU)".to_string(),
         })
     }
 
@@ -204,6 +268,7 @@ impl LlamaCppProvider {
             .ok();
 
         let mut command = Command::new(binary);
+        silence_console(&mut command);
         command
             .arg("--host")
             .arg(&host)
@@ -672,23 +737,41 @@ fn default_models_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(".").join("models"))
 }
 
+/// On Windows, stop spawned console child processes (llama-server, winget, ...) from
+/// flashing a black terminal window. No-op on other platforms.
+pub(crate) fn silence_console(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+    }
+}
+
 async fn command_available(command: &str) -> bool {
     if command.trim().is_empty() {
         return false;
     }
 
-    Command::new(command)
-        .arg("--help")
+    let mut cmd = Command::new(command);
+    cmd.arg("--help")
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
+        .stderr(Stdio::null());
+    silence_console(&mut cmd);
+    cmd.output()
         .await
         .map(|output| output.status.success())
         .unwrap_or(false)
 }
 
 async fn run_command(program: &str, args: &[&str], timeout: Duration) -> Result<(), ProviderError> {
-    let output = tokio::time::timeout(timeout, Command::new(program).args(args).output())
+    let mut cmd = Command::new(program);
+    cmd.args(args);
+    silence_console(&mut cmd);
+    let output = tokio::time::timeout(timeout, cmd.output())
         .await
         .map_err(|_| ProviderError::Timeout {
             seconds: timeout.as_secs().max(1),
