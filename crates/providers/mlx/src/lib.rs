@@ -12,6 +12,18 @@ use tokio::process::Command;
 use tokio::time::timeout;
 use tracing::debug;
 
+fn silence_console(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MlxProviderConfig {
     pub models_dir: PathBuf,
@@ -60,6 +72,44 @@ impl MlxProvider {
 
     pub fn config(&self) -> &MlxProviderConfig {
         &self.cfg
+    }
+
+    /// Validate whether the MLX runtime is usable on this platform.
+    /// Models remain lazily loaded after the user selects one.
+    pub async fn prepare_runtime(&self) -> Result<String, ProviderError> {
+        if cfg!(target_os = "windows") {
+            return Err(ProviderError::Unavailable {
+                details:
+                    "MLX requer Apple Silicon/macOS; provider nao aplicavel nesta maquina Windows"
+                        .to_string(),
+            });
+        }
+
+        let mut command = Command::new(&self.cfg.command);
+        silence_console(&mut command);
+        for arg in &self.cfg.command_prefix_args {
+            command.arg(arg);
+        }
+        command
+            .arg("--help")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let output = timeout(Duration::from_secs(10), command.output())
+            .await
+            .map_err(|_| ProviderError::Timeout { seconds: 10 })?
+            .map_err(|source| ProviderError::Io {
+                context: format!("validando runtime MLX '{}'", self.cfg.command),
+                source,
+            })?;
+        if !output.status.success() {
+            return Err(ProviderError::Unavailable {
+                details: format!(
+                    "comando MLX '{}' nao passou na verificacao de integridade",
+                    self.cfg.command
+                ),
+            });
+        }
+        Ok(self.cfg.command.clone())
     }
 
     fn resolve_model_path(&self, model_id: &str) -> PathBuf {
@@ -455,6 +505,7 @@ impl MlxProvider {
         debug!("running command: {command_debug}");
 
         let mut command = Command::new(command_name);
+        silence_console(&mut command);
         command
             .args(args)
             .stdout(Stdio::piped())
