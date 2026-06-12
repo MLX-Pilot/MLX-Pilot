@@ -5,6 +5,7 @@ mod channels;
 mod chat_stream;
 mod config;
 mod jobs;
+mod model_catalog;
 mod plugins;
 mod provider_embedder;
 mod runtime_doctor;
@@ -56,6 +57,8 @@ use crate::channels::{
     LegacyChannelUpsertRequest, MessageSendRequest,
 };
 use crate::plugins::{PluginConfigRequest, PluginManager, PluginToggleRequest};
+use crate::secrets_vault::SecretsVault;
+use http_llm_provider::{HttpLlmProvider, HttpLlmProviderConfig};
 
 #[derive(Clone)]
 struct AppState {
@@ -77,6 +80,7 @@ struct AppState {
     pub search_service: Arc<search::SearchService>,
     pub search_config: search::SearchConfig,
     pub embedder: Option<Arc<dyn mlx_agent_core::embeddings::Embedder>>,
+    pub vault: Option<Arc<SecretsVault>>,
     startup: startup::StartupCoordinator,
 }
 
@@ -429,6 +433,10 @@ pub async fn run() -> anyhow::Result<()> {
 
     let state_db_path = resolve_state_db_path();
 
+    let vault = SecretsVault::open(AppConfig::get_settings_path().parent().unwrap_or(std::path::Path::new(".")))
+        .ok()
+        .map(Arc::new);
+
     let search_config = search::SearchConfig {
         default_provider: cfg.search_provider.clone().unwrap_or_else(|| "duckduckgo".to_string()),
         searxng_instance: cfg.searxng_instance.clone(),
@@ -538,6 +546,7 @@ pub async fn run() -> anyhow::Result<()> {
         search_service: search_service.clone(),
         search_config: search_config.clone(),
         embedder: embedder.clone(),
+        vault: vault.clone(),
         startup,
     };
 
@@ -567,6 +576,7 @@ pub async fn run() -> anyhow::Result<()> {
             get(runtime_doctor_get).post(runtime_doctor_run),
         )
         .route("/models", get(list_models))
+        .route("/models/all", get(list_models_all))
         .route("/models/rename", post(rename_model))
         .route("/models/{model_id}", delete(delete_model))
         .route("/chat", post(chat))
@@ -855,6 +865,19 @@ async fn list_models(
         .map(annotate_agent_model_compatibility)
         .collect::<Vec<_>>();
     Ok(Json(models))
+}
+
+async fn list_models_all(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<model_catalog::ModelGroup>>, AppError> {
+    let local = list_chat_models(&state)
+        .await?
+        .into_iter()
+        .map(annotate_agent_model_compatibility)
+        .collect::<Vec<_>>();
+    let airgap = false; // TODO: read from config/settings
+    let groups = model_catalog::build_unified_models(local, state.vault.as_deref(), airgap).await;
+    Ok(Json(groups))
 }
 
 async fn agent_plugins(
@@ -2034,10 +2057,66 @@ fn is_known_tool_ready_ollama_family(model: &str) -> bool {
     .any(|needle| model.contains(needle))
 }
 
+/// Try to route a chat request to a cloud provider (e.g. "deepseek:model-name").
+/// Returns `None` if the model_id doesn't match any cloud provider.
+async fn try_cloud_chat(
+    state: &AppState,
+    request: &ChatRequest,
+) -> Option<Result<ChatResponse, ProviderError>> {
+    let model_id = request.model_id.trim();
+    // Check known cloud provider prefixes.
+    let known_cloud_providers = ["deepseek", "openai", "anthropic", "groq", "openrouter"];
+    let mut cloud_provider: Option<&str> = None;
+    let mut cloud_model: Option<&str> = None;
+
+    for prefix in &known_cloud_providers {
+        if let Some(rest) = model_id.strip_prefix(&format!("{prefix}:")) {
+            cloud_provider = Some(prefix);
+            cloud_model = Some(rest.trim());
+            break;
+        }
+    }
+
+    let provider_key = cloud_provider?;
+    let model = cloud_model?;
+
+    let config = model_catalog::find_cloud_config(provider_key)?;
+    let api_key = model_catalog::get_api_key(state.vault.as_deref(), &config)?;
+
+    let http_config = HttpLlmProviderConfig {
+        provider_name: provider_key.to_string(),
+        base_url: config.default_base_url.clone(),
+        api_key: Some(api_key),
+        api_kind: config.api_kind,
+        timeout: std::time::Duration::from_secs(120),
+        default_headers: BTreeMap::new(),
+        default_models: vec![model.to_string()],
+    };
+
+    let provider = HttpLlmProvider::new(http_config);
+    let cloud_request = ChatRequest {
+        model_id: model.to_string(),
+        messages: request.messages.clone(),
+        options: request.options.clone(),
+    };
+
+    match provider.chat(cloud_request).await {
+        Ok(response) => Some(Ok(response)),
+        Err(e) => Some(Err(ProviderError::Unavailable {
+            details: format!("cloud provider '{provider_key}': {e}"),
+        })),
+    }
+}
+
 async fn chat_with_routing(
     state: &AppState,
     request: ChatRequest,
 ) -> Result<ChatResponse, ProviderError> {
+    // Check for cloud provider prefix (e.g. "deepseek:model-name").
+    if let Some(cloud_result) = try_cloud_chat(state, &request).await {
+        return cloud_result;
+    }
+
     let provider_pinned = request_has_explicit_provider(&request.model_id);
     let routed = route_model_request(state, &request.model_id).await?;
     let request = ChatRequest {
