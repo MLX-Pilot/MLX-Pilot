@@ -10,6 +10,10 @@ members = [
   "crates/agent-core",
   "crates/agent-tools",
   "crates/agent-skills",
+  # Research & hardware-fit (Wave 5)
+  "crates/research",
+  "crates/hardware-fit",
+  "crates/model-fit",
 ]
 resolver = "2"
 

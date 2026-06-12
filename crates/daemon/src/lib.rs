@@ -4,10 +4,12 @@ mod catalog;
 mod channels;
 mod chat_stream;
 mod config;
+mod hwfit_routes;
 mod jobs;
 mod model_catalog;
 mod plugins;
 mod provider_embedder;
+mod research_routes;
 mod runtime_doctor;
 mod search;
 mod secrets_vault;
@@ -586,6 +588,22 @@ pub async fn run() -> anyhow::Result<()> {
         .route("/api/search/fetch", post(search::api_search_fetch))
         .route("/api/search/providers", get(search::api_search_providers))
         .route("/api/search/config", get(search::api_search_config))
+        // ── Research (Wave 5) ──
+        .route("/api/research/start", post(research_routes::research_start))
+        .route("/api/research/stream/{job_id}", get(research_routes::research_stream))
+        .route("/api/research/cancel/{job_id}", post(research_routes::research_cancel))
+        .route("/api/research/result/{job_id}", get(research_routes::research_result))
+        .route("/api/research/report/{id}", get(research_routes::research_report))
+        .route("/api/research/library", get(research_routes::research_library))
+        .route("/api/research/spinoff/{id}", post(research_routes::research_spinoff))
+        .route("/api/research/{id}/hide-image", post(research_routes::research_hide_image))
+        .route("/api/research/{id}/unhide-images", post(research_routes::research_unhide_images))
+        .route("/api/research/{id}", delete(research_routes::research_delete))
+        // ── Hardware Fit (Wave 5) ──
+        .route("/api/hwfit/system", get(hwfit_routes::hwfit_system))
+        .route("/api/hwfit/models", get(hwfit_routes::hwfit_models))
+        .route("/api/hwfit/profiles", get(hwfit_routes::hwfit_profiles))
+        .route("/api/hwfit/simulate", post(hwfit_routes::hwfit_simulate))
         .route("/environment", get(environment).post(update_environment))
         .route("/catalog/sources", get(catalog_sources))
         .route("/catalog/models", get(catalog_models))

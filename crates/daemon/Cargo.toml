@@ -35,6 +35,9 @@ mlx-provider = { path = "../providers/mlx" }
 llamacpp-provider = { path = "../providers/llamacpp" }
 ollama-provider = { path = "../providers/ollama" }
 http-llm-provider = { path = "../providers/http_llm_provider" }
+mlx-research = { path = "../research" }
+mlx-hardware-fit = { path = "../hardware-fit" }
+mlx-model-fit = { path = "../model-fit" }
 rusqlite = { version = "0.32", features = ["bundled"] }
 chrono.workspace = true
 uuid.workspace = true
