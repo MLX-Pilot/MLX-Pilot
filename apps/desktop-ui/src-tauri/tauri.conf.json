@@ -27,7 +27,8 @@
     "active": true,
     "targets": "all",
     "resources": {
-      "../../../scripts/mlx_airllm_bridge.py": "mlx_airllm_bridge.py"
+      "../../../scripts/mlx_airllm_bridge.py": "mlx_airllm_bridge.py",
+      "binaries/llamacpp/*": "llamacpp/"
     },
     "icon": [
       "icons/32x32.png",

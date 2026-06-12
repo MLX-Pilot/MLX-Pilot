@@ -11,3 +11,6 @@ bench_agent_fixture.txt
 *_output.txt
 *_err.txt
 clippy.txt
+
+# Bundled llama.cpp engine binaries — fetched by scripts/fetch-llama-engine.ps1, not committed
+apps/desktop-ui/src-tauri/binaries/
