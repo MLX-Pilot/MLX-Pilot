@@ -7,6 +7,7 @@ mod config;
 mod jobs;
 mod plugins;
 mod runtime_doctor;
+mod search;
 mod secrets_vault;
 mod startup;
 mod wave1;
@@ -71,6 +72,8 @@ struct AppState {
     pub compare: Arc<mlx_agent_core::CompareStore>,
     pub jobs: Arc<jobs::JobRegistry>,
     pub state_db_path: FsPathBuf,
+    pub search_service: Arc<search::SearchService>,
+    pub search_config: search::SearchConfig,
     startup: startup::StartupCoordinator,
 }
 
@@ -423,6 +426,20 @@ pub async fn run() -> anyhow::Result<()> {
 
     let state_db_path = resolve_state_db_path();
 
+    let search_config = search::SearchConfig {
+        default_provider: cfg.search_provider.clone().unwrap_or_else(|| "duckduckgo".to_string()),
+        searxng_instance: cfg.searxng_instance.clone(),
+        brave_api_key: cfg.brave_api_key.clone(),
+        safe_search: cfg.search_safe_search.unwrap_or(true),
+        max_results: cfg.search_max_results.unwrap_or(5),
+        ..Default::default()
+    };
+
+    let search_service = Arc::new(search::SearchService::new(
+        &search_config,
+        cfg.brave_api_key.clone(),
+    ));
+
     let state = AppState {
         provider_mode,
         mlx_provider: mlx_provider.clone(),
@@ -496,6 +513,8 @@ pub async fn run() -> anyhow::Result<()> {
         ),
         jobs: Arc::new(jobs::JobRegistry::new(4)),
         state_db_path: state_db_path.clone(),
+        search_service: search_service.clone(),
+        search_config: search_config.clone(),
         startup,
     };
 
@@ -530,6 +549,10 @@ pub async fn run() -> anyhow::Result<()> {
         .route("/chat", post(chat))
         .route("/chat/stream", post(chat_stream))
         .route("/web/brave/search", post(brave_web_search))
+        .route("/api/search", post(search::api_search))
+        .route("/api/search/fetch", post(search::api_search_fetch))
+        .route("/api/search/providers", get(search::api_search_providers))
+        .route("/api/search/config", get(search::api_search_config))
         .route("/environment", get(environment).post(update_environment))
         .route("/catalog/sources", get(catalog_sources))
         .route("/catalog/models", get(catalog_models))
