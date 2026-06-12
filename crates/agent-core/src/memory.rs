@@ -166,6 +166,47 @@ impl MemoryStore {
         Ok(hits)
     }
 
+    /// List stored records, newest first, with optional scope/kind filters.
+    /// `pinned_only` restricts to records whose `pin_state == "pinned"`.
+    pub async fn list(
+        &self,
+        scope: Option<&str>,
+        kind: Option<&str>,
+        pinned_only: bool,
+        limit: usize,
+    ) -> std::io::Result<Vec<MemoryRecord>> {
+        let mut records = self.state.load_all_memory_records().await?;
+        records.retain(|record| {
+            scope.map(|s| record.scope == s).unwrap_or(true)
+                && kind.map(|k| record.kind == k).unwrap_or(true)
+                && (!pinned_only || record.pin_state == "pinned")
+        });
+        if limit > 0 && records.len() > limit {
+            records.truncate(limit);
+        }
+        Ok(records)
+    }
+
+    /// Save (insert or update) a single record.
+    pub async fn save(&self, record: &MemoryRecord) -> std::io::Result<()> {
+        self.state.upsert_memory_records(std::slice::from_ref(record)).await
+    }
+
+    /// Delete a record by id.
+    pub async fn delete(&self, id: &str) -> std::io::Result<()> {
+        self.state.delete_memory_record(id).await
+    }
+
+    /// Pin (`pinned`) or unpin (`auto`) a record so it survives auto-pruning.
+    pub async fn set_pin(&self, id: &str, pinned: bool) -> std::io::Result<bool> {
+        let Some(mut record) = self.state.get_memory_record(id).await? else {
+            return Ok(false);
+        };
+        record.pin_state = if pinned { "pinned".to_string() } else { "auto".to_string() };
+        self.state.upsert_memory_records(std::slice::from_ref(&record)).await?;
+        Ok(true)
+    }
+
     fn import_legacy_if_needed_blocking(&self) -> std::io::Result<()> {
         if !self.root.exists() {
             std::fs::create_dir_all(&self.root)?;

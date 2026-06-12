@@ -125,6 +125,15 @@ pub struct SessionMeta {
     pub thread_id: String,
     #[serde(default)]
     pub correlation_id: String,
+    /// Optional user-defined folder/label for organizing the history tree.
+    #[serde(default)]
+    pub folder: String,
+    /// Whether the session is archived (hidden from the default list).
+    #[serde(default)]
+    pub archived: bool,
+    /// Whether the session is pinned to the top of the history list.
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 impl SessionMeta {
@@ -147,6 +156,9 @@ impl SessionMeta {
             source_channel: String::new(),
             thread_id: String::new(),
             correlation_id: String::new(),
+            folder: String::new(),
+            archived: false,
+            pinned: false,
         }
     }
 }
@@ -262,6 +274,13 @@ impl SessionStore {
                 } else {
                     meta.correlation_id
                 },
+                folder: if meta.folder.trim().is_empty() {
+                    existing.folder
+                } else {
+                    meta.folder
+                },
+                archived: existing.archived,
+                pinned: existing.pinned,
             }
         } else {
             meta
@@ -348,6 +367,95 @@ impl SessionStore {
 
     pub async fn delete(&self, session_id: &str) -> std::io::Result<()> {
         self.state.delete_session(session_id).await
+    }
+
+    // ── History organization + editing (Wave 1) ──
+
+    pub async fn set_folder(&self, session_id: &str, folder: &str) -> std::io::Result<()> {
+        self.state
+            .set_session_flags(session_id, Some(folder.to_string()), None, None)
+            .await
+    }
+
+    pub async fn set_archived(&self, session_id: &str, archived: bool) -> std::io::Result<()> {
+        self.state
+            .set_session_flags(session_id, None, Some(archived), None)
+            .await
+    }
+
+    pub async fn set_pinned(&self, session_id: &str, pinned: bool) -> std::io::Result<()> {
+        self.state
+            .set_session_flags(session_id, None, None, Some(pinned))
+            .await
+    }
+
+    /// Load messages paired with their durable event ids (for inline edit/delete).
+    pub async fn load_with_ids(
+        &self,
+        session_id: &str,
+    ) -> std::io::Result<Vec<(i64, SessionMessage)>> {
+        self.state.load_session_events_with_ids(session_id).await
+    }
+
+    pub async fn edit_message(&self, event_id: i64, content: &str) -> std::io::Result<()> {
+        self.state.update_session_event(event_id, content).await
+    }
+
+    pub async fn delete_message(
+        &self,
+        session_id: &str,
+        event_id: i64,
+    ) -> std::io::Result<()> {
+        self.state.delete_session_event(session_id, event_id).await
+    }
+
+    /// Remove every event after `event_id` (inclusive cutoff is the kept boundary).
+    pub async fn truncate_after(
+        &self,
+        session_id: &str,
+        event_id: i64,
+    ) -> std::io::Result<usize> {
+        self.state.truncate_session_after(session_id, event_id).await
+    }
+
+    /// Duplicate a session (meta + full transcript) into a new child session.
+    pub async fn fork(
+        &self,
+        session_id: &str,
+        new_name: Option<String>,
+    ) -> std::io::Result<Option<String>> {
+        let Some(meta) = self.state.get_session_meta(session_id).await? else {
+            return Ok(None);
+        };
+        let messages = self.state.load_session_events(session_id).await?;
+        let new_id = Self::new_session_id();
+        let now = Utc::now();
+        let new_meta = SessionMeta {
+            id: new_id.clone(),
+            name: new_name.unwrap_or_else(|| format!("{} (fork)", meta.name)),
+            updated_at: now,
+            last_activity_at: now,
+            message_count: 0,
+            provider_id: meta.provider_id,
+            model_id: meta.model_id,
+            workspace_root: meta.workspace_root,
+            origin_kind: "fork".to_string(),
+            parent_session_id: Some(session_id.to_string()),
+            status: default_session_status(),
+            created_at: now,
+            summary: String::new(),
+            source_channel: meta.source_channel,
+            thread_id: String::new(),
+            correlation_id: String::new(),
+            folder: meta.folder,
+            archived: false,
+            pinned: false,
+        };
+        self.state.upsert_session_meta(&new_meta).await?;
+        for message in &messages {
+            self.state.append_session_event(&new_id, message).await?;
+        }
+        Ok(Some(new_id))
     }
 
     pub async fn export(&self, session_id: &str) -> std::io::Result<String> {

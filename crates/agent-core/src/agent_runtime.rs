@@ -327,6 +327,9 @@ impl AgentRuntime {
             source_channel: session_context.source_channel,
             thread_id: session_context.thread_id,
             correlation_id: session_context.correlation_id,
+            folder: String::new(),
+            archived: false,
+            pinned: false,
         };
         self.sessions.ensure_session_with_meta(meta).await
     }
