@@ -3189,7 +3189,7 @@
     if (e.key === 'Escape') document.getElementById('model-menu')?.classList.add('hidden');
     if (!e.ctrlKey && !e.metaKey && !e.altKey && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
       const n = parseInt(e.key);
-      if (n >= 1 && n <= 6) switchTab(['chat', 'discover', 'agent', 'ai-interaction', 'settings'][n - 1]);
+      if (n >= 1 && n <= 7) switchTab(['chat', 'discover', 'agent', 'ai-interaction', 'research', 'hardware', 'settings'][n - 1]);
     }
     if ((e.ctrlKey || e.metaKey) && e.key === '.') state.streamController?.abort();
   });
@@ -3361,6 +3361,420 @@
 
     return restoreHtmlTokens(blocks.join(''), blockTokens);
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // DEEP RESEARCH (Wave 5)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const researchJobs = {};   // jobId -> { stream, record }
+
+  async function apiResearch(action, body) {
+    const res = await fetch(`${state.daemonUrl}/api/research/${action}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json().catch(() => null);
+  }
+
+  // ── Start Research ──
+  async function startResearch() {
+    const query = document.getElementById('research-query').value.trim();
+    if (!query) return;
+
+    const btn = document.getElementById('btn-research-start');
+    btn.disabled = true;
+    btn.textContent = 'Iniciando...';
+
+    const payload = {
+      query,
+      max_rounds: parseInt(document.getElementById('research-rounds').value) || 3,
+      max_time_secs: 300,
+      search_provider: document.getElementById('research-provider').value || null,
+      model_id: document.getElementById('research-model').value || null,
+      category: document.getElementById('research-category').value || null
+    };
+
+    try {
+      const res = await apiResearch('start', payload);
+      if (res && res.job_id) {
+        attachResearchJob(res.job_id);
+        document.getElementById('research-jobs-section').style.display = 'block';
+      }
+    } catch (e) {
+      console.error('Research start failed:', e);
+    }
+    btn.disabled = false;
+    btn.innerHTML = '<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="7"/><path d="M10 6v8M6 10h8"/></svg> Iniciar Pesquisa';
+  }
+
+  // ── Attach SSE stream to a job ──
+  function attachResearchJob(jobId) {
+    const evtSource = new EventSource(`${state.daemonUrl}/api/research/stream/${jobId}`);
+    researchJobs[jobId] = { stream: evtSource, record: null, cancelled: false };
+
+    evtSource.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        researchJobs[jobId].record = data;
+        renderResearchJobs();
+      } catch {}
+    };
+    evtSource.onerror = () => {
+      evtSource.close();
+      // Job ended — refresh library
+      setTimeout(() => { delete researchJobs[jobId]; renderResearchJobs(); loadResearchLibrary(); }, 2000);
+    };
+
+    renderResearchJobs();
+  }
+
+  // ── Cancel research ──
+  async function cancelResearch(jobId) {
+    try {
+      await apiResearch(`cancel/${jobId}`, {});
+      if (researchJobs[jobId]) researchJobs[jobId].cancelled = true;
+      if (researchJobs[jobId]?.stream) researchJobs[jobId].stream.close();
+    } catch (e) { console.error(e); }
+  }
+
+  // ── Render active job cards ──
+  function renderResearchJobs() {
+    const container = document.getElementById('research-jobs-list');
+    const entries = Object.entries(researchJobs);
+    if (!entries.length) {
+      document.getElementById('research-jobs-section').style.display = 'none';
+      return;
+    }
+    document.getElementById('research-jobs-section').style.display = 'block';
+
+    container.innerHTML = entries.map(([id, job]) => {
+      const rec = job.record || {};
+      const pct = rec.percent || 0;
+      const phase = rec.phase || 'queued';
+      const msg = esc(rec.message || 'Aguardando...');
+      const phaseLabel = { planning: 'Planejando', searching: 'Buscando', extracting: 'Extraindo', synthesizing: 'Sintetizando', deciding: 'Decidindo', finalizing: 'Finalizando', done: 'Concluida', cancelled: 'Cancelada', error: 'Erro' }[phase] || phase;
+      const isDone = phase === 'done';
+      const isCancelled = job.cancelled;
+
+      return `<div class="job-card" style="background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-weight:600;font-size:13px">${esc(id.slice(0,8))}...</span>
+          <span style="font-size:11px;color:${isCancelled ? 'var(--red)' : isDone ? 'var(--green)' : 'var(--accent)'}">${phaseLabel}</span>
+        </div>
+        <div class="progress-bar" style="height:4px;background:var(--bg-tertiary);border-radius:2px;overflow:hidden;margin-bottom:4px">
+          <div style="height:100%;width:${pct}%;background:${isCancelled ? 'var(--red)' : 'var(--accent)'};transition:width 0.3s"></div>
+        </div>
+        <div style="font-size:11px;color:var(--text-tertiary)">${msg}</div>
+        ${!isDone && !isCancelled ? `<button class="action-btn danger" style="margin-top:6px;font-size:11px" onclick="cancelResearch('${id}')">Cancelar</button>` : ''}
+      </div>`;
+    }).join('');
+  }
+
+  // ── Load library ──
+  async function loadResearchLibrary() {
+    const container = document.getElementById('research-library-list');
+    try {
+      const sessions = await apiResearch('library');
+      if (!sessions || !sessions.length) {
+        container.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-tertiary)">Nenhuma pesquisa conclu&iacute;da</div>';
+        return;
+      }
+      container.innerHTML = sessions.map(s => {
+        const date = s.created_at ? new Date(s.created_at).toLocaleDateString('pt-BR') : '';
+        const statusBadge = s.status === 'done' ? `<span style="color:var(--green);font-size:11px">Concluida</span>` :
+                            s.status === 'error' ? `<span style="color:var(--red);font-size:11px">Erro</span>` :
+                            `<span style="color:var(--text-tertiary);font-size:11px">${esc(s.status)}</span>`;
+        return `<div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:6px;cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="viewResearchReport('${esc(s.id)}')">
+          <div>
+            <div style="font-weight:500;font-size:13px;margin-bottom:2px">${esc(s.query.slice(0, 80))}${s.query.length > 80 ? '...' : ''}</div>
+            <div style="font-size:11px;color:var(--text-tertiary)">${date} &middot; ${s.rounds || 0} rounds &middot; ${s.sources || 0} fontes ${s.category ? '&middot; ' + esc(s.category) : ''}</div>
+          </div>
+          ${statusBadge}
+        </div>`;
+      }).join('');
+    } catch (e) {
+      console.error('Library load failed:', e);
+    }
+  }
+
+  // ── View report ──
+  function viewResearchReport(sessionId) {
+    const viewer = document.getElementById('research-report-viewer');
+    const iframe = document.getElementById('research-report-iframe');
+    viewer.style.display = 'block';
+    iframe.src = `${state.daemonUrl}/api/research/report/${sessionId}`;
+    viewer.dataset.sessionId = sessionId;
+    document.querySelector('.research-library-section').style.display = 'none';
+    document.querySelector('.research-form-card').style.display = 'none';
+    document.getElementById('research-jobs-section').style.display = 'none';
+  }
+
+  function backToLibrary() {
+    document.getElementById('research-report-viewer').style.display = 'none';
+    document.querySelector('.research-library-section').style.display = '';
+    document.querySelector('.research-form-card').style.display = '';
+    loadResearchLibrary();
+  }
+
+  async function exportResearchPdf() {
+    window.print(); // triggers print dialog for the iframe content
+  }
+
+  function exportResearchHtml() {
+    const sessionId = document.getElementById('research-report-viewer').dataset.sessionId;
+    if (sessionId) {
+      window.open(`${state.daemonUrl}/api/research/report/${sessionId}`, '_blank');
+    }
+  }
+
+  async function spinoffResearch() {
+    const sessionId = document.getElementById('research-report-viewer').dataset.sessionId;
+    if (!sessionId) return;
+    try {
+      const res = await apiResearch(`spinoff/${sessionId}`, {});
+      if (res && res.session_id) {
+        alert(`Sessão de chat criada: ${res.name}`);
+        // Switch to chat tab — note: we can't directly select a session from here easily
+        // but the session will appear in the sidebar
+      }
+    } catch (e) {
+      console.error('Spinoff failed:', e);
+    }
+  }
+
+  async function deleteResearchReport() {
+    const sessionId = document.getElementById('research-report-viewer').dataset.sessionId;
+    if (!sessionId || !confirm('Excluir esta pesquisa?')) return;
+    try {
+      await fetch(`${state.daemonUrl}/api/research/${sessionId}`, { method: 'DELETE' });
+      backToLibrary();
+    } catch (e) {
+      console.error('Delete failed:', e);
+    }
+  }
+
+  // ── Populate model selector ──
+  function populateResearchModels() {
+    const sel = document.getElementById('research-model');
+    if (!state.models || !state.models.length) return;
+    state.models.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m.id || m.name || '';
+      opt.textContent = m.name || m.id || '';
+      sel.appendChild(opt);
+    });
+  }
+
+  // ── Event bindings ──
+  document.getElementById('btn-research-start').addEventListener('click', startResearch);
+  document.getElementById('btn-refresh-library').addEventListener('click', loadResearchLibrary);
+  document.getElementById('btn-report-back').addEventListener('click', backToLibrary);
+  document.getElementById('btn-report-export-pdf').addEventListener('click', exportResearchPdf);
+  document.getElementById('btn-report-export-html').addEventListener('click', exportResearchHtml);
+  document.getElementById('btn-report-spinoff').addEventListener('click', spinoffResearch);
+  document.getElementById('btn-report-delete').addEventListener('click', deleteResearchReport);
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // HARDWARE & MODEL FIT (Wave 5)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  let hwProfile = null;
+  let hwRanked = [];
+
+  // ── Scan hardware ──
+  async function scanHardware(fresh = false) {
+    const cards = document.getElementById('hw-cards');
+    cards.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-tertiary)">Escaneando hardware...</div>';
+    try {
+      const r = await fetch(`${state.daemonUrl}/api/hwfit/system?fresh=${fresh}`);
+      const res = await r.json();
+      hwProfile = res;
+      renderHardwareCards();
+      loadModelRanking();
+      document.getElementById('hw-models-section').style.display = 'block';
+    } catch (e) {
+      cards.innerHTML = `<div style="padding:24px;text-align:center;color:var(--red)">Erro ao escanear: ${esc(e.message)}</div>`;
+    }
+  }
+
+  // ── Render hardware cards ──
+  function renderHardwareCards() {
+    if (!hwProfile) return;
+    const cards = document.getElementById('hw-cards');
+    const gpuList = hwProfile.gpus && hwProfile.gpus.length
+      ? hwProfile.gpus.map(g => `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px"><span>${esc(g.name)}</span><span style="color:var(--text-secondary)">${g.vram_gb.toFixed(1)} GB &middot; ${esc(g.backend)}</span></div>`).join('')
+      : '<div style="font-size:12px;color:var(--text-tertiary)">Nenhuma GPU detectada (CPU-only)</div>';
+
+    const groups = hwProfile.gpu_groups || [];
+    const groupSummary = groups.length
+      ? groups.map(g => `${g.count}x ${esc(g.name)} (${g.total_vram_gb.toFixed(1)} GB ${esc(g.backend)})`).join(', ')
+      : 'CPU-only';
+
+    cards.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px">
+        <div class="hw-card" style="background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;padding:16px">
+          <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;margin-bottom:4px">CPU</div>
+          <div style="font-weight:600;font-size:15px">${esc(hwProfile.cpu_name)}</div>
+          <div style="font-size:12px;color:var(--text-secondary)">${hwProfile.cpu_cores} n&uacute;cleos</div>
+        </div>
+        <div class="hw-card" style="background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;padding:16px">
+          <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;margin-bottom:4px">RAM</div>
+          <div style="font-weight:600;font-size:15px">${hwProfile.ram_gb.toFixed(1)} GB</div>
+          <div style="font-size:12px;color:var(--text-secondary)">${hwProfile.available_ram_gb.toFixed(1)} GB dispon&iacute;vel</div>
+        </div>
+        <div class="hw-card" style="background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;padding:16px">
+          <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;margin-bottom:4px">GPU</div>
+          <div style="font-weight:600;font-size:15px">${hwProfile.gpu_count} GPU${hwProfile.gpu_count !== 1 ? 's' : ''} &middot; ${hwProfile.total_vram_gb.toFixed(1)} GB VRAM</div>
+          <div style="font-size:12px;color:var(--text-secondary)">${esc(groupSummary)}</div>
+          ${gpuList}
+        </div>
+        <div class="hw-card" style="background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;padding:16px">
+          <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;margin-bottom:4px">Backend</div>
+          <div style="font-weight:600;font-size:15px;text-transform:uppercase">${esc(hwProfile.primary_backend)}</div>
+          <div style="font-size:12px;color:var(--text-secondary)">${hwProfile.is_cpu_only ? 'Modo CPU-only' : 'Acelerac&atilde;o GPU dispon&iacute;vel'}</div>
+        </div>
+      </div>
+      <div style="font-size:10px;color:var(--text-tertiary);margin-top:8px;text-align:right">Detectado: ${esc(hwProfile.detected_at)}</div>`;
+  }
+
+  // ── Load model ranking ──
+  async function loadModelRanking() {
+    const sort = document.getElementById('hw-sort').value;
+    const useCase = document.getElementById('hw-use-case').value;
+    const tbody = document.getElementById('hw-model-table-body');
+
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;text-align:center;color:var(--text-tertiary)">Ranqueando modelos...</td></tr>';
+
+    try {
+      const params = new URLSearchParams({ sort, use_case: useCase, fit_only: 'false' });
+      const r = await fetch(`${state.daemonUrl}/api/hwfit/models?${params}`);
+      const res = await r.json();
+      if (!res || !res.models) return;
+      hwRanked = res.models;
+
+      tbody.innerHTML = hwRanked.map(m => {
+        const fitColor = m.fit_level === 'excellent' ? 'var(--green)' :
+                         m.fit_level === 'good' ? 'var(--accent)' :
+                         m.fit_level === 'tight' ? 'var(--orange)' :
+                         m.fit_level === 'poor' ? 'var(--orange)' : 'var(--red)';
+        const badges = (m.badges || []).map(b => `<span style="display:inline-block;background:var(--bg-tertiary);padding:1px 6px;border-radius:4px;font-size:10px;margin-left:3px">${esc(b)}</span>`).join('');
+        return `<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="showServeProfiles('${esc(m.model.id)}',${m.model.params_b},'${esc(m.model.architecture)}',${m.model.is_moe},${m.model.context_length})">
+          <td style="padding:8px">
+            <div style="font-weight:500">${esc(m.model.name)}</div>
+            <div style="font-size:10px;color:var(--text-tertiary)">${esc(m.model.id.slice(0,40))}${m.model.id.length > 40 ? '...' : ''}${badges}</div>
+          </td>
+          <td style="padding:8px;font-size:12px">${m.model.params_b.toFixed(1)}B${m.model.is_moe ? ' MoE' : ''}</td>
+          <td style="padding:8px;font-size:12px;font-family:var(--font-mono)">${esc(m.recommended_quant)}</td>
+          <td style="padding:8px;font-size:12px">${m.estimated_vram_gb.toFixed(1)} GB</td>
+          <td style="padding:8px;font-size:12px">${m.estimated_tps.toFixed(0)} tok/s</td>
+          <td style="padding:8px"><span style="color:${fitColor};font-weight:600;font-size:11px;text-transform:uppercase">${esc(m.fit_level)}</span></td>
+          <td style="padding:8px"><span style="font-weight:700;font-size:14px">${m.composite_score.toFixed(0)}</span></td>
+          <td style="padding:8px"><button class="action-btn" style="font-size:10px" onclick="event.stopPropagation();downloadModel('${esc(m.model.id)}')">Baixar</button></td>
+        </tr>`;
+      }).join('');
+    } catch (e) {
+      console.error('Model ranking failed:', e);
+      tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;text-align:center;color:var(--red)">Erro ao carregar ranking</td></tr>';
+    }
+  }
+
+  // ── Show serve profiles ──
+  async function showServeProfiles(modelId, paramsB, arch, isMoe, ctxLen) {
+    const section = document.getElementById('hw-profiles-section');
+    const list = document.getElementById('hw-profiles-list');
+    section.style.display = 'block';
+
+    try {
+      const params = new URLSearchParams({
+        model_id: modelId,
+        params_b: paramsB,
+        architecture: arch,
+        is_moe: isMoe,
+        context_length: ctxLen
+      });
+      const pr = await fetch(`${state.daemonUrl}/api/hwfit/profiles?${params}`);
+      const profiles = await pr.json();
+      list.innerHTML = (profiles || []).map(p => {
+        const bgColor = p.fits ? 'var(--bg-surface)' : 'var(--red-bg, #3d1a1a)';
+        return `<div style="background:${bgColor};border:1px solid var(--border);border-radius:8px;padding:16px;flex:1;min-width:200px">
+          <div style="font-weight:700;font-size:14px;margin-bottom:8px">${esc(p.name)}</div>
+          <div style="font-size:12px;color:var(--text-secondary);line-height:1.6">
+            <div>Quant: <strong>${esc(p.quant)}</strong></div>
+            <div>GPU Layers: <strong>${p.n_gpu_layers === -1 ? 'Todas' : p.n_gpu_layers}</strong></div>
+            <div>Cache: <strong>${esc(p.cache_type)}</strong></div>
+            <div>Contexto: <strong>${p.context_size}</strong></div>
+            <div>VRAM Est.: <strong>${p.estimated_vram_gb.toFixed(1)} GB</strong></div>
+            ${p.note ? `<div style="margin-top:6px;font-style:italic;color:var(--text-tertiary)">${esc(p.note)}</div>` : ''}
+          </div>
+        </div>`;
+      }).join('');
+    } catch (e) {
+      list.innerHTML = '<div style="color:var(--red)">Erro ao carregar perfis</div>';
+    }
+  }
+
+  // ── Apply manual hardware simulation ──
+  async function applySimulatedHardware() {
+    const body = {
+      manual_gpu_count: parseInt(document.getElementById('hw-sim-gpu-count').value) || null,
+      manual_vram_gb: parseFloat(document.getElementById('hw-sim-vram').value) || null,
+      manual_ram_gb: parseFloat(document.getElementById('hw-sim-ram').value) || null,
+      manual_backend: document.getElementById('hw-sim-backend').value || null,
+      ignore_detected_gpu: !!document.getElementById('hw-sim-gpu-count').value,
+      ignore_detected_ram: !!document.getElementById('hw-sim-ram').value
+    };
+    try {
+      const sr = await fetch(`${state.daemonUrl}/api/hwfit/simulate`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+      });
+      const res = await sr.json();
+      hwProfile = res;
+      renderHardwareCards();
+      loadModelRanking();
+      document.getElementById('hw-models-section').style.display = 'block';
+    } catch (e) {
+      console.error('Simulation failed:', e);
+    }
+  }
+
+  // ── Download model via catalog ──
+  async function downloadModel(modelId) {
+    if (!confirm(`Baixar ${modelId}?`)) return;
+    try {
+      const dr = await fetch(`${state.daemonUrl}/catalog/downloads`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_id: modelId, source: 'huggingface' })
+      });
+      const res = await dr.json();
+      alert(`Download iniciado: ${res.job_id || 'ok'}`);
+    } catch (e) {
+      console.error('Download failed:', e);
+    }
+  }
+
+  // ── Event bindings ──
+  document.getElementById('btn-hw-scan').addEventListener('click', () => scanHardware(true));
+  document.getElementById('btn-hw-sim-apply').addEventListener('click', applySimulatedHardware);
+  document.getElementById('hw-sort').addEventListener('change', loadModelRanking);
+  document.getElementById('hw-use-case').addEventListener('change', loadModelRanking);
+
+  // ── Expose key functions to window for inline onclick handlers ──
+  window.cancelResearch = cancelResearch;
+  window.viewResearchReport = viewResearchReport;
+  window.showServeProfiles = showServeProfiles;
+  window.downloadModel = downloadModel;
+
+  // ── Populate models on tab switch ──
+  const origSwitchTab = switchTab;
+  switchTab = function(target) {
+    origSwitchTab(target);
+    if (target === 'research') {
+      populateResearchModels();
+      loadResearchLibrary();
+    }
+    if (target === 'hardware') {
+      if (!hwProfile) scanHardware(false);
+      else { renderHardwareCards(); loadModelRanking(); }
+    }
+  };
 
 })();
 

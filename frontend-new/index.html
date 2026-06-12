@@ -126,6 +126,22 @@
               </span>
               IA Visual
             </button>
+            <button class="tab" data-panel="research" role="tab">
+              <span class="tab-icon">
+                <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <circle cx="10" cy="10" r="7" /><path d="M10 6v8M6 10h8" />
+                </svg>
+              </span>
+              Pesquisa
+            </button>
+            <button class="tab" data-panel="hardware" role="tab">
+              <span class="tab-icon">
+                <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <rect x="2" y="4" width="16" height="10" rx="2" /><path d="M6 18h8M10 14v4" />
+                </svg>
+              </span>
+              Hardware
+            </button>
             <button class="tab" data-panel="settings" role="tab">
               <span class="tab-icon">
                 <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -538,6 +554,196 @@
                   <button class="example-btn" data-prompt="Crie ondas senoidais com particulas se sobrepondo em harmonia">Ondas</button>
                 </div>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- RESEARCH PANEL (Wave 5) -->
+        <section class="panel" id="panel-research">
+          <div class="panel-scroll">
+            <div class="section-header">
+              <h2 class="section-title">Deep Research</h2>
+              <p class="section-subtitle">Pesquisa iterativa multi-etapa com relat&oacute;rio visual</p>
+            </div>
+
+            <div class="research-form-card">
+              <div class="settings-field">
+                <label for="research-query">Pergunta de pesquisa</label>
+                <textarea id="research-query" class="input" rows="2" placeholder="Ex: Quais s&atilde;o as principais t&eacute;cnicas de fine-tuning para LLMs em 2025?"></textarea>
+              </div>
+              <div class="research-form-row">
+                <div class="settings-field">
+                  <label for="research-model">Modelo LLM</label>
+                  <select id="research-model" class="input">
+                    <option value="auto">Auto (detectar)</option>
+                  </select>
+                </div>
+                <div class="settings-field">
+                  <label for="research-rounds">Max Rounds</label>
+                  <select id="research-rounds" class="input">
+                    <option value="2">2</option>
+                    <option value="3" selected>3</option>
+                    <option value="5">5</option>
+                    <option value="8">8</option>
+                  </select>
+                </div>
+                <div class="settings-field">
+                  <label for="research-provider">Busca</label>
+                  <select id="research-provider" class="input">
+                    <option value="">Auto</option>
+                    <option value="duckduckgo">DuckDuckGo</option>
+                    <option value="brave">Brave</option>
+                  </select>
+                </div>
+                <div class="settings-field">
+                  <label for="research-category">Categoria</label>
+                  <select id="research-category" class="input">
+                    <option value="">Auto</option>
+                    <option value="product">Produto</option>
+                    <option value="comparison">Compara&ccedil;&atilde;o</option>
+                    <option value="howto">Guia</option>
+                    <option value="factcheck">Fact-check</option>
+                  </select>
+                </div>
+              </div>
+              <button class="primary-btn" id="btn-research-start" style="margin-top:8px">
+                <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="10" cy="10" r="7" /><path d="M10 6v8M6 10h8" />
+                </svg>
+                Iniciar Pesquisa
+              </button>
+            </div>
+
+            <!-- Active research jobs -->
+            <div class="research-jobs-section" id="research-jobs-section" style="display:none">
+              <h3 style="font-size:14px;color:var(--text-secondary);margin:20px 0 12px">Pesquisas em Andamento</h3>
+              <div id="research-jobs-list"></div>
+            </div>
+
+            <!-- Research Library -->
+            <div class="research-library-section">
+              <div class="section-header" style="margin-top:24px">
+                <h3 style="font-size:14px;color:var(--text-secondary)">Biblioteca de Pesquisas</h3>
+                <button class="refresh-btn" id="btn-refresh-library">
+                  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M2 8a6 6 0 0 1 10.5-4M14 8a6 6 0 0 1-10.5 4" /><path d="M12.5 1v3h-3M3.5 15v-3h3" />
+                  </svg>
+                  Atualizar
+                </button>
+              </div>
+              <div id="research-library-list">
+                <div style="padding:24px;text-align:center;color:var(--text-tertiary)">Nenhuma pesquisa conclu&iacute;da</div>
+              </div>
+            </div>
+
+            <!-- Report Viewer -->
+            <div id="research-report-viewer" style="display:none">
+              <div class="report-toolbar">
+                <button class="action-btn" id="btn-report-back">&larr; Biblioteca</button>
+                <button class="action-btn" id="btn-report-export-pdf">Exportar PDF</button>
+                <button class="action-btn" id="btn-report-export-html">Exportar HTML</button>
+                <button class="action-btn" id="btn-report-spinoff">Abrir no Chat</button>
+                <button class="action-btn danger" id="btn-report-delete">Excluir</button>
+              </div>
+              <iframe id="research-report-iframe" style="width:100%;height:70vh;border:1px solid var(--border);border-radius:8px;background:var(--bg-surface)"></iframe>
+            </div>
+          </div>
+        </section>
+
+        <!-- HARDWARE PANEL (Wave 5) -->
+        <section class="panel" id="panel-hardware">
+          <div class="panel-scroll">
+            <div class="section-header">
+              <h2 class="section-title">Hardware &amp; Model Fit</h2>
+              <p class="section-subtitle">Detecte seu hardware e descubra quais modelos rodam bem</p>
+            </div>
+
+            <!-- Hardware Cards -->
+            <div class="hw-cards" id="hw-cards">
+              <div style="padding:24px;text-align:center;color:var(--text-tertiary)">
+                <button class="primary-btn" id="btn-hw-scan">
+                  <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <circle cx="10" cy="10" r="7" /><path d="M10 6v8M6 10h8" />
+                  </svg>
+                  Escanear Hardware
+                </button>
+              </div>
+            </div>
+
+            <!-- Manual Hardware Simulator -->
+            <details class="hw-simulator" style="margin-top:16px">
+              <summary style="cursor:pointer;font-size:13px;color:var(--text-secondary)">Simulador de Hardware Manual</summary>
+              <div class="hw-sim-form" style="display:flex;gap:12px;flex-wrap:wrap;padding:12px 0">
+                <div class="settings-field" style="flex:1;min-width:120px">
+                  <label>GPUs</label>
+                  <input type="number" id="hw-sim-gpu-count" class="input" placeholder="0" min="0" />
+                </div>
+                <div class="settings-field" style="flex:1;min-width:120px">
+                  <label>VRAM por GPU (GB)</label>
+                  <input type="number" id="hw-sim-vram" class="input" placeholder="0" min="0" step="0.5" />
+                </div>
+                <div class="settings-field" style="flex:1;min-width:120px">
+                  <label>RAM (GB)</label>
+                  <input type="number" id="hw-sim-ram" class="input" placeholder="0" min="0" step="1" />
+                </div>
+                <div class="settings-field" style="flex:1;min-width:120px">
+                  <label>Backend</label>
+                  <select id="hw-sim-backend" class="input">
+                    <option value="">Auto</option>
+                    <option value="cuda">CUDA</option>
+                    <option value="rocm">ROCm</option>
+                    <option value="metal">Metal</option>
+                    <option value="cpu">CPU-only</option>
+                  </select>
+                </div>
+                <button class="action-btn" id="btn-hw-sim-apply" style="align-self:flex-end">Aplicar</button>
+              </div>
+            </details>
+
+            <!-- Model Ranking Table -->
+            <div class="hw-models-section" id="hw-models-section" style="display:none;margin-top:20px">
+              <div class="section-header">
+                <h3 style="font-size:14px;color:var(--text-secondary)">Modelos Ranqueados</h3>
+                <div class="filter-row">
+                  <select id="hw-sort" class="input" style="width:auto;font-size:12px">
+                    <option value="score">Score</option>
+                    <option value="speed">Velocidade</option>
+                    <option value="quality">Qualidade</option>
+                    <option value="vram">VRAM</option>
+                  </select>
+                  <select id="hw-use-case" class="input" style="width:auto;font-size:12px">
+                    <option value="general">Geral</option>
+                    <option value="coding">C&oacute;digo</option>
+                    <option value="creative">Criativo</option>
+                    <option value="analysis">An&aacute;lise</option>
+                  </select>
+                </div>
+              </div>
+              <div class="hw-model-table-wrap" style="overflow-x:auto">
+                <table class="hw-model-table" style="width:100%;border-collapse:collapse;font-size:13px">
+                  <thead>
+                    <tr style="text-align:left;border-bottom:1px solid var(--border)">
+                      <th style="padding:8px">Modelo</th>
+                      <th style="padding:8px">Params</th>
+                      <th style="padding:8px">Quant</th>
+                      <th style="padding:8px">VRAM Est.</th>
+                      <th style="padding:8px">Tok/s Est.</th>
+                      <th style="padding:8px">Fit</th>
+                      <th style="padding:8px">Score</th>
+                      <th style="padding:8px"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="hw-model-table-body">
+                    <tr><td colspan="8" style="padding:24px;text-align:center;color:var(--text-tertiary)">Escaneie o hardware primeiro</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Serve Profiles -->
+            <div id="hw-profiles-section" style="display:none;margin-top:16px">
+              <h3 style="font-size:14px;color:var(--text-secondary);margin-bottom:8px">Perfis de Serve</h3>
+              <div id="hw-profiles-list" style="display:flex;gap:12px;flex-wrap:wrap"></div>
             </div>
           </div>
         </section>
