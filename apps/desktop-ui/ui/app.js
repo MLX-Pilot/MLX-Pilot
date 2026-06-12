@@ -2191,6 +2191,35 @@
     container.scrollTop = container.scrollHeight;
   }
 
+  // Load a previous conversation into the Chat view and render its transcript.
+  async function loadChatSessionIntoView(sessionId) {
+    const container = document.getElementById('chat-messages');
+    if (!container) return;
+    container.innerHTML = '<div style="text-align:center;padding:24px;font-size:12px;color:var(--text-tertiary)">Carregando conversa...</div>';
+    try {
+      const messages = await api(`/agent/sessions/${encodeURIComponent(sessionId)}`);
+      state.messages = Array.isArray(messages) ? messages : [];
+      container.innerHTML = '';
+      const visible = state.messages.filter(m => {
+        const role = m && m.role;
+        return (role === 'user' || role === 'assistant') && String(m.content || '').trim();
+      });
+      if (!visible.length) {
+        addSystemMsg('Esta conversa nao possui mensagens visiveis.');
+        return;
+      }
+      visible.forEach(m => {
+        const role = m.role === 'assistant' ? 'assistant' : 'user';
+        const el = addMessage(role, role === 'assistant' ? '' : m.content);
+        if (role === 'assistant' && el) updateAnswer(el, m.content);
+      });
+      container.scrollTop = container.scrollHeight;
+    } catch (e) {
+      container.innerHTML = '';
+      addSystemMsg('Erro ao carregar conversa: ' + e.message);
+    }
+  }
+
   function updateStreamStatus(el, status) {
     const c = el?.querySelector('.msg-content');
     if (!c) return;
@@ -2430,7 +2459,11 @@
       }
       item.addEventListener('click', () => {
         state.currentSessionId = s.id;
-        renderAgentChatEmptyState();
+        if (variant === 'agent') {
+          renderAgentChatEmptyState();
+        } else {
+          void loadChatSessionIntoView(s.id);
+        }
         renderSidebarHistory();
       });
       container.appendChild(item);
