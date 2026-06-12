@@ -7,6 +7,7 @@ mod config;
 mod plugins;
 mod runtime_doctor;
 mod secrets_vault;
+mod startup;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -64,6 +65,7 @@ struct AppState {
     pub agent_state: agent_api::AgentState,
     pub plugin_manager: Arc<PluginManager>,
     pub channel_service: Arc<ChannelService>,
+    startup: startup::StartupCoordinator,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -281,8 +283,10 @@ fn map_channel_service_error(error: String) -> AppError {
 
 #[derive(Serialize)]
 struct HealthBody {
-    status: &'static str,
+    status: String,
     provider: &'static str,
+    provider_ready: bool,
+    degraded: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -336,6 +340,20 @@ struct EnvironmentResponse {
     variables: Vec<EnvironmentVariableView>,
 }
 
+/// On Windows, stop spawned console child processes (python/mlx, probes, installers, ...)
+/// from flashing a black terminal window. No-op on other platforms.
+pub(crate) fn silence_console(command: &mut tokio::process::Command) {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+    }
+}
+
 pub async fn run() -> anyhow::Result<()> {
     init_tracing();
 
@@ -379,6 +397,7 @@ pub async fn run() -> anyhow::Result<()> {
     }));
 
     info!("chat provider mode selected: {}", provider_mode.label());
+    let startup = startup::StartupCoordinator::default();
 
     let catalog = Arc::new(CatalogService::new(CatalogConfig {
         hf_api_base: cfg.hf_api_base.clone(),
@@ -439,11 +458,22 @@ pub async fn run() -> anyhow::Result<()> {
         ),
         plugin_manager: Arc::new(PluginManager::new(AppConfig::get_settings_path())),
         channel_service: Arc::new(ChannelService::new(AppConfig::get_settings_path())),
+        startup,
     };
+
+    state.startup.start(
+        state.mlx_provider.clone(),
+        state.llamacpp_provider.clone(),
+        state.ollama_provider.clone(),
+        selected_startup_ollama_model(&cfg),
+    );
 
     let app = Router::new()
         .route("/config", get(get_config).post(update_config))
         .route("/health", get(health))
+        .route("/runtime/startup", get(runtime_startup_get))
+        .route("/runtime/startup/retry", post(runtime_startup_retry))
+        .route("/runtime/startup/cancel", post(runtime_startup_cancel))
         .route(
             "/runtime/doctor",
             get(runtime_doctor_get).post(runtime_doctor_run),
@@ -574,10 +604,62 @@ fn init_tracing() {
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthBody> {
+    let startup = state.startup.snapshot(&state.ollama_provider).await;
     Json(HealthBody {
-        status: "ok",
+        status: if !startup.app_ready {
+            "starting".to_string()
+        } else if startup.degraded {
+            "degraded".to_string()
+        } else if startup.phase == "failed" {
+            "failed".to_string()
+        } else {
+            "ok".to_string()
+        },
         provider: state.provider_mode.label(),
+        provider_ready: startup.providers.iter().any(|provider| provider.ready),
+        degraded: startup.degraded,
     })
+}
+
+async fn runtime_startup_get(State(state): State<AppState>) -> Json<startup::StartupSnapshot> {
+    Json(state.startup.snapshot(&state.ollama_provider).await)
+}
+
+async fn runtime_startup_retry(State(state): State<AppState>) -> Json<startup::StartupSnapshot> {
+    let cfg = AppConfig::load_settings().apply_env();
+    state.startup.start(
+        state.mlx_provider.clone(),
+        state.llamacpp_provider.clone(),
+        state.ollama_provider.clone(),
+        selected_startup_ollama_model(&cfg),
+    );
+    Json(state.startup.snapshot(&state.ollama_provider).await)
+}
+
+async fn runtime_startup_cancel(State(state): State<AppState>) -> Json<startup::StartupSnapshot> {
+    state.ollama_provider.cancel_runtime_operation();
+    Json(state.startup.snapshot(&state.ollama_provider).await)
+}
+
+fn selected_startup_ollama_model(cfg: &AppConfig) -> Option<String> {
+    if !cfg.agent.provider.trim().eq_ignore_ascii_case("ollama") {
+        return None;
+    }
+    let without_prefix = cfg
+        .agent
+        .model_id
+        .trim()
+        .strip_prefix("ollama::")
+        .unwrap_or(cfg.agent.model_id.trim());
+    let model = without_prefix
+        .strip_suffix(" [Ollama]")
+        .unwrap_or(without_prefix)
+        .trim();
+    if model.is_empty() {
+        None
+    } else {
+        Some(model.to_string())
+    }
 }
 
 async fn runtime_doctor_get(
