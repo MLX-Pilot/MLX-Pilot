@@ -546,13 +546,17 @@ impl StateStore {
             let mut conn = open_connection(&db_path)?;
             let tx = conn.transaction().map_err(sql_error)?;
             for record in records {
+                let embedding_blob: Option<Vec<u8>> = record
+                    .embedding
+                    .as_ref()
+                    .map(|emb| crate::embeddings::serialize_embedding(emb));
                 tx.execute(
                     r#"
                     INSERT INTO memory_records (
                         id, session_id, source_session_id, scope, namespace, kind, title, content,
                         tags_json, metadata_json, importance, created_at, last_accessed_at,
-                        pin_state, promotion_source, summary_ref
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+                        pin_state, promotion_source, summary_ref, embedding, embedding_dim
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
                     ON CONFLICT(id) DO UPDATE SET
                         session_id = excluded.session_id,
                         source_session_id = excluded.source_session_id,
@@ -568,7 +572,9 @@ impl StateStore {
                         last_accessed_at = excluded.last_accessed_at,
                         pin_state = excluded.pin_state,
                         promotion_source = excluded.promotion_source,
-                        summary_ref = excluded.summary_ref
+                        summary_ref = excluded.summary_ref,
+                        embedding = excluded.embedding,
+                        embedding_dim = excluded.embedding_dim
                     "#,
                     params![
                         record.id,
@@ -588,6 +594,8 @@ impl StateStore {
                         record.pin_state,
                         record.promotion_source,
                         record.summary_ref,
+                        embedding_blob,
+                        record.embedding_dim as i64,
                     ],
                 )
                 .map_err(sql_error)?;
@@ -619,7 +627,7 @@ impl StateStore {
                     r#"
                     SELECT id, session_id, source_session_id, scope, namespace, kind, title, content,
                            tags_json, metadata_json, importance, created_at, last_accessed_at,
-                           pin_state, promotion_source, summary_ref
+                           pin_state, promotion_source, summary_ref, embedding, embedding_dim
                     FROM memory_records
                     WHERE id = ?1
                     "#,
@@ -649,7 +657,7 @@ impl StateStore {
                     r#"
                     SELECT id, session_id, source_session_id, scope, namespace, kind, title, content,
                            tags_json, metadata_json, importance, created_at, last_accessed_at,
-                           pin_state, promotion_source, summary_ref
+                           pin_state, promotion_source, summary_ref, embedding, embedding_dim
                     FROM memory_records
                     ORDER BY created_at DESC
                     "#,
@@ -688,7 +696,7 @@ impl StateStore {
                     SELECT m.id, m.session_id, m.source_session_id, m.scope, m.namespace, m.kind,
                            m.title, m.content, m.tags_json, m.metadata_json, m.importance,
                            m.created_at, m.last_accessed_at, m.pin_state, m.promotion_source,
-                           m.summary_ref,
+                           m.summary_ref, m.embedding, m.embedding_dim,
                            snippet(memory_records_fts, 2, '[', ']', '...', 18) AS preview,
                            CAST((-bm25(memory_records_fts)) * 1000 AS INTEGER) AS raw_score
                     FROM memory_records_fts
@@ -703,8 +711,8 @@ impl StateStore {
                 .query_map(params![query, limit.max(1) as i64], |row| {
                     Ok((
                         row_to_memory_record(row)?,
-                        row.get::<_, String>(16).unwrap_or_default(),
-                        row.get::<_, i64>(17).unwrap_or_default(),
+                        row.get::<_, String>(18).unwrap_or_default(),
+                        row.get::<_, i64>(19).unwrap_or_default(),
                     ))
                 })
                 .map_err(sql_error)?;
@@ -1377,6 +1385,11 @@ fn row_to_session_meta(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionMeta>
 }
 
 fn row_to_memory_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryRecord> {
+    let embedding_blob: Option<Vec<u8>> = row.get(16).unwrap_or(None);
+    let embedding_dim: i64 = row.get(17).unwrap_or(0);
+    let embedding: Option<Vec<f32>> = embedding_blob
+        .filter(|b| !b.is_empty())
+        .map(|b| crate::embeddings::deserialize_embedding(&b));
     Ok(MemoryRecord {
         id: row.get(0)?,
         session_id: row.get(1)?,
@@ -1394,6 +1407,8 @@ fn row_to_memory_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryRecor
         pin_state: row.get(13).unwrap_or_else(|_| "auto".to_string()),
         promotion_source: row.get(14).unwrap_or_default(),
         summary_ref: row.get(15).unwrap_or_default(),
+        embedding,
+        embedding_dim: embedding_dim as usize,
     })
 }
 

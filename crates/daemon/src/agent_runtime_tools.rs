@@ -864,6 +864,8 @@ impl Tool for MemoryWriteTool {
             pin_state: "manual".to_string(),
             promotion_source: "memory_write_tool".to_string(),
             summary_ref: ctx.session_id.clone(),
+            embedding: None,
+            embedding_dim: 0,
         };
         self.memory.upsert(&[record]).await.map_err(io_error)?;
 

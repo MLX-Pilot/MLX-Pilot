@@ -222,6 +222,8 @@ pub async fn add_memory(
         pin_state: "pinned".to_string(),
         promotion_source: "manual".to_string(),
         summary_ref: String::new(),
+        embedding: None,
+        embedding_dim: 0,
     };
     state.agent_state.memory.save(&record).await.map_err(internal)?;
     Ok(Json(record))
@@ -747,4 +749,25 @@ then state which label is best and briefly why. Be concise.\n\n",
     comparison.synthesis = response.message.content;
     state.compare.save(&comparison).await.map_err(internal)?;
     Ok(Json(comparison))
+}
+
+// ── Semantic memory (embeddings) ─────────────────────────────────────────
+
+/// POST /agent/memory/reindex — recompute embeddings for all records.
+pub async fn reindex_memory(
+    State(state): State<AppState>,
+) -> ApiResult<Value> {
+    let count = state.agent_state.memory.reindex().await.map_err(internal)?;
+    Ok(Json(json!({ "ok": true, "reindexed": count })))
+}
+
+/// GET /agent/memory/semantic — semantic search status.
+pub async fn memory_semantic_status(
+    State(state): State<AppState>,
+) -> Json<Value> {
+    let memory = &state.agent_state.memory;
+    Json(json!({
+        "semantic_active": memory.has_semantic(),
+        "embedder": memory.embedder_name(),
+    }))
 }

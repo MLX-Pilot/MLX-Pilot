@@ -6,6 +6,7 @@ mod chat_stream;
 mod config;
 mod jobs;
 mod plugins;
+mod provider_embedder;
 mod runtime_doctor;
 mod search;
 mod secrets_vault;
@@ -33,6 +34,7 @@ use catalog::{
 use chat_stream::{spawn_chat_stream, ChatRuntimeConfig, ChatStreamEvent};
 use config::AppConfig;
 use llamacpp_provider::{LlamaCppProvider, LlamaCppProviderConfig};
+use mlx_agent_core::embeddings::Embedder;
 use mlx_agent_skills::normalize_env_key;
 use mlx_ollama_core::{ChatRequest, ChatResponse, ModelDescriptor, ModelProvider, ProviderError};
 use mlx_provider::{MlxProvider, MlxProviderConfig};
@@ -74,6 +76,7 @@ struct AppState {
     pub state_db_path: FsPathBuf,
     pub search_service: Arc<search::SearchService>,
     pub search_config: search::SearchConfig,
+    pub embedder: Option<Arc<dyn mlx_agent_core::embeddings::Embedder>>,
     startup: startup::StartupCoordinator,
 }
 
@@ -440,6 +443,34 @@ pub async fn run() -> anyhow::Result<()> {
         cfg.brave_api_key.clone(),
     ));
 
+    // Try to set up the embedder from the Ollama provider.
+    let memory_root = AppConfig::get_settings_path()
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join("memory");
+    let (embedder, memory): (
+        Option<Arc<dyn mlx_agent_core::embeddings::Embedder>>,
+        Arc<mlx_agent_core::MemoryStore>,
+    ) = {
+        let provider_emb = provider_embedder::ProviderEmbedder::new(
+            &cfg.ollama_base_url,
+            &Some(ollama_provider.clone()),
+        )
+        .await;
+        if provider_emb.is_ready() {
+            let emb: Arc<dyn mlx_agent_core::embeddings::Embedder> = Arc::new(provider_emb);
+            let mem = mlx_agent_core::MemoryStore::with_embedder(memory_root, emb.clone())
+                .await
+                .expect("Failed to initialize memory store with embedder");
+            (Some(emb), Arc::new(mem))
+        } else {
+            let mem = mlx_agent_core::MemoryStore::new(memory_root)
+                .await
+                .expect("Failed to initialize memory store");
+            (None, Arc::new(mem))
+        }
+    };
+
     let state = AppState {
         provider_mode,
         mlx_provider: mlx_provider.clone(),
@@ -467,16 +498,7 @@ pub async fn run() -> anyhow::Result<()> {
             audit: Arc::new(mlx_agent_core::AuditLog::new(
                 std::env::temp_dir().join("mlx-pilot-audit"),
             )),
-            memory: Arc::new(
-                mlx_agent_core::MemoryStore::new(
-                    AppConfig::get_settings_path()
-                        .parent()
-                        .unwrap_or(std::path::Path::new("."))
-                        .join("memory"),
-                )
-                .await
-                .expect("Failed to initialize memory store"),
-            ),
+            memory: memory.clone(),
             budget_tracker: Arc::new(tokio::sync::RwLock::new(BTreeMap::new())),
         },
         session_store: Arc::new(
@@ -515,6 +537,7 @@ pub async fn run() -> anyhow::Result<()> {
         state_db_path: state_db_path.clone(),
         search_service: search_service.clone(),
         search_config: search_config.clone(),
+        embedder: embedder.clone(),
         startup,
     };
 
@@ -677,6 +700,11 @@ pub async fn run() -> anyhow::Result<()> {
                 .delete(wave1::delete_memory),
         )
         .route("/agent/memory/{id}/pin", post(wave1::pin_memory))
+        .route("/agent/memory/reindex", post(wave1::reindex_memory))
+        .route(
+            "/agent/memory/semantic",
+            get(wave1::memory_semantic_status),
+        )
         // ── Wave 1: Session history organization + editing ──
         .route("/agent/sessions/{id}/messages", get(wave1::session_messages))
         .route("/agent/sessions/{id}/flags", post(wave1::session_set_flags))
