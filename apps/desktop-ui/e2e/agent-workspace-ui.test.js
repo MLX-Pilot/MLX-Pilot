@@ -59,6 +59,10 @@ function createFixture({
   agentConfigResponse,
   environmentResponseHidden,
   environmentResponseRevealed,
+  catalogModelsResponse,
+  initialDownloads,
+  startupResponse,
+  useRealTimers = false,
 } = {}) {
   let sessions = [
     { id: "sess-1", name: "Operacao", message_count: 3 },
@@ -68,6 +72,7 @@ function createFixture({
   const fetchCalls = [];
   const hiddenEnvironment = environmentResponseHidden ?? { variables: [] };
   const revealedEnvironment = environmentResponseRevealed ?? hiddenEnvironment;
+  let downloads = Array.isArray(initialDownloads) ? [...initialDownloads] : [];
 
   const dom = new JSDOM(indexHtml, {
     url: "http://localhost/",
@@ -108,11 +113,16 @@ function createFixture({
 
   window.requestAnimationFrame = () => 1;
   window.cancelAnimationFrame = () => {};
-  window.setTimeout = (callback) => {
-    callback();
-    return 1;
-  };
-  window.clearTimeout = () => {};
+  if (useRealTimers) {
+    window.setTimeout = globalThis.setTimeout;
+    window.clearTimeout = globalThis.clearTimeout;
+  } else {
+    window.setTimeout = (callback) => {
+      callback();
+      return 1;
+    };
+    window.clearTimeout = () => {};
+  }
   window.alert = () => {};
   window.confirm = () => true;
   window.prompt = () => "slack";
@@ -162,7 +172,29 @@ function createFixture({
     fetchCalls.push({ method, path, body, url: requestUrl.toString() });
 
     if (path === "/health") {
-      return jsonResponse({ status: "ok", provider: "ollama" });
+      return jsonResponse({ status: "ok", provider: "auto", provider_ready: true, degraded: false });
+    }
+
+    if (path === "/runtime/startup" || path === "/runtime/startup/retry" || path === "/runtime/startup/cancel") {
+      return jsonResponse(startupResponse ?? {
+        phase: "ready",
+        step: "ready",
+        message: "Pronto",
+        progress_percent: null,
+        bytes_downloaded: 0,
+        bytes_total: null,
+        bytes_per_second: null,
+        can_cancel: false,
+        app_ready: true,
+        degraded: false,
+        operation_id: "startup-test",
+        providers: [
+          { provider: "ollama", phase: "ready", ready: true, applicable: true, message: "Ollama pronto" },
+          { provider: "llamacpp", phase: "ready", ready: true, applicable: true, message: "llama.cpp pronto" },
+          { provider: "mlx", phase: "unsupported", ready: false, applicable: false, message: "Nao aplicavel" },
+        ],
+        error: null,
+      });
     }
 
     if (path === "/config") {
@@ -198,6 +230,46 @@ function createFixture({
       ]);
     }
 
+    if (requestUrl.pathname === "/catalog/models") {
+      return jsonResponse(catalogModelsResponse ?? []);
+    }
+
+    if (path === "/catalog/downloads" && method === "GET") {
+      return jsonResponse(downloads);
+    }
+
+    if (path === "/catalog/downloads" && method === "POST") {
+      const job = {
+        id: "dl-test-1",
+        source: body?.source || "huggingface",
+        model_id: body?.model_id || "unknown/model",
+        destination: "G:/models/test",
+        status: "running",
+        progress_percent: 37,
+        bytes_downloaded: 370,
+        bytes_total: 1000,
+        total_files: 2,
+        completed_files: 0,
+        current_file: "model.gguf",
+        can_cancel: true,
+      };
+      downloads = [job, ...downloads.filter((entry) => entry.id !== job.id)];
+      return jsonResponse(job);
+    }
+
+    if (/^\/catalog\/downloads\/[^/]+\/cancel$/.test(path) && method === "POST") {
+      const jobId = path.split("/")[3];
+      const current = downloads.find((entry) => entry.id === jobId);
+      const cancelled = {
+        ...current,
+        status: "cancelled",
+        can_cancel: false,
+        error: "cancelado pelo usuario",
+      };
+      downloads = downloads.map((entry) => entry.id === jobId ? cancelled : entry);
+      return jsonResponse(cancelled);
+    }
+
     if (path === "/agent/config" && method === "GET") {
       return jsonResponse(agentConfigResponse ?? {
         provider: "ollama",
@@ -209,7 +281,7 @@ function createFixture({
             id: "ollama-local",
             provider: "ollama",
             model_id: "qwen3.5:9b",
-            base_url: "http://127.0.0.1:11434",
+            base_url: "",
             api_key_ref: null,
             custom_headers: {},
             runtime_variant: "classic",
@@ -518,7 +590,50 @@ test("workspace preserves cached model shell when no installed model is returned
   }
 });
 
-test("agent filtra modelos chat-only e repara para qwen3.5:9b", async () => {
+test("catalog shows download percentage and supports cancellation", async () => {
+  const fixture = createFixture({
+    useRealTimers: true,
+    catalogModelsResponse: [
+      {
+        source: "huggingface",
+        model_id: "acme/model-7b",
+        name: "model-7b",
+        author: "acme",
+        downloads: 1200,
+        likes: 42,
+        size_bytes: 1000,
+      },
+    ],
+  });
+
+  try {
+    await flush(8);
+
+    fixture.document.querySelector('.tab[data-panel="discover"]')?.click();
+    await flush(5);
+    fixture.document.querySelector(".download-btn")?.click();
+    await flush(5);
+
+    const progress = fixture.document.querySelector(".download-progress-track");
+    assert.equal(progress?.getAttribute("aria-valuenow"), "37");
+    assert.match(fixture.document.getElementById("catalog-download-list")?.textContent || "", /Baixando 37%/);
+    assert.equal(fixture.document.querySelector(".download-btn")?.disabled, true);
+
+    fixture.document.querySelector(".download-cancel-btn")?.click();
+    await flush(5);
+
+    assert.ok(fixture.fetchCalls.some((entry) =>
+      entry.path === "/catalog/downloads/dl-test-1/cancel"
+      && entry.method === "POST"
+    ));
+    assert.match(fixture.document.getElementById("catalog-download-list")?.textContent || "", /Cancelado 37%/);
+    assert.equal(fixture.document.querySelector(".download-cancel-btn"), null);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("agent mantem modelo local chat-only visivel e selecionado", async () => {
   const fixture = createFixture({
     agentConfigResponse: {
       provider: "ollama",
@@ -538,10 +653,11 @@ test("agent filtra modelos chat-only e repara para qwen3.5:9b", async () => {
     fixture.document.getElementById("model-picker-btn")?.click();
     await flush(2);
 
-    assert.match(fixture.document.getElementById("current-model")?.textContent || "", /qwen3\.5:9b/i);
+    assert.match(fixture.document.getElementById("current-model")?.textContent || "", /deepseek-r1:8b/i);
     assert.ok(menu?.textContent.includes("Tool-ready"));
-    assert.ok(!menu?.textContent.includes("deepseek-r1:8b [Ollama]"));
-    assert.ok(fixture.fetchCalls.some((entry) =>
+    assert.ok(menu?.textContent.includes("deepseek-r1:8b [Ollama]"));
+    assert.ok(menu?.textContent.includes("Chat-only"));
+    assert.ok(!fixture.fetchCalls.some((entry) =>
       entry.path === "/agent/config"
       && entry.method === "POST"
       && entry.body?.model_id === "qwen3.5:9b"
@@ -887,6 +1003,110 @@ test("chat canoniza modelos legados decorados antes de chamar o backend", async 
     const streamCall = fixture.fetchCalls.find((entry) => entry.path === "/chat/stream");
     assert.ok(streamCall);
     assert.equal(streamCall.body.model_id, "ollama::dolphin3:8b");
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("startup renders real download telemetry and cancellation", async () => {
+  const fixture = createFixture({
+    startupResponse: {
+      phase: "cancelled",
+      step: "cancelled",
+      message: "Operacao cancelada com seguranca",
+      progress_percent: 42,
+      bytes_downloaded: 420,
+      bytes_total: 1000,
+      bytes_per_second: 100,
+      can_cancel: true,
+      app_ready: true,
+      degraded: true,
+      operation_id: "startup-cancel",
+      providers: [
+        {
+          provider: "ollama",
+          phase: "cancelled",
+          ready: false,
+          applicable: true,
+          message: "Cancelado",
+        },
+        {
+          provider: "llamacpp",
+          phase: "ready",
+          ready: true,
+          applicable: true,
+          message: "llama.cpp pronto",
+        },
+      ],
+      error: "operacao cancelada pelo usuario",
+    },
+  });
+
+  try {
+    await flush(8);
+    assert.equal(fixture.document.getElementById("startup-progress")?.getAttribute("aria-valuenow"), "42");
+    assert.match(fixture.document.getElementById("startup-meta")?.textContent || "", /42%/);
+    fixture.document.getElementById("startup-cancel")?.click();
+    await flush(3);
+    assert.ok(fixture.fetchCalls.some((entry) =>
+      entry.path === "/runtime/startup/cancel" && entry.method === "POST"
+    ));
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("degraded Ollama blocks only models routed to Ollama", async () => {
+  const fixture = createFixture({
+    startupResponse: {
+      phase: "degraded",
+      step: "degraded",
+      message: "Aplicacao pronta em modo degradado",
+      progress_percent: null,
+      bytes_downloaded: 0,
+      bytes_total: null,
+      bytes_per_second: null,
+      can_cancel: false,
+      app_ready: true,
+      degraded: true,
+      operation_id: "startup-degraded",
+      providers: [
+        {
+          provider: "ollama",
+          phase: "failed",
+          ready: false,
+          applicable: true,
+          message: "GPU nao detectada",
+          error: "Ollama iniciou somente em CPU",
+        },
+        {
+          provider: "llamacpp",
+          phase: "ready",
+          ready: true,
+          applicable: true,
+          message: "llama.cpp pronto",
+        },
+        {
+          provider: "mlx",
+          phase: "unsupported",
+          ready: false,
+          applicable: false,
+          message: "Nao aplicavel",
+        },
+      ],
+      error: "Ollama iniciou somente em CPU",
+    },
+  });
+
+  try {
+    await flush(10);
+    const input = fixture.document.getElementById("chat-input");
+    input.value = "Ola";
+    fixture.document.getElementById("send-btn")?.click();
+    await flush(3);
+    assert.ok(!fixture.fetchCalls.some((entry) => entry.path === "/chat/stream"));
+    assert.match(fixture.document.getElementById("chat-messages")?.textContent || "", /Ollama nao esta pronto/);
+    assert.equal(fixture.document.getElementById("agent-daemon-status")?.textContent, "Degradado");
   } finally {
     fixture.cleanup();
   }
