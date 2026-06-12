@@ -135,6 +135,30 @@
               </span>
               Console
             </button>
+            <button class="tab" data-panel="historico" role="tab">
+              <span class="tab-icon">
+                <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M10 5v5l3 2" /><circle cx="10" cy="10" r="7" />
+                </svg>
+              </span>
+              Histórico
+            </button>
+            <button class="tab" data-panel="memoria" role="tab">
+              <span class="tab-icon">
+                <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M10 3a4 4 0 0 0-4 4v1a3 3 0 0 0 0 6 3 3 0 0 0 4 1.5A3 3 0 0 0 14 14a3 3 0 0 0 0-6V7a4 4 0 0 0-4-4z" /><path d="M10 3v14" />
+                </svg>
+              </span>
+              Memória
+            </button>
+            <button class="tab" data-panel="comparar" role="tab">
+              <span class="tab-icon">
+                <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <rect x="3" y="4" width="6" height="12" rx="1" /><rect x="11" y="4" width="6" height="12" rx="1" />
+                </svg>
+              </span>
+              Comparar
+            </button>
             <button class="tab" data-panel="settings" role="tab">
               <span class="tab-icon">
                 <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -199,6 +223,15 @@
                     </svg>
                     AIRLLM
                   </button>
+                  <div class="preset-picker" id="preset-picker">
+                    <button class="toggle-chip" id="preset-toggle" title="Aplicar preset à próxima mensagem">
+                      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M3 3h10v3H3zM3 8h10M3 12h6" />
+                      </svg>
+                      <span id="preset-active-label">Preset</span>
+                    </button>
+                    <div class="preset-menu hidden" id="preset-menu"></div>
+                  </div>
                 </div>
                 <textarea class="chat-input" id="chat-input" placeholder="Envie uma mensagem..." rows="1"></textarea>
                 <button class="send-btn" id="send-btn" title="Enviar">
@@ -679,10 +712,29 @@
           </div>
         </section>
 
+        <!-- HISTORY PANEL -->
+        <section class="panel" id="panel-historico">
+          <div id="historico-root" class="wave1-root"></div>
+        </section>
+
+        <!-- MEMORY PANEL -->
+        <section class="panel" id="panel-memoria">
+          <div id="memoria-root" class="wave1-root"></div>
+        </section>
+
+        <!-- COMPARE PANEL -->
+        <section class="panel" id="panel-comparar">
+          <div id="comparar-root" class="wave1-root"></div>
+        </section>
+
       </div><!-- /panels -->
     </main>
   </div><!-- /app -->
 
+  <!-- Wave-1 feature overlays (presets manager, etc.) -->
+  <div id="wave1-modal-root"></div>
+
   <script src="app.js"></script>
+  <script src="wave1.js"></script>
 </body>
 </html>
