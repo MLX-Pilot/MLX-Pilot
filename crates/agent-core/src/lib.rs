@@ -6,6 +6,7 @@
 
 pub mod agent_loop;
 pub mod agent_runtime;
+pub mod embeddings;
 pub mod approval;
 pub mod audit;
 pub mod capabilities;
