@@ -15,6 +15,7 @@ static DESKTOP_LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
 const DEFAULT_DAEMON_HOST: &str = "127.0.0.1";
 const DEFAULT_DAEMON_PORT: u16 = 11435;
 const DAEMON_PORT_SCAN_LIMIT: u16 = 12;
+const RESERVED_PROVIDER_PORTS: &[u16] = &[11438, 11439];
 
 #[derive(Serialize)]
 struct DesktopRuntimeInfo {
@@ -168,6 +169,9 @@ fn resolve_embedded_daemon_bind_addr() -> String {
     }
 
     for port in DEFAULT_DAEMON_PORT..=DEFAULT_DAEMON_PORT + DAEMON_PORT_SCAN_LIMIT {
+        if RESERVED_PROVIDER_PORTS.contains(&port) {
+            continue;
+        }
         if let Ok(listener) = TcpListener::bind((DEFAULT_DAEMON_HOST, port)) {
             drop(listener);
             return format!("{DEFAULT_DAEMON_HOST}:{port}");
@@ -246,6 +250,60 @@ fn inject_daemon_bootstrap_into_webview(webview: &tauri::Webview) {
     let _ = webview.eval(&script);
 }
 
+/// Point the embedded daemon at the llama.cpp engine we ship alongside the app,
+/// so local inference works with zero external installs (no winget/Ollama needed).
+fn configure_embedded_llamacpp(app: &tauri::App) {
+    // Respect an explicit user/operator override.
+    if std::env::var("APP_LLAMACPP_SERVER_BINARY")
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+    {
+        return;
+    }
+
+    let binary_names = ["llama-server.exe", "llama-server"];
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    // Installer layout: resources are copied under <resource_dir>/llamacpp/.
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        for name in binary_names {
+            candidates.push(resource_dir.join("llamacpp").join(name));
+            candidates.push(resource_dir.join(name));
+        }
+    }
+
+    // Dev / portable layout: binary sits next to the executable.
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            for name in binary_names {
+                candidates.push(exe_dir.join(name));
+                candidates.push(exe_dir.join("llamacpp").join(name));
+                candidates.push(exe_dir.join("bin").join(name));
+            }
+        }
+    }
+
+    for candidate in candidates {
+        if candidate.exists() {
+            append_desktop_log_line(
+                "info",
+                &format!("using bundled llama-server at {}", candidate.display()),
+            );
+            std::env::set_var("APP_LLAMACPP_SERVER_BINARY", &candidate);
+            // We ship the engine; never fall back to auto-installing it externally.
+            if std::env::var("APP_LLAMACPP_AUTO_INSTALL").is_err() {
+                std::env::set_var("APP_LLAMACPP_AUTO_INSTALL", "false");
+            }
+            return;
+        }
+    }
+
+    append_desktop_log_line(
+        "warn",
+        "bundled llama-server not found; relying on PATH or auto-install fallback",
+    );
+}
+
 fn bootstrap_embedded_daemon() {
     if !should_bootstrap_embedded_daemon() {
         let _ = current_daemon_url();
@@ -283,6 +341,7 @@ fn main() {
         ])
         .setup(|app| {
             append_desktop_log_line("info", "desktop shell starting");
+            configure_embedded_llamacpp(app);
             bootstrap_embedded_daemon();
 
             // Get the main webview window
