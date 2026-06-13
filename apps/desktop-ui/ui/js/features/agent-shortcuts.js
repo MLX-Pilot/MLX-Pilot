@@ -6,11 +6,12 @@
  */
 
 // === auto-imports (generated — do not edit) ===
-import { activeAgentModelId, pushConsoleEntry, updateAgentWorkspaceSummary } from '../../app.js';
+import { activeAgentModelId, pushConsoleEntry } from '../../app.js';
 import { api } from '../core/api.js';
 import { state } from '../core/state.js';
 import { renderAssistantOutput, updateThinking } from './chat.js';
 import { searchCatalog } from './models.js';
+import { updateAgentWorkspaceSummary } from './runtime.js';
 // === end auto-imports ===
 
   // -- Catalog Search -----------------------------------------

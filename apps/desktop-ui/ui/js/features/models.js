@@ -6,12 +6,13 @@
  */
 
 // === auto-imports (generated — do not edit) ===
-import { capabilityBadge, ensureAgentCompatibleModel, ensureVisibleModel, humanizeModelLabel, isAgentPanelActive, isToolReadyModel, modelCapabilityMode, modelCapabilityReason, persistAgentModelSelection, pushConsoleEntry, resolveModelId, saveModelCache, updateAgentWorkspaceSummary, visibleModelsForCurrentPanel } from '../../app.js';
+import { capabilityBadge, ensureAgentCompatibleModel, humanizeModelLabel, isAgentPanelActive, isToolReadyModel, modelCapabilityMode, modelCapabilityReason, persistAgentModelSelection, pushConsoleEntry, resolveModelId, visibleModelsForCurrentPanel } from '../../app.js';
 import { api } from '../core/api.js';
 import { esc, fmtBytes, fmtNum, modelIcon } from '../core/dom.js';
 import { switchTab } from '../core/router.js';
 import { API_SLOW_TIMEOUT_MS, CURRENT_MODEL_KEY, state } from '../core/state.js';
 import { addSystemMsg } from './chat.js';
+import { ensureVisibleModel, saveModelCache, updateAgentWorkspaceSummary } from './runtime.js';
 // === end auto-imports ===
 
   // -- Models -------------------------------------------------

@@ -6,10 +6,10 @@
  */
 
 // === auto-imports (generated — do not edit) ===
-import { updateAgentWorkspaceSummary } from '../../app.js';
 import { api } from '../core/api.js';
 import { esc } from '../core/dom.js';
 import { state } from '../core/state.js';
+import { updateAgentWorkspaceSummary } from './runtime.js';
 // === end auto-imports ===
 
   // -- Plugins ------------------------------------------------

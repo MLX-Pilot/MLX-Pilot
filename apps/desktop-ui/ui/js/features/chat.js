@@ -6,12 +6,13 @@
  */
 
 // === auto-imports (generated — do not edit) ===
-import { activeModelId, ensureRuntimeReadyForModel, pushConsoleEntry, renderAgentChatEmptyState, updateAgentWorkspaceSummary } from '../../app.js';
+import { activeModelId, pushConsoleEntry } from '../../app.js';
 import { api, createStreamDecoder } from '../core/api.js';
 import { esc, fmtNum } from '../core/dom.js';
 import { renderMarkdown } from '../core/markdown.js';
 import { state } from '../core/state.js';
 import { buildWebAugmentedMessages } from './models.js';
+import { ensureRuntimeReadyForModel, renderAgentChatEmptyState, updateAgentWorkspaceSummary } from './runtime.js';
 // === end auto-imports ===
 
   // -- Chat Streaming -----------------------------------------
