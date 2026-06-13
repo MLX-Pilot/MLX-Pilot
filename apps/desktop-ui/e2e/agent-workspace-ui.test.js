@@ -5,7 +5,45 @@ import { TextDecoder, TextEncoder } from "node:util";
 import { JSDOM } from "jsdom";
 
 const indexHtml = await readFile(new URL("../ui/index.html", import.meta.url), "utf8");
-const appJs = await readFile(new URL("../ui/app.js", import.meta.url), "utf8");
+
+// The runtime front-end is split into native ES modules under ui/js/. JSDOM does
+// not execute `type="module"` scripts and window.eval() cannot evaluate
+// import/export syntax, so for this integration test we flatten the module graph
+// into a single classic script: read each module in dependency order, strip the
+// ESM import/export syntax, and concatenate. The browser loads the very same
+// modules natively through js/main.js, so behaviour under test is identical.
+//
+// IMPORTANT: keep MODULE_FILES in dependency order (leaf modules first, the
+// app.js bootstrap last) and write every import/export statement on a SINGLE
+// line, so the line-based stripper below stays exact.
+const MODULE_FILES = [
+  "js/core/dom.js",
+  "js/core/markdown.js",
+  "app.js",
+];
+
+function stripEsmSyntax(src) {
+  return src
+    // drop single-line import statements (side-effect and named)
+    .replace(/^[ \t]*import\b[^\n;]*;[ \t]*$/gm, "")
+    // drop single-line `export { ... };` aggregate / re-export statements
+    .replace(/^[ \t]*export\s*\{[^}\n]*\}\s*(?:from\s*['"][^'"\n]*['"])?\s*;[ \t]*$/gm, "")
+    // strip the leading `export ` keyword from exported declarations
+    .replace(/^([ \t]*)export\s+(?=(?:async\s+)?(?:function|const|let|var|class)\b)/gm, "$1");
+}
+
+async function buildAppBundle() {
+  // Force strict mode for the whole bundle to match the original IIFE directive
+  // (native modules are always strict; the flattened classic script must be too).
+  const parts = ["'use strict';"];
+  for (const rel of MODULE_FILES) {
+    const src = await readFile(new URL(`../ui/${rel}`, import.meta.url), "utf8");
+    parts.push(`// ===== ${rel} =====\n${stripEsmSyntax(src)}`);
+  }
+  return parts.join("\n");
+}
+
+const appJs = await buildAppBundle();
 
 function jsonResponse(data, status = 200) {
   return {
