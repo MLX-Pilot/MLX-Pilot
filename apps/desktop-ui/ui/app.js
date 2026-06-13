@@ -7,12 +7,12 @@
 
 // === auto-imports (generated — do not edit) ===
 import { api, nativeInvoke } from './js/core/api.js';
-import { esc, fmtBytes, fmtNum, modelIcon } from './js/core/dom.js';
-import { switchTab } from './js/core/router.js';
-import { AGENT_LOCAL_PROVIDER_CHOICE, AGENT_PROVIDER_PROFILE_TYPES, API_SLOW_TIMEOUT_MS, CLOUD_PROVIDER_DEFAULTS, CURRENT_MODEL_KEY, DAEMON_READY_EVENT, DEFAULT_DAEMON_URL, MIN_SPLASH_MS, MODEL_CACHE_KEY, readStorage, state } from './js/core/state.js';
+import { esc, fmtBytes } from './js/core/dom.js';
+import { AGENT_LOCAL_PROVIDER_CHOICE, AGENT_PROVIDER_PROFILE_TYPES, CLOUD_PROVIDER_DEFAULTS, CURRENT_MODEL_KEY, DAEMON_READY_EVENT, DEFAULT_DAEMON_URL, MIN_SPLASH_MS, MODEL_CACHE_KEY, readStorage, state } from './js/core/state.js';
 import { loadAudit, loadChannels, loadPlugins, loadSkills, loadTools } from './js/features/agent.js';
-import { addSystemMsg, loadSessions } from './js/features/chat.js';
+import { loadSessions } from './js/features/chat.js';
 import { loadConsoleSnapshot, loadEnvironment, renderConsole } from './js/features/console.js';
+import { loadModels, renderInstalledModels, renderModelPicker, selectModel } from './js/features/models.js';
 // === end auto-imports ===
 
 
@@ -71,7 +71,7 @@ import { loadConsoleSnapshot, loadEnvironment, renderConsole } from './js/featur
       .trim();
   }
 
-  function humanizeModelLabel(value) {
+  export function humanizeModelLabel(value) {
     return stripModelDecoration(value).replace(/^(ollama|mlx|llama)::/i, '').trim();
   }
 
@@ -135,7 +135,7 @@ import { loadConsoleSnapshot, loadEnvironment, renderConsole } from './js/featur
     return fallback || state.agentConfig?.provider || state.provider || 'configured';
   }
 
-  function resolveModelId(candidate, provider = '') {
+  export function resolveModelId(candidate, provider = '') {
     const raw = stripModelDecoration(candidate);
     if (!raw) return '';
 
@@ -173,11 +173,11 @@ import { loadConsoleSnapshot, loadEnvironment, renderConsole } from './js/featur
     return state.activePanel || document.querySelector('.tab.active')?.dataset.panel || 'chat';
   }
 
-  function isAgentPanelActive() {
+  export function isAgentPanelActive() {
     return currentPanelId() === 'agent';
   }
 
-  function modelCapabilityMode(model) {
+  export function modelCapabilityMode(model) {
     if (!model) return 'unknown';
 
     const explicit = String(model.agent_tool_mode || '').trim().toLowerCase();
@@ -192,7 +192,7 @@ import { loadConsoleSnapshot, loadEnvironment, renderConsole } from './js/featur
     return 'unknown';
   }
 
-  function modelCapabilityReason(model) {
+  export function modelCapabilityReason(model) {
     if (model?.agent_tool_reason) return model.agent_tool_reason;
     const mode = modelCapabilityMode(model);
     if (mode === 'tool_ready') return 'Compatível com tool calling no Agent.';
@@ -200,7 +200,7 @@ import { loadConsoleSnapshot, loadEnvironment, renderConsole } from './js/featur
     return 'Compatibilidade ainda não validada para uso com tools.';
   }
 
-  function isToolReadyModel(model) {
+  export function isToolReadyModel(model) {
     return modelCapabilityMode(model) === 'tool_ready';
   }
 
@@ -577,7 +577,7 @@ import { loadConsoleSnapshot, loadEnvironment, renderConsole } from './js/featur
     }
   }
 
-  function visibleModelsForCurrentPanel() {
+  export function visibleModelsForCurrentPanel() {
     if (!isAgentPanelActive()) return state.models;
     const providerOption = selectedAgentProviderOption();
     if (providerOption?.kind === 'cloud') {
@@ -595,7 +595,7 @@ import { loadConsoleSnapshot, loadEnvironment, renderConsole } from './js/featur
     );
   }
 
-  function capabilityBadge(mode) {
+  export function capabilityBadge(mode) {
     if (mode === 'tool_ready') return { label: 'Tool-ready', tone: 'tool-ready' };
     if (mode === 'chat_only') return { label: 'Chat-only', tone: 'chat-only' };
     return { label: 'Verificar', tone: 'unknown' };
@@ -611,7 +611,7 @@ import { loadConsoleSnapshot, loadEnvironment, renderConsole } from './js/featur
     return raw;
   }
 
-  async function persistAgentModelSelection(modelId) {
+  export async function persistAgentModelSelection(modelId) {
     const resolvedId = resolveModelId(modelId, state.agentConfig?.provider);
     if (!resolvedId) return false;
 
@@ -841,7 +841,7 @@ import { loadConsoleSnapshot, loadEnvironment, renderConsole } from './js/featur
     appEl.classList.toggle('chat-sidebar-visible', target === 'chat');
   }
 
-  function saveModelCache() {
+  export function saveModelCache() {
     try {
       localStorage.setItem(MODEL_CACHE_KEY, JSON.stringify(state.models));
       const resolvedModel = activeModelId();
@@ -853,7 +853,7 @@ import { loadConsoleSnapshot, loadEnvironment, renderConsole } from './js/featur
     }
   }
 
-  function ensureVisibleModel(modelId, provider) {
+  export function ensureVisibleModel(modelId, provider) {
     const normalizedId = resolveModelId(modelId, provider);
     if (!normalizedId) return;
 
@@ -1459,427 +1459,3 @@ import { loadConsoleSnapshot, loadEnvironment, renderConsole } from './js/featur
     container.style.display = hidden ? '' : 'none';
     btn.innerHTML = hidden ? '&#9660; Colapsar' : '&#9654; Expandir';
   });
-
-  // -- Models -------------------------------------------------
-  async function loadModels({ force = false } = {}) {
-    if (state.modelsLoading) return state.modelsPromise;
-    if (!force && state.modelsLoaded && !state.modelsStale) return state.models;
-
-    state.modelsLoading = true;
-    renderInstalledModels();
-
-    state.modelsPromise = (async () => {
-      try {
-        const models = await api('/models');
-        state.models = Array.isArray(models) ? models : [];
-        if (state.agentConfig?.model_id) ensureVisibleModel(state.agentConfig.model_id, state.agentConfig.provider);
-        if (state.currentModel) state.currentModel = resolveModelId(state.currentModel, state.agentConfig?.provider);
-        if (state.currentModel) ensureVisibleModel(state.currentModel, state.agentConfig?.provider);
-        if (state.agentConfig && (!state.agentConfig.model_id || isAgentPanelActive())) {
-          void ensureAgentCompatibleModel({ persist: isAgentPanelActive() });
-        }
-        state.modelsLoaded = true;
-        state.modelsStale = false;
-        saveModelCache();
-        renderModelPicker();
-        renderInstalledModels();
-        return state.models;
-      } catch (e) {
-        console.error('Models load failed:', e);
-        if (!state.modelsLoaded) {
-          state.models = [];
-          renderModelPicker();
-        }
-        renderInstalledModels();
-        throw e;
-      } finally {
-        state.modelsLoading = false;
-        state.modelsPromise = null;
-        renderInstalledModels();
-      }
-    })();
-
-    return state.modelsPromise;
-  }
-
-  export function invalidateModels() {
-    state.modelsStale = true;
-  }
-
-  export function refreshModelsInBackground() {
-    if (state.modelsLoading) return;
-    void loadModels({ force: true }).catch(() => {});
-  }
-
-  export function showInstalledModels() {
-    renderInstalledModels();
-    if (!state.modelsLoaded || state.modelsStale) refreshModelsInBackground();
-  }
-
-  export function renderModelPicker() {
-    const menu = document.getElementById('model-menu');
-    if (!menu) return;
-    menu.innerHTML = '';
-    const visibleModels = visibleModelsForCurrentPanel();
-    if (visibleModels.length === 0) {
-      menu.innerHTML = '<div class="model-menu-item" style="pointer-events:none;color:var(--text-tertiary)">Nenhum modelo encontrado</div>';
-      return;
-    }
-    visibleModels.forEach(m => {
-      const badge = capabilityBadge(modelCapabilityMode(m));
-      const item = document.createElement('div');
-      item.className = 'model-menu-item' + (state.currentModel === m.id ? ' selected' : '');
-      item.dataset.model = m.id;
-      item.title = modelCapabilityReason(m);
-      item.innerHTML = `
-        <div class="model-menu-info">
-          <span class="model-menu-name">${esc(m.name || m.id)}</span>
-          <span class="model-menu-meta">${esc(m.provider || '')}</span>
-        </div>
-        <div class="model-menu-badges">
-          <span class="model-capability-badge ${badge.tone}">${badge.label}</span>
-        </div>`;
-      item.addEventListener('click', (e) => {
-        e.stopPropagation();
-        selectModel(m.id, { persistAgentConfig: isAgentPanelActive() });
-        menu.classList.add('hidden');
-      });
-      menu.appendChild(item);
-    });
-    if (!state.currentModel && visibleModels.length > 0) {
-      selectModel(visibleModels[0].id, { persistAgentConfig: isAgentPanelActive() });
-    }
-  }
-
-  function selectModel(id, { persistAgentConfig = false } = {}) {
-    const resolvedId = resolveModelId(id, state.agentConfig?.provider);
-    state.currentModel = resolvedId || id;
-    try {
-      localStorage.setItem(CURRENT_MODEL_KEY, state.currentModel);
-    } catch {
-      /* ignore storage errors */
-    }
-    const nameEl = document.getElementById('current-model');
-    const model = state.models.find(m => m.id === state.currentModel);
-    if (nameEl) nameEl.textContent = model ? (model.name || model.id) : humanizeModelLabel(state.currentModel);
-    renderModelPicker();
-    updateAgentWorkspaceSummary();
-    if (persistAgentConfig) void persistAgentModelSelection(state.currentModel);
-  }
-
-  function renderInstalledModels() {
-    const list = document.getElementById('installed-list');
-    const count = document.getElementById('installed-count');
-    if (!list) return;
-    if (count) {
-      if (!state.modelsLoaded && state.modelsLoading) {
-        count.textContent = 'Carregando modelos...';
-      } else {
-        const suffix = state.modelsLoading ? ' • atualizando...' : '';
-        const toolReadyCount = state.models.filter(isToolReadyModel).length;
-        count.textContent = `${state.models.length} modelo${state.models.length !== 1 ? 's' : ''} instalado${state.models.length !== 1 ? 's' : ''} • ${toolReadyCount} Tool-ready${suffix}`;
-      }
-    }
-    list.innerHTML = '';
-    if (!state.modelsLoaded && state.modelsLoading) {
-      list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-tertiary)">Carregando modelos...</div>';
-      return;
-    }
-    if (state.models.length === 0) {
-      list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-tertiary)">Nenhum modelo instalado</div>';
-      return;
-    }
-    state.models.forEach(m => {
-      const badge = capabilityBadge(modelCapabilityMode(m));
-      const item = document.createElement('div');
-      item.className = 'installed-item';
-      const ic = modelIcon(m.id);
-      item.innerHTML = `
-        <span class="installed-icon ${ic}">${(m.name || m.id)[0].toUpperCase()}</span>
-        <div class="installed-info">
-          <span class="installed-name">${esc(m.name || m.id)}</span>
-          <span class="installed-meta">${esc(m.provider || '')} &middot; ${m.is_available ? 'Disponível' : 'Indisponível'}</span>
-          <span class="installed-capability"><span class="model-capability-badge ${badge.tone}" title="${esc(modelCapabilityReason(m))}">${badge.label}</span></span>
-        </div>
-        <div class="installed-actions">
-          <button class="action-btn" data-act="chat" data-id="${esc(m.id)}">Chat</button>
-          <button class="action-btn danger" data-act="del" data-id="${esc(m.id)}">Remover</button>
-        </div>`;
-      list.appendChild(item);
-    });
-    list.querySelectorAll('[data-act="chat"]').forEach(b => b.addEventListener('click', () => { selectModel(b.dataset.id); switchTab('chat'); }));
-    list.querySelectorAll('[data-act="del"]').forEach(b => b.addEventListener('click', async () => {
-      if (!confirm(`Remover modelo ${b.dataset.id}?`)) return;
-      try {
-        await api(`/models/${encodeURIComponent(b.dataset.id)}`, { method: 'DELETE' });
-        invalidateModels();
-        refreshModelsInBackground();
-      } catch (e) { alert('Erro: ' + e.message); }
-    }));
-  }
-
-  function isWebSearchEnabled() {
-    const toggle = document.getElementById('web-search-toggle');
-    if (toggle) return toggle.classList.contains('active');
-    return Boolean(state.webSearchEnabled);
-  }
-
-  function renderWebSearchContext(searchResponse) {
-    const results = Array.isArray(searchResponse?.results) ? searchResponse.results : [];
-    if (!results.length) return '';
-
-    const lines = results.slice(0, 5).map((result, index) => {
-      const title = String(result.title || '').trim();
-      const url = String(result.url || '').trim();
-      const description = String(result.description || '').trim();
-      return [
-        `${index + 1}. ${title || url || 'Resultado sem titulo'}`,
-        url ? `URL: ${url}` : '',
-        description ? `Resumo: ${description}` : '',
-      ].filter(Boolean).join('\n');
-    });
-
-    return [
-      'Contexto de busca web recente. Use estes resultados quando responder e deixe claro quando a informacao veio da web.',
-      `Consulta: ${searchResponse.query || ''}`,
-      '',
-      lines.join('\n\n'),
-    ].join('\n');
-  }
-
-  export async function buildWebAugmentedMessages(userText) {
-    if (!isWebSearchEnabled()) return state.messages;
-
-    try {
-      const searchResponse = await api('/web/brave/search', {
-        method: 'POST',
-        timeoutMs: API_SLOW_TIMEOUT_MS,
-        body: JSON.stringify({
-          query: userText,
-          max_results: 5,
-        }),
-      });
-      const webContext = renderWebSearchContext(searchResponse);
-      const resultCount = Array.isArray(searchResponse?.results) ? searchResponse.results.length : 0;
-      if (!webContext) {
-        addSystemMsg('Busca web executada, mas nenhum resultado relevante foi retornado.');
-        return state.messages;
-      }
-      addSystemMsg(`Busca web anexada ao contexto (${resultCount} resultado${resultCount === 1 ? '' : 's'}).`);
-      return [
-        { role: 'system', content: webContext },
-        ...state.messages,
-      ];
-    } catch (error) {
-      addSystemMsg(`Busca web nao executada: ${error.message}`);
-      pushConsoleEntry('warn', 'web', `Busca web falhou: ${error.message}`);
-      return state.messages;
-    }
-  }
-
-  // -- Catalog ------------------------------------------------
-  const ACTIVE_DOWNLOAD_STATUSES = new Set(['queued', 'running', 'cancelling']);
-
-  function downloadPercent(job) {
-    const percent = Number(job?.progress_percent || 0);
-    return Math.round(Math.max(0, Math.min(100, Number.isFinite(percent) ? percent : 0)));
-  }
-
-  function downloadStatusLabel(status) {
-    return {
-      queued: 'Na fila',
-      running: 'Baixando',
-      cancelling: 'Cancelando',
-      completed: 'Concluido',
-      failed: 'Falhou',
-      cancelled: 'Cancelado',
-    }[status] || String(status || 'Aguardando');
-  }
-
-  function activeDownloadForModel(source, modelId) {
-    return state.downloads.find(job =>
-      job.source === source
-      && job.model_id === modelId
-      && ACTIVE_DOWNLOAD_STATUSES.has(job.status)
-    );
-  }
-
-  function upsertDownload(job) {
-    state.downloads = [
-      job,
-      ...state.downloads.filter(entry => entry.id !== job.id),
-    ];
-  }
-
-  function scheduleDownloadRefresh() {
-    if (state.downloadRefreshTimer) {
-      clearTimeout(state.downloadRefreshTimer);
-      state.downloadRefreshTimer = null;
-    }
-    if (!state.downloads.some(job => ACTIVE_DOWNLOAD_STATUSES.has(job.status))) return;
-    state.downloadRefreshTimer = setTimeout(() => {
-      state.downloadRefreshTimer = null;
-      void loadDownloads();
-    }, 800);
-  }
-
-  export async function loadDownloads() {
-    if (state.downloadsLoading) return;
-    state.downloadsLoading = true;
-    const previous = new Map(state.downloads.map(job => [job.id, job.status]));
-    try {
-      const jobs = await api('/catalog/downloads');
-      state.downloads = Array.isArray(jobs) ? jobs : [];
-      const completedNow = state.downloads.some(job =>
-        job.status === 'completed' && ACTIVE_DOWNLOAD_STATUSES.has(previous.get(job.id))
-      );
-      renderDownloads();
-      renderCatalog();
-      if (completedNow) {
-        invalidateModels();
-        refreshModelsInBackground();
-      }
-    } catch (error) {
-      console.error('Download refresh failed:', error);
-    } finally {
-      state.downloadsLoading = false;
-      scheduleDownloadRefresh();
-    }
-  }
-
-  async function cancelDownload(jobId) {
-    const current = state.downloads.find(job => job.id === jobId);
-    if (current) {
-      current.status = 'cancelling';
-      current.can_cancel = false;
-      renderDownloads();
-      renderCatalog();
-    }
-    try {
-      const job = await api(`/catalog/downloads/${encodeURIComponent(jobId)}/cancel`, {
-        method: 'POST',
-      });
-      upsertDownload(job);
-      renderDownloads();
-      renderCatalog();
-      scheduleDownloadRefresh();
-    } catch (error) {
-      await loadDownloads();
-      alert('Erro ao cancelar download: ' + error.message);
-    }
-  }
-
-  function renderDownloads() {
-    const panel = document.getElementById('catalog-download-panel');
-    const list = document.getElementById('catalog-download-list');
-    const summary = document.getElementById('catalog-download-summary');
-    if (!panel || !list) return;
-
-    panel.hidden = state.downloads.length === 0;
-    if (state.downloads.length === 0) {
-      list.innerHTML = '';
-      if (summary) summary.textContent = '';
-      return;
-    }
-
-    const activeCount = state.downloads.filter(job => ACTIVE_DOWNLOAD_STATUSES.has(job.status)).length;
-    if (summary) {
-      summary.textContent = activeCount > 0
-        ? `${activeCount} em andamento`
-        : `${state.downloads.length} recente${state.downloads.length === 1 ? '' : 's'}`;
-    }
-
-    list.innerHTML = '';
-    state.downloads.slice(0, 6).forEach(job => {
-      const percent = downloadPercent(job);
-      const row = document.createElement('div');
-      row.className = `download-row ${esc(job.status)}`;
-      const byteProgress = job.bytes_total > 0
-        ? `${fmtBytes(job.bytes_downloaded || 0)} de ${fmtBytes(job.bytes_total)}`
-        : `${job.completed_files || 0} de ${job.total_files || 0} arquivos`;
-      const detail = job.error || job.current_file || byteProgress;
-      const canCancel = Boolean(job.can_cancel) && ACTIVE_DOWNLOAD_STATUSES.has(job.status);
-      row.innerHTML = `
-        <div class="download-row-header">
-          <span class="download-row-name" title="${esc(job.model_id)}">${esc(job.model_id)}</span>
-          <span class="download-status ${esc(job.status)}">${downloadStatusLabel(job.status)} ${percent}%</span>
-        </div>
-        <div class="download-progress-track" role="progressbar" aria-label="Download de ${esc(job.model_id)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}">
-          <div class="download-progress-fill" style="width:${percent}%"></div>
-        </div>
-        <div class="download-row-meta">
-          <span class="download-current-file" title="${esc(detail)}">${esc(detail)}</span>
-          ${canCancel ? `<button class="download-cancel-btn" type="button" data-download-cancel="${esc(job.id)}">Cancelar</button>` : ''}
-        </div>`;
-      list.appendChild(row);
-    });
-
-    list.querySelectorAll('[data-download-cancel]').forEach(button => {
-      button.addEventListener('click', () => void cancelDownload(button.dataset.downloadCancel));
-    });
-  }
-
-  export async function searchCatalog(query) {
-    try {
-      const models = await api(`/catalog/models?source=huggingface&query=${encodeURIComponent(query)}&limit=20`);
-      state.catalogModels = Array.isArray(models) ? models : [];
-      renderCatalog();
-    } catch (e) {
-      console.error('Catalog search failed:', e);
-      const c = document.getElementById('catalog-results');
-      if (c) c.innerHTML = `<div style="padding:24px;text-align:center;color:var(--rose)">Erro: ${esc(e.message)}</div>`;
-    }
-  }
-
-  async function startDownload(source, modelId) {
-    if (activeDownloadForModel(source, modelId)) return;
-    try {
-      const job = await api('/catalog/downloads', { method: 'POST', body: JSON.stringify({ source, model_id: modelId }) });
-      upsertDownload(job);
-      invalidateModels();
-      renderDownloads();
-      renderCatalog();
-      scheduleDownloadRefresh();
-    } catch (e) { alert('Erro no download: ' + e.message); }
-  }
-
-  function renderCatalog() {
-    const container = document.getElementById('catalog-results');
-    if (!container) return;
-    container.innerHTML = '';
-    if (state.catalogModels.length === 0) {
-      container.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-tertiary)">Nenhum modelo encontrado.</div>';
-      return;
-    }
-    state.catalogModels.forEach(m => {
-      const card = document.createElement('div');
-      card.className = 'model-card';
-      const ic = modelIcon(m.model_id || m.name);
-      const size = m.size_bytes ? fmtBytes(m.size_bytes) : 'N/A';
-      const dl = m.downloads ? fmtNum(m.downloads) : '0';
-      const lk = m.likes ? fmtNum(m.likes) : '0';
-      const activeDownload = activeDownloadForModel('huggingface', m.model_id);
-      const downloadLabel = activeDownload
-        ? `${downloadStatusLabel(activeDownload.status)} ${downloadPercent(activeDownload)}%`
-        : 'Baixar';
-      card.innerHTML = `
-        <div class="model-card-header">
-          <div class="model-card-icon ${ic}">${(m.name || m.model_id || 'M')[0].toUpperCase()}</div>
-          <div class="model-card-info">
-            <h3>${esc(m.name || m.model_id)}</h3>
-            <span class="model-card-source">${esc(m.author || m.source || '')}</span>
-          </div>
-          <button class="download-btn" data-src="huggingface" data-mid="${esc(m.model_id)}" ${activeDownload ? 'disabled' : ''}>
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 2v9M4 8l4 4 4-4M2 14h12"/></svg>
-            ${downloadLabel}
-          </button>
-        </div>
-        <div class="model-card-stats">
-          <span class="stat"><span class="stat-val">${esc(size)}</span> tamanho</span>
-          <span class="stat"><span class="stat-val">${esc(dl)}</span> downloads</span>
-          <span class="stat"><span class="stat-val">${esc(lk)}</span> likes</span>
-        </div>`;
-      container.appendChild(card);
-    });
-    container.querySelectorAll('.download-btn').forEach(b => b.addEventListener('click', () => startDownload(b.dataset.src, b.dataset.mid)));
-  }
