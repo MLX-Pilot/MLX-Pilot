@@ -8,6 +8,7 @@
 import { esc, fmtBytes, fmtNum, modelIcon } from './js/core/dom.js';
 import { renderMarkdown } from './js/core/markdown.js';
 import { DEFAULT_DAEMON_URL, DAEMON_READY_EVENT, API_DEFAULT_TIMEOUT_MS, API_SLOW_TIMEOUT_MS, MIN_SPLASH_MS, MODEL_CACHE_KEY, CURRENT_MODEL_KEY, AGENT_LOCAL_PROVIDER_CHOICE, CLOUD_PROVIDER_DEFAULTS, AGENT_PROVIDER_PROFILE_TYPES, readStorage, state } from './js/core/state.js';
+import { nativeInvoke, api, createStreamDecoder } from './js/core/api.js';
 
 
   const originalConsole = {
@@ -16,14 +17,6 @@ import { DEFAULT_DAEMON_URL, DAEMON_READY_EVENT, API_DEFAULT_TIMEOUT_MS, API_SLO
     warn: console.warn.bind(console),
     error: console.error.bind(console),
   };
-
-  function nativeInvoke(command, args = {}) {
-    const invoke = window.__TAURI__?.core?.invoke || window.__TAURI__?.tauri?.invoke;
-    if (typeof invoke !== 'function') {
-      return Promise.reject(new Error('Runtime Tauri indisponivel'));
-    }
-    return invoke(command, args);
-  }
 
   function stringifyConsoleArg(value) {
     if (value instanceof Error) return value.stack || value.message;
@@ -668,54 +661,6 @@ import { DEFAULT_DAEMON_URL, DAEMON_READY_EVENT, API_DEFAULT_TIMEOUT_MS, API_SLO
   }
 
   // -- API ----------------------------------------------------
-  async function api(path, opts = {}) {
-    const url = (state.daemonUrl || DEFAULT_DAEMON_URL) + path;
-    const inferredTimeoutMs =
-      path.startsWith('/chat')
-      || path.startsWith('/agent/run')
-      || path.startsWith('/catalog/downloads')
-        ? 120000
-        : API_DEFAULT_TIMEOUT_MS;
-    const { timeoutMs = inferredTimeoutMs, headers: requestHeaders = {}, ...fetchOpts } = opts;
-    const headers = { ...requestHeaders };
-
-    if (fetchOpts.body != null && !Object.keys(headers).some(key => key.toLowerCase() === 'content-type')) {
-      headers['Content-Type'] = 'application/json';
-    }
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-    let res;
-    try {
-      res = await fetch(url, {
-        ...fetchOpts,
-        headers,
-        signal: controller.signal,
-      });
-    } catch (error) {
-      if (error?.name === 'AbortError') {
-        throw new Error(`Tempo limite ao acessar ${path}`);
-      }
-      throw error;
-    } finally {
-      clearTimeout(timeoutId);
-    }
-
-    if (res.status === 204 || res.status === 205) return null;
-    if (!res.ok) {
-      let msg = `HTTP ${res.status}`;
-      try {
-        const body = await res.json();
-        if (body.error) msg = body.error_code ? `${body.error_code}: ${body.error}` : body.error;
-      } catch { /* ok */ }
-      throw new Error(msg);
-    }
-    const text = await res.text();
-    if (!text) return null;
-    try { return JSON.parse(text); } catch { return { message: text }; }
-  }
-
   // -- Splash -------------------------------------------------
   const splash = document.getElementById('splash');
   const appEl = document.getElementById('app');
@@ -2191,12 +2136,6 @@ import { DEFAULT_DAEMON_URL, DAEMON_READY_EVENT, API_DEFAULT_TIMEOUT_MS, API_SLO
     }
 
     return { thinking: combinedThinking, answer: answerText || (!hasThinkMarkup ? String(rawAnswer || '').trim() : '') };
-  }
-
-  function createStreamDecoder() {
-    const Decoder = window.TextDecoder || globalThis.TextDecoder;
-    if (!Decoder) throw new Error('Streaming indisponivel: TextDecoder nao encontrado');
-    return new Decoder();
   }
 
   async function sendAgentMessageStreaming(payload, assistantEl) {
