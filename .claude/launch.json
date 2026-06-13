@@ -1,0 +1,25 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mlx-agent-preview",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "C:/Users/kaike/AppData/Local/Temp/mlx-preview/mock-daemon.mjs",
+        "G:/TCC/apps/desktop-ui/ui",
+        "11435"
+      ],
+      "port": 11435
+    },
+    {
+      "name": "mlx-ui-static",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "G:/TCC/temp/static-server.mjs",
+        "G:/TCC/apps/desktop-ui/ui",
+        "5599"
+      ],
+      "port": 5599
+    }
+  ]
+}

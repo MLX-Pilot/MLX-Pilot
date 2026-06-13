@@ -3593,7 +3593,9 @@
     if (e.key === 'Escape') document.getElementById('model-menu')?.classList.add('hidden');
     if (!e.ctrlKey && !e.metaKey && !e.altKey && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
       const n = parseInt(e.key);
-      if (n >= 1 && n <= 6) switchTab(['chat', 'discover', 'agent', 'ai-interaction', 'console', 'settings'][n - 1]);
+      var tabs = ['chat', 'discover', 'agent', 'ai-interaction', 'console', 'historico', 'memoria', 'comparar', 'research', 'hardware', 'settings'];
+      if (n >= 1 && n <= 9) switchTab(tabs[n - 1]);
+      else if (n === 0) switchTab('settings');
     }
     if ((e.ctrlKey || e.metaKey) && e.key === '.') state.streamController?.abort();
   });

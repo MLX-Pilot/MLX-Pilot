@@ -47,6 +47,12 @@ Cada arquivo segue estritamente a estrutura:
   unificado que mostra modelos locais **e** cloud (DeepSeek/OpenAI/…) quando a API
   key é salva no cofre. Foco no Agent. Reaproveita os providers remotos já existentes.
 
+### Refator de base (frontend)
+- [`21-frontend-modularization.md`](21-frontend-modularization.md) — quebrar o
+  frontend monolítico (`app.js` ~159 KB) em módulos ES nativos, **sem bundler** e
+  **sem mudar nada visual**. Viabiliza features futuras como "novo módulo + nova
+  aba". Refator puro com paridade total.
+
 ### Observabilidade do Agente
 - [`monitor_orquestracao_agentes.md`](monitor_orquestracao_agentes.md) — tela de
   monitoramento de workflows de agentes: console de raciocínio em streaming, rodapé
