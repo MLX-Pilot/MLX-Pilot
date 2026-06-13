@@ -5,10 +5,11 @@
  */
 
 // === auto-imports (generated — do not edit) ===
-import { pushConsoleEntry, renderAgentProviderProfiles, renderAgentProviderSelector } from '../../app.js';
+import { pushConsoleEntry } from '../../app.js';
 import { api, nativeInvoke } from '../core/api.js';
 import { esc } from '../core/dom.js';
 import { state } from '../core/state.js';
+import { renderAgentProviderProfiles, renderAgentProviderSelector } from './providers.js';
 import { probeDaemon } from './runtime.js';
 // === end auto-imports ===
 

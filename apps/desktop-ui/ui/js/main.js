@@ -9,6 +9,7 @@
  * that import them. Behaviour is unchanged from the pre-modularization build.
  */
 import '../app.js';
+import './features/providers.js';
 import './features/runtime.js';
 import './features/settings.js';
 import './features/models.js';

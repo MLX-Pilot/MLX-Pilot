@@ -5,9 +5,9 @@
  */
 
 // === auto-imports (generated — do not edit) ===
-import { agentConfigModelId, createProviderProfileDraft, defaultCloudModelForProvider, ensureAgentCompatibleModel, inferModelProvider, isLocalProvider, isToolReadyModel, profileHasConfiguredSecret, readAgentProviderProfilesFromDom, recommendedAgentModelId, renderAgentProviderProfiles, renderAgentProviderSelector, resolveModelId } from '../../app.js';
 import { api } from '../core/api.js';
 import { state } from '../core/state.js';
+import { agentConfigModelId, createProviderProfileDraft, defaultCloudModelForProvider, ensureAgentCompatibleModel, inferModelProvider, isLocalProvider, isToolReadyModel, profileHasConfiguredSecret, readAgentProviderProfilesFromDom, recommendedAgentModelId, renderAgentProviderProfiles, renderAgentProviderSelector, resolveModelId } from './providers.js';
 import { ensureVisibleModel, hydrateModelShell, updateAgentWorkspaceSummary } from './runtime.js';
 // === end auto-imports ===
 

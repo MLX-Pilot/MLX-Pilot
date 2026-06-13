@@ -6,11 +6,11 @@
  */
 
 // === auto-imports (generated — do not edit) ===
-import { ensureAgentCompatibleModel } from '../../app.js';
 import { state } from './state.js';
 import { loadAudit } from '../features/agent.js';
 import { loadConsoleSnapshot } from '../features/console.js';
 import { invalidateModels, loadDownloads, refreshModelsInBackground, renderModelPicker, searchCatalog, showInstalledModels } from '../features/models.js';
+import { ensureAgentCompatibleModel } from '../features/providers.js';
 import { syncShellLayout, updateAgentWorkspaceSummary } from '../features/runtime.js';
 import { initAICanvas } from '../features/ui-bindings.js';
 // === end auto-imports ===

@@ -7,7 +7,7 @@
  */
 
 // === auto-imports (generated — do not edit) ===
-import { activeAgentModelId, activeModelId, humanizeModelLabel, inferModelProvider, isLocalProvider, providerDisplayName, pushConsoleEntry, renderAgentProviderSelector, resolveModelId, selectedAgentProviderOption } from '../../app.js';
+import { pushConsoleEntry } from '../../app.js';
 import { api } from '../core/api.js';
 import { esc, fmtBytes } from '../core/dom.js';
 import { CURRENT_MODEL_KEY, DAEMON_READY_EVENT, DEFAULT_DAEMON_URL, MIN_SPLASH_MS, MODEL_CACHE_KEY, readStorage, state } from '../core/state.js';
@@ -15,6 +15,7 @@ import { loadAudit, loadChannels, loadPlugins, loadSkills, loadTools } from './a
 import { loadSessions } from './chat.js';
 import { loadConsoleSnapshot, loadEnvironment } from './console.js';
 import { loadModels, renderInstalledModels, renderModelPicker } from './models.js';
+import { activeAgentModelId, activeModelId, humanizeModelLabel, inferModelProvider, isLocalProvider, providerDisplayName, renderAgentProviderSelector, resolveModelId, selectedAgentProviderOption } from './providers.js';
 import { loadAgentConfig, loadDaemonConfig } from './settings.js';
 // === end auto-imports ===
 
