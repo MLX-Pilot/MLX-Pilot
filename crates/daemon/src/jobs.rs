@@ -258,7 +258,7 @@ impl JobRegistry {
             let rec = h.record.read().await;
             records.push(rec.clone());
         }
-        records.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        records.sort_by_key(|b| std::cmp::Reverse(b.created_at));
         records
     }
 

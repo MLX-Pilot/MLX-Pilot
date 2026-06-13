@@ -229,7 +229,7 @@ pub fn rank_models(
                 .partial_cmp(&b.estimated_vram_gb)
                 .unwrap_or(std::cmp::Ordering::Equal)
         }),
-        "name" => results.sort_by(|a, b| a.model.name.cmp(&b.model.name)),
+        "name" => results.sort_by_key(|a| a.model.name.clone()),
         _ => results.sort_by(|a, b| {
             b.composite_score
                 .partial_cmp(&a.composite_score)

@@ -411,7 +411,7 @@ pub fn resolve_effective_tool_policy(
             }
         })
         .collect::<Vec<_>>();
-    entries.sort_by(|left, right| left.name.cmp(&right.name));
+    entries.sort_by_key(|left| left.name.clone());
 
     EffectiveToolPolicy {
         profile: policy.profile,
