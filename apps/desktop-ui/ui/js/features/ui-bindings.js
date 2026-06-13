@@ -7,10 +7,11 @@
  */
 
 // === auto-imports (generated — do not edit) ===
-import { activeAgentModelId, activeModelId, addMetrics, bootSequence, clearConsole, consoleText, createNewSession, ensureAgentChatReady, ensureRuntimeReadyForModel, inferModelProvider, loadAudit, loadChannels, loadConsoleSnapshot, loadSessions, pushConsoleEntry, renderAgentChatEmptyState, renderAssistantOutput, renderAuditFeed, resizeTextArea, saveDaemonConfig, saveEnvironment, sendAgentMessageStreaming, sendChatMessage, switchTab, updateAgentWorkspaceSummary } from '../../app.js';
+import { activeAgentModelId, activeModelId, addMetrics, bootSequence, clearConsole, consoleText, createNewSession, ensureAgentChatReady, ensureRuntimeReadyForModel, inferModelProvider, loadAudit, loadChannels, loadConsoleSnapshot, loadSessions, pushConsoleEntry, renderAgentChatEmptyState, renderAssistantOutput, renderAuditFeed, resizeTextArea, saveDaemonConfig, saveEnvironment, sendAgentMessageStreaming, sendChatMessage, updateAgentWorkspaceSummary } from '../../app.js';
 import { api } from '../core/api.js';
 import { esc } from '../core/dom.js';
 import { renderMarkdown } from '../core/markdown.js';
+import { switchTab } from '../core/router.js';
 import { state } from '../core/state.js';
 import { runAgentShortcut } from './agent-shortcuts.js';
 // === end auto-imports ===

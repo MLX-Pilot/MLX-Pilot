@@ -9,8 +9,8 @@
 import { api, createStreamDecoder, nativeInvoke } from './js/core/api.js';
 import { esc, fmtBytes, fmtNum, modelIcon } from './js/core/dom.js';
 import { renderMarkdown } from './js/core/markdown.js';
+import { switchTab } from './js/core/router.js';
 import { AGENT_LOCAL_PROVIDER_CHOICE, AGENT_PROVIDER_PROFILE_TYPES, API_SLOW_TIMEOUT_MS, CLOUD_PROVIDER_DEFAULTS, CURRENT_MODEL_KEY, DAEMON_READY_EVENT, DEFAULT_DAEMON_URL, MIN_SPLASH_MS, MODEL_CACHE_KEY, readStorage, state } from './js/core/state.js';
-import { initAICanvas } from './js/features/ui-bindings.js';
 // === end auto-imports ===
 
 
@@ -643,7 +643,7 @@ import { initAICanvas } from './js/features/ui-bindings.js';
     }
   }
 
-  async function ensureAgentCompatibleModel({ persist = false } = {}) {
+  export async function ensureAgentCompatibleModel({ persist = false } = {}) {
     const providerOption = selectedAgentProviderOption();
     if (providerOption?.kind === 'cloud') {
       if (providerOption.modelId) {
@@ -833,7 +833,7 @@ import { initAICanvas } from './js/features/ui-bindings.js';
     dot.classList.toggle('offline', !online);
   }
 
-  function syncShellLayout(target) {
+  export function syncShellLayout(target) {
     if (!appEl) return;
     appEl.dataset.activePanel = target;
     appEl.classList.toggle('chat-sidebar-visible', target === 'chat');
@@ -1500,21 +1500,21 @@ import { initAICanvas } from './js/features/ui-bindings.js';
     return state.modelsPromise;
   }
 
-  function invalidateModels() {
+  export function invalidateModels() {
     state.modelsStale = true;
   }
 
-  function refreshModelsInBackground() {
+  export function refreshModelsInBackground() {
     if (state.modelsLoading) return;
     void loadModels({ force: true }).catch(() => {});
   }
 
-  function showInstalledModels() {
+  export function showInstalledModels() {
     renderInstalledModels();
     if (!state.modelsLoaded || state.modelsStale) refreshModelsInBackground();
   }
 
-  function renderModelPicker() {
+  export function renderModelPicker() {
     const menu = document.getElementById('model-menu');
     if (!menu) return;
     menu.innerHTML = '';
@@ -1721,7 +1721,7 @@ import { initAICanvas } from './js/features/ui-bindings.js';
     }, 800);
   }
 
-  async function loadDownloads() {
+  export async function loadDownloads() {
     if (state.downloadsLoading) return;
     state.downloadsLoading = true;
     const previous = new Map(state.downloads.map(job => [job.id, job.status]));
@@ -2821,96 +2821,3 @@ import { initAICanvas } from './js/features/ui-bindings.js';
       if (btn) { btn.textContent = 'Salvo!'; setTimeout(() => { btn.textContent = 'Salvar Variáveis'; }, 2000); }
     } catch (e) { alert('Erro: ' + e.message); }
   }
-
-  // -- Tab Navigation -----------------------------------------
-  export function switchTab(target) {
-
-    state.activePanel = target;
-    document.querySelectorAll('.tab').forEach(t => { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
-    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-    const tab = document.querySelector(`[data-panel="${target}"]`);
-    const panel = document.getElementById(`panel-${target}`);
-    if (tab) { tab.classList.add('active'); tab.setAttribute('aria-selected', 'true'); }
-    if (panel) panel.classList.add('active');
-    syncShellLayout(target);
-    renderModelPicker();
-
-    if (target === 'discover') {
-      searchCatalog('llama');
-      void loadDownloads();
-      if (state.activeDiscoverTab === 'installed') showInstalledModels();
-    }
-    if (target === 'agent') {
-      void ensureAgentCompatibleModel({ persist: true });
-      updateAgentWorkspaceSummary();
-    }
-    if (target === 'ai-interaction') initAICanvas();
-    if (target === 'console') void loadConsoleSnapshot();
-  }
-
-  document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => switchTab(tab.dataset.panel)));
-
-  document.querySelectorAll('.agent-view-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.agent-view-tab').forEach(t => {
-        t.classList.remove('active');
-        t.setAttribute('aria-selected', 'false');
-      });
-      document.querySelectorAll('.agent-view').forEach(view => {
-        view.classList.remove('active');
-        view.style.display = 'none';
-      });
-      tab.classList.add('active');
-      tab.setAttribute('aria-selected', 'true');
-      const view = document.getElementById(`agent-view-${tab.dataset.agentView}`);
-      if (view) {
-        view.classList.add('active');
-        view.style.display = 'block';
-      }
-      if (tab.dataset.agentView === 'config') loadAudit();
-      updateAgentWorkspaceSummary();
-    });
-  });
-
-  // -- Config Sub-tabs ----------------------------------------
-  document.querySelectorAll('.agent-config-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.agent-config-tab').forEach(t => {
-        t.classList.remove('active');
-        t.setAttribute('aria-selected', 'false');
-      });
-      document.querySelectorAll('.agent-config-pane').forEach(p => p.classList.remove('active'));
-      tab.classList.add('active');
-      tab.setAttribute('aria-selected', 'true');
-      const pane = document.querySelector(`[data-config-pane="${tab.dataset.configSection}"]`);
-      if (pane) pane.classList.add('active');
-      if (tab.dataset.configSection === 'observability') loadAudit();
-    });
-  });
-
-  // -- Model Picker -------------------------------------------
-  document.getElementById('model-trigger')?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    document.getElementById('model-menu')?.classList.toggle('hidden');
-  });
-  document.addEventListener('click', () => document.getElementById('model-menu')?.classList.add('hidden'));
-
-  // -- Discover Sub-tabs --------------------------------------
-  document.querySelectorAll('.discover-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.discover-tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      const d = tab.dataset.dtab;
-      state.activeDiscoverTab = d;
-      document.getElementById('dtab-catalog').style.display = d === 'catalog' ? 'block' : 'none';
-      document.getElementById('dtab-installed').style.display = d === 'installed' ? 'block' : 'none';
-      if (d === 'installed') showInstalledModels();
-      if (d === 'catalog') void loadDownloads();
-    });
-  });
-
-  // Refresh installed models
-  document.getElementById('refresh-installed')?.addEventListener('click', () => {
-    invalidateModels();
-    refreshModelsInBackground();
-  });
