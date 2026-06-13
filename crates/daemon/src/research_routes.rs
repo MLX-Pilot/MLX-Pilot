@@ -96,11 +96,24 @@ fn research_data_dir() -> PathBuf {
 }
 
 /// Resolve a model_id for research. If "auto" or empty, picks the first available.
-/// Cloud model IDs (e.g., `deepseek:deepseek-chat`) flow through to chat_with_routing.
+/// Cloud model IDs (e.g., `deepseek:deepseek-v4-flash`) flow through to chat_with_routing.
 async fn resolve_research_model(
     state: &crate::AppState,
     requested: Option<&str>,
 ) -> Result<String, String> {
+    let app_config = crate::AppConfig::load_settings().apply_env();
+    let environment_values = crate::read_environment_values().unwrap_or_default();
+    let configured_key = |config: &crate::model_catalog::CloudProviderConfig| {
+        if app_config.agent.security.airgapped {
+            return None;
+        }
+        crate::model_catalog::resolve_api_key(
+            state.vault.as_deref(),
+            config,
+            &app_config.agent,
+            &environment_values,
+        )
+    };
     let requested = requested.filter(|s| !s.is_empty() && *s != "auto");
 
     if let Some(id) = requested {
@@ -123,16 +136,12 @@ async fn resolve_research_model(
         }
         // Not found locally — reject with clear message.
         // User must either load the model locally or use an explicit cloud prefix
-        // (e.g., deepseek:deepseek-chat).
-        let configured_clouds: Vec<String> = if let Some(ref vault) = state.vault {
-            crate::model_catalog::cloud_provider_configs()
-                .iter()
-                .filter(|cfg| crate::model_catalog::get_api_key(Some(vault), cfg).is_some())
-                .map(|cfg| format!("{}:<modelo>", cfg.provider_key))
-                .collect()
-        } else {
-            vec![]
-        };
+        // (e.g., deepseek:deepseek-v4-flash).
+        let configured_clouds: Vec<String> = crate::model_catalog::cloud_provider_configs()
+            .iter()
+            .filter(|config| configured_key(config).is_some())
+            .map(|config| format!("{}:<modelo>", config.provider_key))
+            .collect();
         let hint = if !configured_clouds.is_empty() {
             format!(
                 ". Use um prefixo cloud ({}) ou carregue o modelo localmente.",
@@ -154,23 +163,21 @@ async fn resolve_research_model(
     }
 
     // No local model — pick first configured cloud provider with its first known model
-    if let Some(ref vault) = state.vault {
-        for cfg in crate::model_catalog::cloud_provider_configs() {
-            if crate::model_catalog::get_api_key(Some(vault), &cfg).is_some() {
-                // Use the provider's default/first model. chat_with_routing with the
-                // "provider:" prefix (without a specific model) won't work, so pick
-                // a reasonable default per provider.
-                let default_model = match cfg.provider_key.as_str() {
-                    "deepseek" => "deepseek-chat",
-                    "openai" => "gpt-4.1",
-                    "anthropic" => "claude-sonnet-4-6",
-                    "groq" => "llama-3.3-70b-versatile",
-                    "openrouter" => "openai/gpt-4.1",
-                    _ => "",
-                };
-                if !default_model.is_empty() {
-                    return Ok(format!("{}:{}", cfg.provider_key, default_model));
-                }
+    for config in crate::model_catalog::cloud_provider_configs() {
+        if configured_key(&config).is_some() {
+            // Use the provider's default/first model. chat_with_routing with the
+            // "provider:" prefix (without a specific model) won't work, so pick
+            // a reasonable default per provider.
+            let default_model = match config.provider_key.as_str() {
+                "deepseek" => "deepseek-v4-flash",
+                "openai" => "gpt-4.1",
+                "anthropic" => "claude-sonnet-4-6",
+                "groq" => "llama-3.3-70b-versatile",
+                "openrouter" => "openai/gpt-4.1",
+                _ => "",
+            };
+            if !default_model.is_empty() {
+                return Ok(format!("{}:{}", config.provider_key, default_model));
             }
         }
     }

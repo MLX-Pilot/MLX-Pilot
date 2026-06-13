@@ -924,8 +924,16 @@ async fn list_models_all(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<model_catalog::ModelGroup>>, AppError> {
     let local = list_models_with_catalog(&state).await?;
-    let airgap = false; // TODO: read from config/settings
-    let groups = model_catalog::build_unified_models(local, state.vault.as_deref(), airgap).await;
+    let cfg = AppConfig::load_settings().apply_env();
+    let environment_values = read_environment_values().unwrap_or_default();
+    let groups = model_catalog::build_unified_models(
+        local,
+        state.vault.as_deref(),
+        &cfg.agent,
+        &environment_values,
+        cfg.agent.security.airgapped,
+    )
+    .await;
     Ok(Json(groups))
 }
 
@@ -2168,7 +2176,19 @@ async fn try_cloud_chat(
     let model = cloud_model?;
 
     let config = model_catalog::find_cloud_config(provider_key)?;
-    let api_key = model_catalog::get_api_key(state.vault.as_deref(), &config)?;
+    let cfg = AppConfig::load_settings().apply_env();
+    if cfg.agent.security.airgapped {
+        return Some(Err(ProviderError::Unavailable {
+            details: format!("cloud provider '{provider_key}' bloqueado no modo airgapped"),
+        }));
+    }
+    let environment_values = read_environment_values().unwrap_or_default();
+    let api_key = model_catalog::resolve_api_key(
+        state.vault.as_deref(),
+        &config,
+        &cfg.agent,
+        &environment_values,
+    )?;
 
     let http_config = HttpLlmProviderConfig {
         provider_name: provider_key.to_string(),
@@ -2727,7 +2747,7 @@ fn update_environment_file(updates: BTreeMap<String, String>) -> Result<(), AppE
     Ok(())
 }
 
-fn read_environment_values() -> Result<BTreeMap<String, String>, AppError> {
+pub(crate) fn read_environment_values() -> Result<BTreeMap<String, String>, AppError> {
     let cfg = AppConfig::load_settings().apply_env();
     let env_path = resolve_environment_path(&cfg);
     read_env_file_assignments_optional(&env_path)

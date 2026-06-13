@@ -690,7 +690,6 @@ pub struct AgentState {
         Arc<tokio::sync::RwLock<BTreeMap<String, mlx_agent_core::ContextBudgetTelemetry>>>,
 }
 
-const AGENT_API_KEY_SECRET_REF: &str = "vault://agent.api_key";
 const AGENT_API_KEY_SECRET_KEY: &str = "agent.api_key";
 const SKILL_INTEGRITY_STATE_FILE: &str = "agent_skill_integrity_state.json";
 const INSTALL_COMMAND_TIMEOUT_SECS_DEFAULT: u64 = 180;
@@ -2606,12 +2605,30 @@ async fn execute_install_spec(
 fn resolve_agent_api_key(
     request_key: Option<String>,
     cfg: &super::config::AgentUiConfig,
+    provider: &str,
 ) -> Result<String, AgentApiError> {
     if let Some(value) = request_key
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
     {
         return Ok(value);
+    }
+
+    if let Some(provider_config) = crate::model_catalog::find_cloud_config(provider) {
+        let vault = if cfg.security.use_secrets_vault {
+            Some(open_secrets_vault()?)
+        } else {
+            None
+        };
+        let environment_values = crate::read_environment_values().unwrap_or_default();
+        if let Some(key) = crate::model_catalog::resolve_api_key(
+            vault.as_ref(),
+            &provider_config,
+            cfg,
+            &environment_values,
+        ) {
+            return Ok(key);
+        }
     }
 
     if !cfg.api_key.trim().is_empty() {
@@ -3018,7 +3035,10 @@ fn resolve_provider(
                 api_key: None,
                 default_headers: BTreeMap::new(),
                 timeout: std::time::Duration::from_secs(120),
-                default_models: vec!["deepseek-chat".to_string(), "deepseek-reasoner".to_string()],
+                default_models: vec![
+                    "deepseek-v4-flash".to_string(),
+                    "deepseek-v4-pro".to_string(),
+                ],
             });
 
             Ok(ResolvedProvider {
@@ -3085,7 +3105,11 @@ fn normalize_agent_model_id(provider: &str, model_id: &str) -> String {
             .unwrap_or(stripped_suffix)
             .trim()
             .to_string(),
-        _ => stripped_suffix.to_string(),
+        _ => stripped_suffix
+            .strip_prefix(&format!("{provider}:"))
+            .unwrap_or(stripped_suffix)
+            .trim()
+            .to_string(),
     }
 }
 
@@ -3682,7 +3706,7 @@ async fn execute_agent_request(
                 .map(|profile| profile.base_url.clone())
         })
         .unwrap_or_else(|| agent_cfg.base_url.clone());
-    let api_key = resolve_agent_api_key(request.api_key.clone(), &agent_cfg)?;
+    let api_key = resolve_agent_api_key(request.api_key.clone(), &agent_cfg, &provider)?;
     let streaming_enabled = request.streaming.unwrap_or(agent_cfg.streaming);
     let headers = request.custom_headers.clone().unwrap_or_else(|| {
         provider_profile
@@ -4079,7 +4103,10 @@ pub async fn agent_providers(
             supports_tool_calling: true,
             supports_streaming: false,
             default_base_url: Some("https://api.deepseek.com/v1".to_string()),
-            models: vec!["deepseek-chat".to_string(), "deepseek-reasoner".to_string()],
+            models: vec![
+                "deepseek-v4-flash".to_string(),
+                "deepseek-v4-pro".to_string(),
+            ],
         },
         AgentProviderInfo {
             id: "custom".to_string(),
@@ -4101,30 +4128,7 @@ pub async fn agent_providers(
 pub async fn agent_get_config() -> Result<Json<super::config::AgentUiConfig>, AgentApiError> {
     let mut cfg = super::config::AppConfig::load_settings().apply_env();
     sync_legacy_enabled_tools(&mut cfg.agent);
-    if cfg.agent.security.use_secrets_vault
-        && cfg.agent.api_key.trim().is_empty()
-        && cfg
-            .agent
-            .api_key_ref
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-            .is_some()
-    {
-        let vault = open_secrets_vault()?;
-        if let Some(secret) = vault
-            .get_secret(AGENT_API_KEY_SECRET_KEY)
-            .map_err(|error| {
-                AgentApiError::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "secrets_vault_error",
-                    Some(error.to_string()),
-                )
-            })?
-        {
-            cfg.agent.api_key = secret;
-        }
-    }
+    cfg.agent.api_key.clear();
     Ok(Json(cfg.agent))
 }
 
@@ -4181,8 +4185,11 @@ pub async fn agent_update_config(
     if merged.security.use_secrets_vault {
         let vault = open_secrets_vault()?;
         if !merged.api_key.trim().is_empty() {
+            let secret_key = crate::model_catalog::find_cloud_config(&merged.provider)
+                .map(|config| config.vault_key)
+                .unwrap_or_else(|| AGENT_API_KEY_SECRET_KEY.to_string());
             vault
-                .set_secret(AGENT_API_KEY_SECRET_KEY, merged.api_key.trim())
+                .set_secret(&secret_key, merged.api_key.trim())
                 .map_err(|error| {
                     AgentApiError::new(
                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -4191,7 +4198,7 @@ pub async fn agent_update_config(
                     )
                 })?;
             merged.api_key.clear();
-            merged.api_key_ref = Some(AGENT_API_KEY_SECRET_REF.to_string());
+            merged.api_key_ref = Some(format!("vault://{secret_key}"));
         } else if merged
             .api_key_ref
             .as_deref()
@@ -4199,7 +4206,10 @@ pub async fn agent_update_config(
             .filter(|v| !v.is_empty())
             .is_none()
         {
-            let _ = vault.remove_secret(AGENT_API_KEY_SECRET_KEY);
+            let secret_key = crate::model_catalog::find_cloud_config(&merged.provider)
+                .map(|config| config.vault_key)
+                .unwrap_or_else(|| AGENT_API_KEY_SECRET_KEY.to_string());
+            let _ = vault.remove_secret(&secret_key);
             merged.api_key_ref = None;
         }
     } else {
@@ -4218,16 +4228,8 @@ pub async fn agent_update_config(
     let approval_mode = parse_approval_mode(Some(cfg.agent.approval_mode.as_str()));
     state.agent_state.approval.set_mode(approval_mode);
 
-    let mut response = merged;
-    if response.security.use_secrets_vault && response.api_key.trim().is_empty() {
-        if let Ok(vault) = open_secrets_vault() {
-            if let Ok(Some(secret)) = vault.get_secret(AGENT_API_KEY_SECRET_KEY) {
-                response.api_key = secret;
-            }
-        }
-    }
-
-    Ok(Json(response))
+    merged.api_key.clear();
+    Ok(Json(merged))
 }
 
 /// GET /agent/skills
@@ -5353,6 +5355,10 @@ mod tests {
         assert_eq!(
             normalize_agent_model_id("llamacpp", "llama::qwen3.gguf [llama.cpp]"),
             "qwen3.gguf"
+        );
+        assert_eq!(
+            normalize_agent_model_id("deepseek", "deepseek:deepseek-v4-pro"),
+            "deepseek-v4-pro"
         );
     }
 
