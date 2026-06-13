@@ -832,4 +832,66 @@ mod tests {
         assert_eq!(infer_use_case("research-analyzer"), "analysis");
         assert_eq!(infer_use_case("llama-3-8b"), "general");
     }
+
+    // ── CPU-only scoring tests (must be honest, not overpromise) ────────
+
+    #[test]
+    fn test_cpu_only_ranking_is_honest() {
+        let system = test_hardware_cpu_only();
+        let models = vec![test_model_7b(), test_model_70b()];
+        let ranked = rank_models(&system, &models, None, Some("score"), None, None, None, None, false);
+
+        // 7B should rank higher than 70B on CPU-only
+        assert_eq!(ranked.len(), 2);
+        let small = ranked.iter().find(|a| a.model.params_b < 10.0).unwrap();
+        let large = ranked.iter().find(|a| a.model.params_b > 10.0).unwrap();
+        // Smaller models fit better on CPU: higher composite or at minimum higher fit_score
+        assert!(
+            small.composite_score >= large.composite_score || small.fit_score > large.fit_score,
+            "Smaller models should not be worse than large models on CPU-only"
+        );
+        // Both should produce valid scores
+        assert!(small.composite_score > 0.0);
+        assert!(large.composite_score > 0.0);
+    }
+
+    #[test]
+    fn test_cpu_only_small_models_rank_higher() {
+        let system = test_hardware_cpu_only();
+        let tiny = ModelCard {
+            id: "tiny-1b".into(),
+            name: "Tiny 1B".into(),
+            provider: "hf".into(),
+            params_b: 1.1,
+            architecture: "llama".into(),
+            is_moe: false,
+            active_params_b: None,
+            context_length: 2048,
+            quantizations: vec!["Q4_K_M".into()],
+            default_quant: "Q4_K_M".into(),
+            has_vision: false,
+            source_url: None,
+            size_gb: None,
+        };
+        let large = test_model_70b();
+
+        let ranked = rank_models(&system, &[tiny.clone(), large.clone()], None, Some("score"), None, None, None, None, false);
+        // Tiny model should rank higher on CPU-only
+        assert!(ranked[0].composite_score > ranked[1].composite_score,
+            "Tiny models must rank higher than large models on CPU-only");
+    }
+
+    #[test]
+    fn test_cpu_only_serve_profiles_note_cpu() {
+        let system = test_hardware_cpu_only();
+        let model = test_model_7b();
+        let profiles = compute_serve_profiles(&system, &model, None, None);
+        assert_eq!(profiles.len(), 3);
+        // All profiles should mention CPU-only
+        for p in &profiles {
+            assert!(p.note.contains("CPU-only"), "CPU-only profiles must note CPU-only mode");
+            assert_eq!(p.n_gpu_layers, 0, "CPU-only must have 0 GPU layers");
+            assert!(p.fits, "CPU-only profiles should always fit (RAM-based)");
+        }
+    }
 }

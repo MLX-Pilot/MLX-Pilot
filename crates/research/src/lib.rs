@@ -1316,4 +1316,101 @@ mod tests {
         assert_eq!(headings[1].1, "Subsection");
         assert_eq!(headings[1].2, 3);
     }
+
+    // ── Fail-fast tests ─────────────────────────────────────────────────
+    /// Mock helpers for testing the engine abort-on-LLM-error behavior.
+    fn mock_search_fn() -> SearchFn {
+        Arc::new(|_q, _p, _n| {
+            Box::pin(async {
+                Ok(vec![Source {
+                    url: "http://example.com".into(),
+                    title: "Test Source".into(),
+                    snippet: "A test snippet".into(),
+                    provider: "test".into(),
+                    relevance: None,
+                }])
+            })
+        })
+    }
+
+    fn mock_fetch_fn() -> FetchFn {
+        Arc::new(|_url| Box::pin(async { Ok(("Test Title".into(), "Test body text for extraction.".into())) }))
+    }
+
+    fn failing_llm_fn() -> LlmFn {
+        Arc::new(|_sys, _usr| Box::pin(async { Err("LLM unavailable".to_string()) }))
+    }
+
+    fn ok_llm_fn(response: &'static str) -> LlmFn {
+        Arc::new(move |_sys, _usr| Box::pin(async move { Ok(response.to_string()) }))
+    }
+
+    #[tokio::test]
+    async fn test_engine_aborts_on_planning_llm_error() {
+        let config = ResearchConfig::default();
+        let engine = ResearchEngine::new(config, mock_search_fn(), mock_fetch_fn(), failing_llm_fn());
+        let token = CancellationToken::new();
+        let events = std::sync::Mutex::new(Vec::new());
+
+        let session = engine
+            .run(
+                "test question",
+                "test-model",
+                None,
+                None,
+                None,
+                token,
+                move |ev| {
+                    if let Ok(mut v) = events.lock() {
+                        v.push(ev.phase);
+                    }
+                },
+            )
+            .await;
+
+        assert_eq!(session.status, ResearchStatus::Error);
+        assert!(session.error.unwrap().contains("LLM planning error"));
+    }
+
+    #[tokio::test]
+    async fn test_engine_aborts_on_synthesis_llm_error() {
+        // Use an LLM that succeeds for planning but fails on synthesis.
+        // After planning, the engine calls query-gen. We fail there.
+        let config = ResearchConfig::default();
+        let call_count = std::sync::atomic::AtomicUsize::new(0);
+        let selective_llm: LlmFn = Arc::new(move |_sys, _usr| {
+            let n = call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Box::pin(async move {
+                if n == 0 {
+                    Ok("Research plan: look it up.".to_string()) // planning OK
+                } else {
+                    Err("LLM crashed".to_string()) // query-gen fails
+                }
+            })
+        });
+
+        let engine = ResearchEngine::new(config, mock_search_fn(), mock_fetch_fn(), selective_llm);
+        let token = CancellationToken::new();
+
+        let session = engine
+            .run("test", "m", None, None, None, token, |_| {})
+            .await;
+
+        assert_eq!(session.status, ResearchStatus::Error);
+        assert!(session.error.unwrap().contains("LLM query generation error"));
+    }
+
+    #[tokio::test]
+    async fn test_engine_honours_cancellation() {
+        let config = ResearchConfig::default();
+        let engine = ResearchEngine::new(config, mock_search_fn(), mock_fetch_fn(), ok_llm_fn("OK"));
+        let token = CancellationToken::new();
+        token.cancel(); // Cancel immediately
+
+        let session = engine
+            .run("test", "m", None, None, None, token, |_| {})
+            .await;
+
+        assert_eq!(session.status, ResearchStatus::Cancelled);
+    }
 }
