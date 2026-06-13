@@ -9,6 +9,7 @@
  * that import them. Behaviour is unchanged from the pre-modularization build.
  */
 import '../app.js';
+import './features/console.js';
 import './core/router.js';
 import './features/agent-shortcuts.js';
 import './features/ui-bindings.js';
