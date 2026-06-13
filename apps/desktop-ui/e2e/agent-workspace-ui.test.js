@@ -22,6 +22,7 @@ const MODULE_FILES = [
   "js/core/dom.js",
   "js/core/markdown.js",
   "app.js",
+  "js/features/agent-shortcuts.js",
   "js/features/ui-bindings.js",
 ];
 
