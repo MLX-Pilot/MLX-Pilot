@@ -296,7 +296,7 @@ impl SessionStore {
         self.ensure_session(session_id, None).await?;
         self.state.append_session_event(session_id, message).await?;
 
-        if message.kind == "user" && message.content.trim().len() > 0 {
+        if message.kind == "user" && !message.content.trim().is_empty() {
             if let Some(meta) = self.state.get_session_meta(session_id).await? {
                 if meta.message_count <= 1 && meta.name == "Nova conversa" {
                     let snippet: String = message.content.chars().take(30).collect();
@@ -401,21 +401,15 @@ impl SessionStore {
         self.state.update_session_event(event_id, content).await
     }
 
-    pub async fn delete_message(
-        &self,
-        session_id: &str,
-        event_id: i64,
-    ) -> std::io::Result<()> {
+    pub async fn delete_message(&self, session_id: &str, event_id: i64) -> std::io::Result<()> {
         self.state.delete_session_event(session_id, event_id).await
     }
 
     /// Remove every event after `event_id` (inclusive cutoff is the kept boundary).
-    pub async fn truncate_after(
-        &self,
-        session_id: &str,
-        event_id: i64,
-    ) -> std::io::Result<usize> {
-        self.state.truncate_session_after(session_id, event_id).await
+    pub async fn truncate_after(&self, session_id: &str, event_id: i64) -> std::io::Result<usize> {
+        self.state
+            .truncate_session_after(session_id, event_id)
+            .await
     }
 
     /// Duplicate a session (meta + full transcript) into a new child session.

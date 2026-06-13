@@ -109,7 +109,7 @@ impl Default for AgentSecurityConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AgentSkillOverride {
     #[serde(default)]
     pub enabled: Option<bool>,
@@ -119,17 +119,6 @@ pub struct AgentSkillOverride {
     pub env_refs: BTreeMap<String, String>,
     #[serde(default)]
     pub config: BTreeMap<String, String>,
-}
-
-impl Default for AgentSkillOverride {
-    fn default() -> Self {
-        Self {
-            enabled: None,
-            env: BTreeMap::new(),
-            env_refs: BTreeMap::new(),
-            config: BTreeMap::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1208,12 +1197,14 @@ fn upgrade_legacy_agent_model_default(agent: &mut AgentUiConfig) {
     }
 }
 
+#[allow(dead_code)]
 fn first_existing_path(candidates: Vec<PathBuf>) -> Option<PathBuf> {
     dedupe_paths(candidates)
         .into_iter()
         .find(|candidate| candidate.exists())
 }
 
+#[allow(dead_code)]
 fn dedupe_paths(candidates: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut seen = BTreeMap::<String, PathBuf>::new();
     for candidate in candidates {
@@ -1268,6 +1259,7 @@ fn home_dir() -> Option<PathBuf> {
     None
 }
 
+#[allow(dead_code)]
 fn default_app_data_dir() -> PathBuf {
     if let Some(home) = home_dir() {
         return home.join(".mlx-pilot");
@@ -1321,12 +1313,10 @@ fn default_mlx_airllm_python_command() -> String {
         });
     if preferred.exists() {
         preferred.display().to_string()
+    } else if cfg!(windows) {
+        "py".to_string()
     } else {
-        if cfg!(windows) {
-            "py".to_string()
-        } else {
-            "python3".to_string()
-        }
+        "python3".to_string()
     }
 }
 
@@ -1557,6 +1547,7 @@ mod tests {
     }
 }
 
+#[allow(clippy::items_after_test_module)]
 fn starts_with_legacy_module(values: &[String], expected: &[&str]) -> bool {
     if values.len() < expected.len() {
         return false;

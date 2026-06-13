@@ -29,10 +29,11 @@ impl ToolRisk {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolProfileName {
     Minimal,
+    #[default]
     Coding,
     Messaging,
     Full,
@@ -46,12 +47,6 @@ impl ToolProfileName {
             Self::Messaging => "messaging",
             Self::Full => "full",
         }
-    }
-}
-
-impl Default for ToolProfileName {
-    fn default() -> Self {
-        Self::Coding
     }
 }
 
@@ -416,7 +411,7 @@ pub fn resolve_effective_tool_policy(
             }
         })
         .collect::<Vec<_>>();
-    entries.sort_by(|left, right| left.name.cmp(&right.name));
+    entries.sort_by_key(|left| left.name.clone());
 
     EffectiveToolPolicy {
         profile: policy.profile,

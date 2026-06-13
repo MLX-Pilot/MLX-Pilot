@@ -6,17 +6,17 @@
 
 pub mod agent_loop;
 pub mod agent_runtime;
-pub mod embeddings;
 pub mod approval;
 pub mod audit;
 pub mod capabilities;
 pub mod compare;
 pub mod context_budget;
+pub mod embeddings;
 pub mod events;
 pub mod memory;
-pub mod presets;
 pub mod memory_manager;
 pub mod policy;
+pub mod presets;
 pub mod prompt_builder;
 pub mod registry;
 pub mod runtime;
@@ -40,16 +40,16 @@ pub use capabilities::{
     CapabilityAuthority, CapabilityBinding, CapabilityContextKind, CapabilityError,
     CapabilityManifest, CapabilityScopeRules, CapabilityScopes, CapabilitySubject,
 };
+pub use compare::{CompareStore, Comparison, ComparisonEntry};
 pub use context_budget::{
     ContextBudgetInput, ContextBudgetManager, ContextBudgetOutput, ContextBudgetTelemetry,
     ContextSummaryArtifact, ResponseStyle,
 };
-pub use compare::{Comparison, ComparisonEntry, CompareStore};
 pub use events::{AgentEvent, EventBus};
 pub use memory::{MemoryPromotionDecision, MemoryRecord, MemorySearchHit, MemoryStore};
-pub use presets::{Preset, PresetStore};
 pub use memory_manager::{MemoryContextBlock, MemoryLifecycleResult, MemoryManager};
 pub use policy::{PolicyConfig, PolicyDecision, PolicyEngine, PolicyToolInspection};
+pub use presets::{Preset, PresetStore};
 pub use prompt_builder::{
     select_model_prompt_profile, ModelPromptProfile, ModelPromptProfileKind, PromptBuildInput,
     PromptBuildOutput, PromptBuilder, VerbosityLevel,

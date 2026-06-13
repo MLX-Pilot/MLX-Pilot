@@ -604,12 +604,10 @@ fn default_airllm_python_command() -> String {
         });
     if preferred.exists() {
         preferred.display().to_string()
+    } else if cfg!(windows) {
+        "py".to_string()
     } else {
-        if cfg!(windows) {
-            "py".to_string()
-        } else {
-            "python3".to_string()
-        }
+        "python3".to_string()
     }
 }
 
@@ -783,7 +781,7 @@ impl ModelProvider for MlxProvider {
             });
         }
 
-        models.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        models.sort_by_key(|a| a.name.to_lowercase());
         Ok(models)
     }
 

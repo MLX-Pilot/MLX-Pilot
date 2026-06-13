@@ -19,8 +19,7 @@ use axum::Json;
 use futures_util::Stream;
 use mlx_ollama_core::{ChatMessage, ChatRequest, MessageRole};
 use mlx_research::{
-    self, hide_image, load_session, persist_session, ResearchConfig,
-    ResearchEngine, ResearchStatus,
+    self, hide_image, load_session, persist_session, ResearchConfig, ResearchEngine, ResearchStatus,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -217,8 +216,8 @@ pub async fn research_start(
         }
     }
 
-    let max_rounds = req.max_rounds.min(10).max(1);
-    let max_time_secs = req.max_time_secs.min(600).max(30);
+    let max_rounds = req.max_rounds.clamp(1, 10);
+    let max_time_secs = req.max_time_secs.clamp(30, 600);
     let query = req.query.trim().to_string();
     let search_provider = req.search_provider.clone();
     let category = req.category.clone();
@@ -376,7 +375,9 @@ pub async fn research_start(
                 match session.status {
                     ResearchStatus::Done => Ok(result),
                     ResearchStatus::Cancelled => Err("Research cancelled".to_string()),
-                    ResearchStatus::Error => Err(session.error.unwrap_or_else(|| "Unknown error".to_string())),
+                    ResearchStatus::Error => {
+                        Err(session.error.unwrap_or_else(|| "Unknown error".to_string()))
+                    }
                     _ => Err("Research incomplete".to_string()),
                 }
             }
@@ -436,7 +437,10 @@ pub async fn research_result(
     let job = state.jobs.get(&job_id).await.ok_or(StatusCode::NOT_FOUND)?;
 
     let session_id = if let Some(ref result) = job.result {
-        result.get("session_id").and_then(|v| v.as_str()).map(|s| s.to_string())
+        result
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
     } else {
         Some(job_id.clone())
     };
@@ -456,25 +460,23 @@ pub async fn research_result(
             stats: session.stats,
             error: session.error,
         })),
-        Err(_) => {
-            Ok(Json(ResearchResultResponse {
-                id: session_id,
-                query: String::new(),
-                status: match job.status {
-                    jobs::JobStatus::Done => ResearchStatus::Done,
-                    jobs::JobStatus::Error => ResearchStatus::Error,
-                    jobs::JobStatus::Cancelled => ResearchStatus::Cancelled,
-                    jobs::JobStatus::Running => ResearchStatus::Running,
-                    jobs::JobStatus::Queued => ResearchStatus::Queued,
-                },
-                report_md: None,
-                report_html: None,
-                sources: vec![],
-                findings: vec![],
-                stats: None,
-                error: job.error,
-            }))
-        }
+        Err(_) => Ok(Json(ResearchResultResponse {
+            id: session_id,
+            query: String::new(),
+            status: match job.status {
+                jobs::JobStatus::Done => ResearchStatus::Done,
+                jobs::JobStatus::Error => ResearchStatus::Error,
+                jobs::JobStatus::Cancelled => ResearchStatus::Cancelled,
+                jobs::JobStatus::Running => ResearchStatus::Running,
+                jobs::JobStatus::Queued => ResearchStatus::Queued,
+            },
+            report_md: None,
+            report_html: None,
+            sources: vec![],
+            findings: vec![],
+            stats: None,
+            error: job.error,
+        })),
     }
 }
 
@@ -613,9 +615,7 @@ pub async fn research_unhide_images(
 
 // ── DELETE /api/research/{id} ──────────────────────────────────────────────
 
-pub async fn research_delete(
-    AxumPath(id): AxumPath<String>,
-) -> Result<Json<Value>, StatusCode> {
+pub async fn research_delete(AxumPath(id): AxumPath<String>) -> Result<Json<Value>, StatusCode> {
     let data_dir = research_data_dir();
     mlx_research::delete_session(&data_dir, &id).map_err(|e| {
         error!("Failed to delete research session: {e}");

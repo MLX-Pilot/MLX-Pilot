@@ -301,7 +301,7 @@ impl CatalogService {
     pub async fn list_downloads(&self) -> Vec<DownloadJob> {
         let jobs = self.jobs.read().await;
         let mut ordered = jobs.values().cloned().collect::<Vec<_>>();
-        ordered.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        ordered.sort_by_key(|b| std::cmp::Reverse(b.created_at));
         ordered
     }
 

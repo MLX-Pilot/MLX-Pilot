@@ -101,7 +101,10 @@ impl MemoryStore {
     }
 
     /// Create a MemoryStore with an embedder for semantic search.
-    pub async fn with_embedder(root: PathBuf, embedder: Arc<dyn Embedder>) -> std::io::Result<Self> {
+    pub async fn with_embedder(
+        root: PathBuf,
+        embedder: Arc<dyn Embedder>,
+    ) -> std::io::Result<Self> {
         let db_path = root
             .parent()
             .unwrap_or(root.as_path())
@@ -133,10 +136,7 @@ impl MemoryStore {
 
     /// Name of the active embedder, or "none".
     pub fn embedder_name(&self) -> &str {
-        self.embedder
-            .as_ref()
-            .map(|e| e.name())
-            .unwrap_or("none")
+        self.embedder.as_ref().map(|e| e.name()).unwrap_or("none")
     }
 
     pub async fn upsert(&self, records: &[MemoryRecord]) -> std::io::Result<()> {
@@ -185,19 +185,17 @@ impl MemoryStore {
         let records = self.state.load_all_memory_records().await?;
 
         // FTS search
-        let fts_hits = self.state.fts_memory_search(query, limit.max(records.len())).await?;
+        let fts_hits = self
+            .state
+            .fts_memory_search(query, limit.max(records.len()))
+            .await?;
 
-        if can_semantic && query_embedding.is_some() {
-            let q_emb = query_embedding.as_ref().unwrap();
+        if let Some(q_emb) = can_semantic.then_some(query_embedding.as_ref()).flatten() {
             let sem_weight = self.semantic_weight;
             let fts_weight = 1.0 - sem_weight;
 
             // Compute max FTS score for normalization
-            let max_fts_score = fts_hits
-                .first()
-                .map(|(_, _, s)| *s)
-                .unwrap_or(1)
-                .max(1) as f32;
+            let max_fts_score = fts_hits.first().map(|(_, _, s)| *s).unwrap_or(1).max(1) as f32;
 
             // Build a map of record_id -> FTS score
             let mut fts_map: BTreeMap<String, i64> = BTreeMap::new();
@@ -233,7 +231,10 @@ impl MemoryStore {
                 })
                 .collect();
 
-            combined.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| b.0.created_at.cmp(&a.0.created_at)));
+            combined.sort_by(|a, b| {
+                b.1.cmp(&a.1)
+                    .then_with(|| b.0.created_at.cmp(&a.0.created_at))
+            });
             combined.truncate(limit.max(1));
 
             let hits: Vec<MemorySearchHit> = combined

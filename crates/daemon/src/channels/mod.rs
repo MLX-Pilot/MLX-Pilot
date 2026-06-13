@@ -38,6 +38,7 @@ pub struct ChannelUpsertAccountRequest {
     pub channel: String,
     pub account_id: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub enabled: Option<bool>,
     #[serde(default)]
     pub credentials: Option<Value>,
@@ -539,13 +540,12 @@ impl ChannelService {
             .compatibility
             .channels
             .entry(channel_id.clone())
-            .or_insert_with(ChannelPersistedState::default);
+            .or_default();
 
         let account = entry
             .accounts
             .entry(request.account_id.clone())
-            .or_insert_with(ChannelAccountPersistedState::default);
-        account.enabled = request.enabled.unwrap_or(account.enabled);
+            .or_default();
         account.metadata = request.metadata;
         account.routing_defaults = request.routing_defaults;
         account.limits = request.limits.unwrap_or_else(|| account.limits.clone());
@@ -988,7 +988,7 @@ impl ChannelService {
                 },
             })
             .collect::<Vec<_>>();
-        accounts.sort_by(|a, b| a.account_id.cmp(&b.account_id));
+        accounts.sort_by_key(|a| a.account_id.clone());
 
         let ambiguity_warning = {
             let active_count = accounts.iter().filter(|account| account.enabled).count();
