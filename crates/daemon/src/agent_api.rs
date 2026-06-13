@@ -1138,6 +1138,8 @@ fn summary_artifact_to_memory_record(
         pin_state: "auto".to_string(),
         promotion_source: "summary_artifact".to_string(),
         summary_ref: artifact.session_id.clone(),
+        embedding: None,
+        embedding_dim: 0,
     }
 }
 

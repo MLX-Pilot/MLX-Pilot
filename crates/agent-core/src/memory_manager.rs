@@ -147,6 +147,8 @@ impl MemoryManager {
                     pin_state: "auto".to_string(),
                     promotion_source: "context_budget".to_string(),
                     summary_ref: String::new(),
+                    embedding: None,
+                    embedding_dim: 0,
                 },
             })
             .collect();
@@ -303,6 +305,8 @@ fn promote_memory(
         },
         promotion_source: "turn_summary".to_string(),
         summary_ref: session_id.to_string(),
+        embedding: None,
+        embedding_dim: 0,
     };
 
     vec![MemoryPromotionDecision {

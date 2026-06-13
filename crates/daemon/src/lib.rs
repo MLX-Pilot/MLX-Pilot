@@ -4,8 +4,14 @@ mod catalog;
 mod channels;
 mod chat_stream;
 mod config;
+mod hwfit_routes;
+mod jobs;
+mod model_catalog;
 mod plugins;
+mod provider_embedder;
+mod research_routes;
 mod runtime_doctor;
+mod search;
 mod secrets_vault;
 mod startup;
 mod wave1;
@@ -31,6 +37,7 @@ use catalog::{
 use chat_stream::{spawn_chat_stream, ChatRuntimeConfig, ChatStreamEvent};
 use config::AppConfig;
 use llamacpp_provider::{LlamaCppProvider, LlamaCppProviderConfig};
+use mlx_agent_core::embeddings::Embedder;
 use mlx_agent_skills::normalize_env_key;
 use mlx_ollama_core::{ChatRequest, ChatResponse, ModelDescriptor, ModelProvider, ProviderError};
 use mlx_provider::{MlxProvider, MlxProviderConfig};
@@ -52,6 +59,8 @@ use crate::channels::{
     LegacyChannelUpsertRequest, MessageSendRequest,
 };
 use crate::plugins::{PluginConfigRequest, PluginManager, PluginToggleRequest};
+use crate::secrets_vault::SecretsVault;
+use http_llm_provider::{HttpLlmProvider, HttpLlmProviderConfig};
 
 #[derive(Clone)]
 struct AppState {
@@ -68,6 +77,12 @@ struct AppState {
     pub channel_service: Arc<ChannelService>,
     pub presets: Arc<mlx_agent_core::PresetStore>,
     pub compare: Arc<mlx_agent_core::CompareStore>,
+    pub jobs: Arc<jobs::JobRegistry>,
+    pub state_db_path: FsPathBuf,
+    pub search_service: Arc<search::SearchService>,
+    pub search_config: search::SearchConfig,
+    pub embedder: Option<Arc<dyn mlx_agent_core::embeddings::Embedder>>,
+    pub vault: Option<Arc<SecretsVault>>,
     startup: startup::StartupCoordinator,
 }
 
@@ -120,6 +135,14 @@ fn find_workspace_root_from(start: &FsPath) -> Option<FsPathBuf> {
         .ancestors()
         .find(|candidate| has_workspace_marker(candidate))
         .map(FsPath::to_path_buf)
+}
+
+fn resolve_state_db_path() -> FsPathBuf {
+    AppConfig::get_settings_path()
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join("agent")
+        .join("state.sqlite")
 }
 
 fn resolve_default_agent_workspace() -> FsPathBuf {
@@ -410,6 +433,54 @@ pub async fn run() -> anyhow::Result<()> {
         download_timeout: cfg.catalog_download_timeout,
     })?);
 
+    let state_db_path = resolve_state_db_path();
+
+    let vault = SecretsVault::open(AppConfig::get_settings_path().parent().unwrap_or(std::path::Path::new(".")))
+        .ok()
+        .map(Arc::new);
+
+    let search_config = search::SearchConfig {
+        default_provider: cfg.search_provider.clone().unwrap_or_else(|| "duckduckgo".to_string()),
+        searxng_instance: cfg.searxng_instance.clone(),
+        brave_api_key: cfg.brave_api_key.clone(),
+        safe_search: cfg.search_safe_search.unwrap_or(true),
+        max_results: cfg.search_max_results.unwrap_or(5),
+        ..Default::default()
+    };
+
+    let search_service = Arc::new(search::SearchService::new(
+        &search_config,
+        cfg.brave_api_key.clone(),
+    ));
+
+    // Try to set up the embedder from the Ollama provider.
+    let memory_root = AppConfig::get_settings_path()
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join("memory");
+    let (embedder, memory): (
+        Option<Arc<dyn mlx_agent_core::embeddings::Embedder>>,
+        Arc<mlx_agent_core::MemoryStore>,
+    ) = {
+        let provider_emb = provider_embedder::ProviderEmbedder::new(
+            &cfg.ollama_base_url,
+            &Some(ollama_provider.clone()),
+        )
+        .await;
+        if provider_emb.is_ready() {
+            let emb: Arc<dyn mlx_agent_core::embeddings::Embedder> = Arc::new(provider_emb);
+            let mem = mlx_agent_core::MemoryStore::with_embedder(memory_root, emb.clone())
+                .await
+                .expect("Failed to initialize memory store with embedder");
+            (Some(emb), Arc::new(mem))
+        } else {
+            let mem = mlx_agent_core::MemoryStore::new(memory_root)
+                .await
+                .expect("Failed to initialize memory store");
+            (None, Arc::new(mem))
+        }
+    };
+
     let state = AppState {
         provider_mode,
         mlx_provider: mlx_provider.clone(),
@@ -437,16 +508,7 @@ pub async fn run() -> anyhow::Result<()> {
             audit: Arc::new(mlx_agent_core::AuditLog::new(
                 std::env::temp_dir().join("mlx-pilot-audit"),
             )),
-            memory: Arc::new(
-                mlx_agent_core::MemoryStore::new(
-                    AppConfig::get_settings_path()
-                        .parent()
-                        .unwrap_or(std::path::Path::new("."))
-                        .join("memory"),
-                )
-                .await
-                .expect("Failed to initialize memory store"),
-            ),
+            memory: memory.clone(),
             budget_tracker: Arc::new(tokio::sync::RwLock::new(BTreeMap::new())),
         },
         session_store: Arc::new(
@@ -481,6 +543,12 @@ pub async fn run() -> anyhow::Result<()> {
             .await
             .expect("Failed to initialize compare store"),
         ),
+        jobs: Arc::new(jobs::JobRegistry::new(4)),
+        state_db_path: state_db_path.clone(),
+        search_service: search_service.clone(),
+        search_config: search_config.clone(),
+        embedder: embedder.clone(),
+        vault: vault.clone(),
         startup,
     };
 
@@ -490,6 +558,14 @@ pub async fn run() -> anyhow::Result<()> {
         state.ollama_provider.clone(),
         selected_startup_ollama_model(&cfg),
     );
+
+    // Initialize scheduler tables and start the background scheduler.
+    jobs::ensure_scheduler_tables(&state.state_db_path)
+        .await
+        .expect("Failed to create scheduler tables");
+    let scheduler = jobs::Scheduler::new(state.state_db_path.clone(), state.jobs.clone());
+    let scheduler_shutdown = tokio_util::sync::CancellationToken::new();
+    scheduler.start(scheduler_shutdown);
 
     let app = Router::new()
         .route("/config", get(get_config).post(update_config))
@@ -502,11 +578,32 @@ pub async fn run() -> anyhow::Result<()> {
             get(runtime_doctor_get).post(runtime_doctor_run),
         )
         .route("/models", get(list_models))
+        .route("/models/all", get(list_models_all))
         .route("/models/rename", post(rename_model))
         .route("/models/{model_id}", delete(delete_model))
         .route("/chat", post(chat))
         .route("/chat/stream", post(chat_stream))
         .route("/web/brave/search", post(brave_web_search))
+        .route("/api/search", post(search::api_search))
+        .route("/api/search/fetch", post(search::api_search_fetch))
+        .route("/api/search/providers", get(search::api_search_providers))
+        .route("/api/search/config", get(search::api_search_config))
+        // ── Research (Wave 5) ──
+        .route("/api/research/start", post(research_routes::research_start))
+        .route("/api/research/stream/{job_id}", get(research_routes::research_stream))
+        .route("/api/research/cancel/{job_id}", post(research_routes::research_cancel))
+        .route("/api/research/result/{job_id}", get(research_routes::research_result))
+        .route("/api/research/report/{id}", get(research_routes::research_report))
+        .route("/api/research/library", get(research_routes::research_library))
+        .route("/api/research/spinoff/{id}", post(research_routes::research_spinoff))
+        .route("/api/research/{id}/hide-image", post(research_routes::research_hide_image))
+        .route("/api/research/{id}/unhide-images", post(research_routes::research_unhide_images))
+        .route("/api/research/{id}", delete(research_routes::research_delete))
+        // ── Hardware Fit (Wave 5) ──
+        .route("/api/hwfit/system", get(hwfit_routes::hwfit_system))
+        .route("/api/hwfit/models", get(hwfit_routes::hwfit_models))
+        .route("/api/hwfit/profiles", get(hwfit_routes::hwfit_profiles))
+        .route("/api/hwfit/simulate", post(hwfit_routes::hwfit_simulate))
         .route("/environment", get(environment).post(update_environment))
         .route("/catalog/sources", get(catalog_sources))
         .route("/catalog/models", get(catalog_models))
@@ -631,6 +728,11 @@ pub async fn run() -> anyhow::Result<()> {
                 .delete(wave1::delete_memory),
         )
         .route("/agent/memory/{id}/pin", post(wave1::pin_memory))
+        .route("/agent/memory/reindex", post(wave1::reindex_memory))
+        .route(
+            "/agent/memory/semantic",
+            get(wave1::memory_semantic_status),
+        )
         // ── Wave 1: Session history organization + editing ──
         .route("/agent/sessions/{id}/messages", get(wave1::session_messages))
         .route("/agent/sessions/{id}/flags", post(wave1::session_set_flags))
@@ -650,6 +752,24 @@ pub async fn run() -> anyhow::Result<()> {
         )
         .route("/compare/{id}/vote", post(wave1::compare_vote))
         .route("/compare/{id}/synthesize", post(wave1::compare_synthesize))
+        // ── Jobs / Scheduler ──
+        .route("/jobs", get(jobs::job_list))
+        .route("/jobs/test", post(jobs::job_test))
+        .route("/jobs/{job_id}", get(jobs::job_get))
+        .route("/jobs/{job_id}/stream", get(jobs::job_stream))
+        .route("/jobs/{job_id}/cancel", post(jobs::job_cancel))
+        .route(
+            "/scheduler/tasks",
+            get(jobs::scheduler_list_tasks).post(jobs::scheduler_create_task),
+        )
+        .route(
+            "/scheduler/tasks/{task_id}",
+            delete(jobs::scheduler_delete_task),
+        )
+        .route(
+            "/scheduler/tasks/{task_id}/runs",
+            get(jobs::scheduler_task_runs),
+        )
         .with_state(state)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
@@ -763,6 +883,19 @@ async fn list_models(
         .map(annotate_agent_model_compatibility)
         .collect::<Vec<_>>();
     Ok(Json(models))
+}
+
+async fn list_models_all(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<model_catalog::ModelGroup>>, AppError> {
+    let local = list_chat_models(&state)
+        .await?
+        .into_iter()
+        .map(annotate_agent_model_compatibility)
+        .collect::<Vec<_>>();
+    let airgap = false; // TODO: read from config/settings
+    let groups = model_catalog::build_unified_models(local, state.vault.as_deref(), airgap).await;
+    Ok(Json(groups))
 }
 
 async fn agent_plugins(
@@ -1942,10 +2075,66 @@ fn is_known_tool_ready_ollama_family(model: &str) -> bool {
     .any(|needle| model.contains(needle))
 }
 
+/// Try to route a chat request to a cloud provider (e.g. "deepseek:model-name").
+/// Returns `None` if the model_id doesn't match any cloud provider.
+async fn try_cloud_chat(
+    state: &AppState,
+    request: &ChatRequest,
+) -> Option<Result<ChatResponse, ProviderError>> {
+    let model_id = request.model_id.trim();
+    // Check known cloud provider prefixes.
+    let known_cloud_providers = ["deepseek", "openai", "anthropic", "groq", "openrouter"];
+    let mut cloud_provider: Option<&str> = None;
+    let mut cloud_model: Option<&str> = None;
+
+    for prefix in &known_cloud_providers {
+        if let Some(rest) = model_id.strip_prefix(&format!("{prefix}:")) {
+            cloud_provider = Some(prefix);
+            cloud_model = Some(rest.trim());
+            break;
+        }
+    }
+
+    let provider_key = cloud_provider?;
+    let model = cloud_model?;
+
+    let config = model_catalog::find_cloud_config(provider_key)?;
+    let api_key = model_catalog::get_api_key(state.vault.as_deref(), &config)?;
+
+    let http_config = HttpLlmProviderConfig {
+        provider_name: provider_key.to_string(),
+        base_url: config.default_base_url.clone(),
+        api_key: Some(api_key),
+        api_kind: config.api_kind,
+        timeout: std::time::Duration::from_secs(120),
+        default_headers: BTreeMap::new(),
+        default_models: vec![model.to_string()],
+    };
+
+    let provider = HttpLlmProvider::new(http_config);
+    let cloud_request = ChatRequest {
+        model_id: model.to_string(),
+        messages: request.messages.clone(),
+        options: request.options.clone(),
+    };
+
+    match provider.chat(cloud_request).await {
+        Ok(response) => Some(Ok(response)),
+        Err(e) => Some(Err(ProviderError::Unavailable {
+            details: format!("cloud provider '{provider_key}': {e}"),
+        })),
+    }
+}
+
 async fn chat_with_routing(
     state: &AppState,
     request: ChatRequest,
 ) -> Result<ChatResponse, ProviderError> {
+    // Check for cloud provider prefix (e.g. "deepseek:model-name").
+    if let Some(cloud_result) = try_cloud_chat(state, &request).await {
+        return cloud_result;
+    }
+
     let provider_pinned = request_has_explicit_provider(&request.model_id);
     let routed = route_model_request(state, &request.model_id).await?;
     let request = ChatRequest {

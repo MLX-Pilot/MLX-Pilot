@@ -19,9 +19,14 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 urlencoding = "2.1"
 futures-util = "0.3"
 bytes = "1"
-tokio-stream = "0.1"
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+cron = "0.12"
 base64 = "0.22"
 ring = "0.17"
+scraper = "0.20"
+url = "2.5"
+thiserror.workspace = true
 mlx-ollama-core = { path = "../core" }
 mlx-agent-core = { path = "../agent-core" }
 mlx-agent-tools = { path = "../agent-tools" }
@@ -30,6 +35,10 @@ mlx-provider = { path = "../providers/mlx" }
 llamacpp-provider = { path = "../providers/llamacpp" }
 ollama-provider = { path = "../providers/ollama" }
 http-llm-provider = { path = "../providers/http_llm_provider" }
+mlx-research = { path = "../research" }
+mlx-hardware-fit = { path = "../hardware-fit" }
+mlx-model-fit = { path = "../model-fit" }
+rusqlite = { version = "0.32", features = ["bundled"] }
 chrono.workspace = true
 uuid.workspace = true
 
