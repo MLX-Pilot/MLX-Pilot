@@ -1,11 +1,14 @@
 /* MLX Pilot — ES module entry point.
  *
- * Loads the front-end scripts as side-effect ES modules, preserving the
- * original execution order (app.js -> wave1.js -> wave5.js). This is the entry
- * step of the ESM modularization: behaviour is unchanged. Subsequent steps move
- * logic out of these files into focused js/core/ and js/features/ modules, which
- * this file then imports in the same dependency order.
+ * Imports the application's ES modules in the SAME order their code ran in the
+ * original monolith, so module-load side effects (console capture, splash,
+ * startup, event-listener wiring) fire in the exact original sequence:
+ *   app.js (shell + console capture) -> feature modules (in file order) ->
+ *   wave1.js -> wave5.js.
+ * Core modules (js/core/*) are pulled in transitively by the feature modules
+ * that import them. Behaviour is unchanged from the pre-modularization build.
  */
 import '../app.js';
+import './features/ui-bindings.js';
 import '../wave1.js';
 import '../wave5.js';
