@@ -96,6 +96,83 @@ fn research_data_dir() -> PathBuf {
         .join("agent")
 }
 
+/// Resolve a model_id for research. If "auto" or empty, picks the first available.
+/// Cloud model IDs (e.g., `deepseek:deepseek-chat`) flow through to chat_with_routing.
+async fn resolve_research_model(
+    state: &crate::AppState,
+    requested: Option<&str>,
+) -> Result<String, String> {
+    let requested = requested.filter(|s| !s.is_empty() && *s != "auto");
+
+    if let Some(id) = requested {
+        // Cloud-prefixed model IDs (deepseek:, openai:, anthropic:, etc.) pass through as-is
+        let known_prefixes = ["deepseek:", "openai:", "anthropic:", "groq:", "openrouter:"];
+        if known_prefixes.iter().any(|p| id.starts_with(p)) || id.contains("::") {
+            return Ok(id.to_string());
+        }
+        // Local provider prefix (mlx::, ollama::, llama::) also passes through
+        let local_prefixes = ["mlx::", "ollama::", "llama::"];
+        if local_prefixes.iter().any(|p| id.starts_with(p)) {
+            return Ok(id.to_string());
+        }
+        // Bare model ID — check if it exists locally
+        let local = crate::list_chat_models(state)
+            .await
+            .map_err(|e| format!("{e}"))?;
+        if local.iter().any(|m| m.id == id || m.path == id) {
+            return Ok(id.to_string());
+        }
+        // Not local — try each configured cloud provider, qualify with provider prefix
+        if let Some(ref vault) = state.vault {
+            for cfg in crate::model_catalog::cloud_provider_configs() {
+                if crate::model_catalog::get_api_key(Some(vault), &cfg).is_some() {
+                    return Ok(format!("{}:{}", cfg.provider_key, id));
+                }
+            }
+        }
+        return Err(format!(
+            "Modelo '{}' não encontrado. Verifique se ele está carregado ou disponível como cloud.",
+            id
+        ));
+    }
+
+    // "auto" — pick first available local model
+    let local = crate::list_chat_models(state)
+        .await
+        .map_err(|e| format!("{e}"))?;
+    if let Some(m) = local.first() {
+        let model_id = if !m.path.is_empty() { &m.path } else { &m.id };
+        return Ok(model_id.clone());
+    }
+
+    // No local model — pick first configured cloud provider with its first known model
+    if let Some(ref vault) = state.vault {
+        for cfg in crate::model_catalog::cloud_provider_configs() {
+            if crate::model_catalog::get_api_key(Some(vault), &cfg).is_some() {
+                // Use the provider's default/first model. chat_with_routing with the
+                // "provider:" prefix (without a specific model) won't work, so pick
+                // a reasonable default per provider.
+                let default_model = match cfg.provider_key.as_str() {
+                    "deepseek" => "deepseek-chat",
+                    "openai" => "gpt-4.1",
+                    "anthropic" => "claude-sonnet-4-6",
+                    "groq" => "llama-3.3-70b-versatile",
+                    "openrouter" => "openai/gpt-4.1",
+                    _ => "",
+                };
+                if !default_model.is_empty() {
+                    return Ok(format!("{}:{}", cfg.provider_key, default_model));
+                }
+            }
+        }
+    }
+
+    Err(
+        "Nenhum modelo disponível. Carregue um modelo local ou configure uma chave API cloud (ex.: DEEPSEEK_API_KEY) no cofre de segredos."
+            .to_string(),
+    )
+}
+
 // ── POST /api/research/start ───────────────────────────────────────────────
 
 pub async fn research_start(
@@ -106,17 +183,41 @@ pub async fn research_start(
         return Err(StatusCode::BAD_REQUEST);
     }
 
+    // ── Fail-fast: check model availability ──
+    let model_id = match resolve_research_model(&state, req.model_id.as_deref()).await {
+        Ok(id) => id,
+        Err(msg) => {
+            return Ok(Json(json!({
+                "error": true,
+                "message": msg,
+                "hint": "Carregue um modelo local ou configure uma API key cloud (DEEPSEEK_API_KEY, OPENAI_API_KEY, etc.) no cofre de segredos."
+            })));
+        }
+    };
+
+    // Pre-flight: verify the model actually exists via a quick probe
+    // (skip full probe for cloud-prefixed models — they'll resolve at call time)
+    if !model_id.contains(':') && !model_id.contains("::") {
+        let local = crate::list_chat_models(&state).await.unwrap_or_default();
+        if !local.iter().any(|m| m.id == model_id || m.path == model_id) {
+            return Ok(Json(json!({
+                "error": true,
+                "message": format!("Modelo '{}' não está carregado no momento.", model_id),
+                "hint": "Carregue o modelo ou use 'auto' para seleção automática."
+            })));
+        }
+    }
+
     let max_rounds = req.max_rounds.min(10).max(1);
     let max_time_secs = req.max_time_secs.min(600).max(30);
     let query = req.query.trim().to_string();
-    let model_id = req.model_id.clone().unwrap_or_else(|| "auto".to_string());
     let search_provider = req.search_provider.clone();
     let category = req.category.clone();
     let owner = req.owner.clone();
 
     let data_dir = research_data_dir();
     let search_service = state.search_service.clone();
-    let state_clone = state.clone(); // AppState is Clone
+    let state_clone = state.clone();
     let search_config = state.search_config.clone();
 
     let config = ResearchConfig {

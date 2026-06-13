@@ -351,8 +351,10 @@ impl ResearchEngine {
         let plan = match (self.llm_fn)(sys, usr).await {
             Ok(p) => p,
             Err(e) => {
-                warn!("Planning failed: {e}");
-                "Research the question broadly and gather facts from multiple sources.".to_string()
+                session.status = ResearchStatus::Error;
+                session.error = Some(format!("LLM planning error: {e}"));
+                session.finished_at = Some(Utc::now());
+                return session;
             }
         };
         debug!("Research plan: {}", &plan[..plan.len().min(200)]);
@@ -377,7 +379,10 @@ impl ResearchEngine {
                     session.category = cat.clone();
                     cat
                 }
-                Err(_) => None,
+                Err(_) => {
+                    // Category classification is non-critical — keep going
+                    session.category.clone()
+                }
             }
         } else {
             session.category.clone()
@@ -422,8 +427,10 @@ impl ResearchEngine {
                     vec![format!("{} round {}", query, round_num)]
                 }),
                 Err(e) => {
-                    warn!("Query generation failed: {e}");
-                    vec![format!("{} round {}", query, round_num)]
+                    session.status = ResearchStatus::Error;
+                    session.error = Some(format!("LLM query generation error: {e}"));
+                    session.finished_at = Some(Utc::now());
+                    return session;
                 }
             };
 
@@ -517,15 +524,10 @@ impl ResearchEngine {
                                 round_findings.push(finding);
                             }
                             Err(e) => {
-                                // Fallback: use snippet
-                                let finding = Finding {
-                                    source_url: src.url.clone(),
-                                    source_title: src.title.clone(),
-                                    extracted_text: format!("Snippet: {}", src.snippet),
-                                    round: round_num,
-                                };
-                                round_findings.push(finding);
-                                warn!("Extraction LLM call failed for {}: {e}", src.url);
+                                session.status = ResearchStatus::Error;
+                                session.error = Some(format!("LLM extraction error for {}: {e}", src.url));
+                                session.finished_at = Some(Utc::now());
+                                return session;
                             }
                         }
                     }
@@ -557,16 +559,10 @@ impl ResearchEngine {
             current_report = match (self.llm_fn)(ssys, susr).await {
                 Ok(synth) => synth,
                 Err(e) => {
-                    warn!("Synthesis failed: {e}");
-                    // Keep existing report + append raw findings
-                    let mut r = current_report.clone();
-                    r.push_str("\n\n## Round ");
-                    r.push_str(&round_num.to_string());
-                    r.push_str(" Findings\n\n");
-                    for f in &round_findings {
-                        r.push_str(&format!("- [{}]({}): {}\n", f.source_title, f.source_url, f.extracted_text));
-                    }
-                    r
+                    session.status = ResearchStatus::Error;
+                    session.error = Some(format!("LLM synthesis error: {e}"));
+                    session.finished_at = Some(Utc::now());
+                    return session;
                 }
             };
 
@@ -584,12 +580,11 @@ impl ResearchEngine {
                 let (tsys, tusr) = stop_prompt(query, &current_report, round_num, self.config.max_rounds);
                 match (self.llm_fn)(tsys, tusr).await {
                     Ok(d) => d,
-                    Err(_) => {
-                        if round_num >= self.config.max_rounds {
-                            "STOP (max rounds reached)".to_string()
-                        } else {
-                            "CONTINUE (fallback)".to_string()
-                        }
+                    Err(e) => {
+                        session.status = ResearchStatus::Error;
+                        session.error = Some(format!("LLM stop-decision error: {e}"));
+                        session.finished_at = Some(Utc::now());
+                        return session;
                     }
                 }
             };
@@ -630,8 +625,10 @@ impl ResearchEngine {
         let final_md = match (self.llm_fn)(fsys, fusr).await {
             Ok(r) => r,
             Err(e) => {
-                warn!("Final report generation failed: {e}");
-                current_report.clone()
+                session.status = ResearchStatus::Error;
+                session.error = Some(format!("LLM final-report error: {e}"));
+                session.finished_at = Some(Utc::now());
+                return session;
             }
         };
 

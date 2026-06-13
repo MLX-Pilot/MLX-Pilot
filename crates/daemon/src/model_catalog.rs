@@ -199,7 +199,7 @@ pub struct CloudProviderConfig {
 }
 
 /// Known cloud providers.
-fn cloud_provider_configs() -> Vec<CloudProviderConfig> {
+pub fn cloud_provider_configs() -> Vec<CloudProviderConfig> {
     vec![
         CloudProviderConfig {
             provider_key: "deepseek".to_string(),
