@@ -968,7 +968,10 @@ impl StateStore {
                 )
                 .map_err(sql_error)?;
             if updated == 0 {
-                return Err(io::Error::new(io::ErrorKind::NotFound, "Evento nao encontrado"));
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "Evento nao encontrado",
+                ));
             }
             if table_exists(&conn, "session_events_fts") {
                 let _ = conn.execute(

@@ -225,7 +225,12 @@ pub async fn add_memory(
         embedding: None,
         embedding_dim: 0,
     };
-    state.agent_state.memory.save(&record).await.map_err(internal)?;
+    state
+        .agent_state
+        .memory
+        .save(&record)
+        .await
+        .map_err(internal)?;
     Ok(Json(record))
 }
 
@@ -257,7 +262,12 @@ pub async fn update_memory(
         .ok_or_else(|| not_found(format!("memory {id} not found")))?;
     record.id = id;
     record.created_at = existing.created_at;
-    state.agent_state.memory.save(&record).await.map_err(internal)?;
+    state
+        .agent_state
+        .memory
+        .save(&record)
+        .await
+        .map_err(internal)?;
     Ok(Json(record))
 }
 
@@ -265,7 +275,12 @@ pub async fn delete_memory(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> ApiResult<Value> {
-    state.agent_state.memory.delete(&id).await.map_err(internal)?;
+    state
+        .agent_state
+        .memory
+        .delete(&id)
+        .await
+        .map_err(internal)?;
     Ok(ok())
 }
 
@@ -329,7 +344,11 @@ pub async fn session_messages(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> ApiResult<Vec<MessageWithId>> {
-    let rows = state.session_store.load_with_ids(&id).await.map_err(internal)?;
+    let rows = state
+        .session_store
+        .load_with_ids(&id)
+        .await
+        .map_err(internal)?;
     let out = rows
         .into_iter()
         .map(|(event_id, message)| MessageWithId { event_id, message })
@@ -343,13 +362,25 @@ pub async fn session_set_flags(
     Json(req): Json<SessionFlagsRequest>,
 ) -> ApiResult<Value> {
     if let Some(folder) = req.folder {
-        state.session_store.set_folder(&id, &folder).await.map_err(internal)?;
+        state
+            .session_store
+            .set_folder(&id, &folder)
+            .await
+            .map_err(internal)?;
     }
     if let Some(archived) = req.archived {
-        state.session_store.set_archived(&id, archived).await.map_err(internal)?;
+        state
+            .session_store
+            .set_archived(&id, archived)
+            .await
+            .map_err(internal)?;
     }
     if let Some(pinned) = req.pinned {
-        state.session_store.set_pinned(&id, pinned).await.map_err(internal)?;
+        state
+            .session_store
+            .set_pinned(&id, pinned)
+            .await
+            .map_err(internal)?;
     }
     Ok(ok())
 }
@@ -458,7 +489,13 @@ pub async fn session_export(
 fn sanitize_filename(name: &str) -> String {
     let cleaned: String = name
         .chars()
-        .map(|ch| if ch.is_alphanumeric() || ch == '-' || ch == '_' { ch } else { '_' })
+        .map(|ch| {
+            if ch.is_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
         .collect();
     let trimmed = cleaned.trim_matches('_');
     if trimmed.is_empty() {
@@ -484,7 +521,11 @@ fn export_markdown(name: &str, messages: &[SessionMessage]) -> String {
         if message.content.trim().is_empty() {
             continue;
         }
-        out.push_str(&format!("**{}**\n\n{}\n\n", role_label(message), message.content));
+        out.push_str(&format!(
+            "**{}**\n\n{}\n\n",
+            role_label(message),
+            message.content
+        ));
     }
     out
 }
@@ -495,7 +536,11 @@ fn export_text(name: &str, messages: &[SessionMessage]) -> String {
         if message.content.trim().is_empty() {
             continue;
         }
-        out.push_str(&format!("[{}] {}\n\n", role_label(message), message.content));
+        out.push_str(&format!(
+            "[{}] {}\n\n",
+            role_label(message),
+            message.content
+        ));
     }
     out
 }
@@ -589,7 +634,10 @@ async fn run_one(
 ) -> ComparisonEntry {
     let mut messages = Vec::new();
     if !system_prompt.trim().is_empty() {
-        messages.push(ChatMessage::text(MessageRole::System, system_prompt.to_string()));
+        messages.push(ChatMessage::text(
+            MessageRole::System,
+            system_prompt.to_string(),
+        ));
     }
     messages.push(ChatMessage::text(MessageRole::User, prompt.to_string()));
     let request = ChatRequest {
@@ -647,7 +695,15 @@ pub async fn compare_run(
         let prompt = req.prompt.clone();
         let options = options.clone();
         async move {
-            run_one(state, label_for(index), model_id, &system_prompt, &prompt, options).await
+            run_one(
+                state,
+                label_for(index),
+                model_id,
+                &system_prompt,
+                &prompt,
+                options,
+            )
+            .await
         }
     });
     let entries = join_all(futures).await;
@@ -704,7 +760,9 @@ pub async fn compare_vote(
         .set_vote(&id, &req.winner_label)
         .await
         .map_err(internal)?;
-    Ok(Json(json!({ "ok": true, "winner_label": req.winner_label })))
+    Ok(Json(
+        json!({ "ok": true, "winner_label": req.winner_label }),
+    ))
 }
 
 pub async fn compare_synthesize(
@@ -754,17 +812,13 @@ then state which label is best and briefly why. Be concise.\n\n",
 // ── Semantic memory (embeddings) ─────────────────────────────────────────
 
 /// POST /agent/memory/reindex — recompute embeddings for all records.
-pub async fn reindex_memory(
-    State(state): State<AppState>,
-) -> ApiResult<Value> {
+pub async fn reindex_memory(State(state): State<AppState>) -> ApiResult<Value> {
     let count = state.agent_state.memory.reindex().await.map_err(internal)?;
     Ok(Json(json!({ "ok": true, "reindexed": count })))
 }
 
 /// GET /agent/memory/semantic — semantic search status.
-pub async fn memory_semantic_status(
-    State(state): State<AppState>,
-) -> Json<Value> {
+pub async fn memory_semantic_status(State(state): State<AppState>) -> Json<Value> {
     let memory = &state.agent_state.memory;
     Json(json!({
         "semantic_active": memory.has_semantic(),

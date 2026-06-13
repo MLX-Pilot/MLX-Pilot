@@ -27,7 +27,7 @@ pub fn quant_bytes_per_param(quant: &str) -> f64 {
         "FP16" => 2.0,
         "FP8" => 1.0,
         "AWQ" | "GPTQ" => 0.5625, // ~4.5 bits
-        _ => 0.625, // default to Q4_K_M equivalent
+        _ => 0.625,               // default to Q4_K_M equivalent
     }
 }
 
@@ -213,11 +213,27 @@ pub fn rank_models(
 
     // Sort
     match sort.unwrap_or("score") {
-        "speed" => results.sort_by(|a, b| b.estimated_tps.partial_cmp(&a.estimated_tps).unwrap_or(std::cmp::Ordering::Equal)),
-        "quality" => results.sort_by(|a, b| b.quality_score.partial_cmp(&a.quality_score).unwrap_or(std::cmp::Ordering::Equal)),
-        "vram" => results.sort_by(|a, b| a.estimated_vram_gb.partial_cmp(&b.estimated_vram_gb).unwrap_or(std::cmp::Ordering::Equal)),
+        "speed" => results.sort_by(|a, b| {
+            b.estimated_tps
+                .partial_cmp(&a.estimated_tps)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }),
+        "quality" => results.sort_by(|a, b| {
+            b.quality_score
+                .partial_cmp(&a.quality_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }),
+        "vram" => results.sort_by(|a, b| {
+            a.estimated_vram_gb
+                .partial_cmp(&b.estimated_vram_gb)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }),
         "name" => results.sort_by(|a, b| a.model.name.cmp(&b.model.name)),
-        _ => results.sort_by(|a, b| b.composite_score.partial_cmp(&a.composite_score).unwrap_or(std::cmp::Ordering::Equal)),
+        _ => results.sort_by(|a, b| {
+            b.composite_score
+                .partial_cmp(&a.composite_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }),
     }
 
     if let Some(limit) = limit {
@@ -236,7 +252,9 @@ pub fn analyze_model(
     target_context: Option<usize>,
 ) -> FitAnalysis {
     let uc = use_case_config(use_case);
-    let ctx = target_context.unwrap_or(uc.context_target).min(model.context_length);
+    let ctx = target_context
+        .unwrap_or(uc.context_target)
+        .min(model.context_length);
 
     // Determine best quantization
     let available_vram = if system.is_cpu_only {
@@ -254,7 +272,14 @@ pub fn analyze_model(
     let estimated_vram = estimate_memory_gb(model, &quant, ctx);
 
     // Scores
-    let fit = fit_score(estimated_vram, if system.is_cpu_only { available_ram * 0.5 } else { available_vram });
+    let fit = fit_score(
+        estimated_vram,
+        if system.is_cpu_only {
+            available_ram * 0.5
+        } else {
+            available_vram
+        },
+    );
     let offload_frac = if system.is_cpu_only || available_vram <= 0.0 {
         0.0
     } else {
@@ -330,13 +355,35 @@ pub fn compute_serve_profiles(
     serve_weights_gb: Option<f64>,
     serve_quant: Option<&str>,
 ) -> Vec<ServeProfile> {
-    let available_vram = if system.is_cpu_only { 0.0 } else { system.total_vram_gb };
+    let available_vram = if system.is_cpu_only {
+        0.0
+    } else {
+        system.total_vram_gb
+    };
     let n_layers = estimate_n_layers(model);
 
     let profiles = vec![
-        ("Qualidade", "Q6_K", "f16", model.context_length, "Máxima qualidade, contexto completo. Pode não caber em GPUs menores."),
-        ("Equilíbrio", "Q4_K_M", "q8_0", (model.context_length / 2).max(4096), "Bom equilíbrio entre qualidade, velocidade e uso de VRAM."),
-        ("Velocidade", "Q3_K_M", "q4_0", 4096.min(model.context_length), "Máxima velocidade. Qualidade reduzida, ideal para consultas rápidas."),
+        (
+            "Qualidade",
+            "Q6_K",
+            "f16",
+            model.context_length,
+            "Máxima qualidade, contexto completo. Pode não caber em GPUs menores.",
+        ),
+        (
+            "Equilíbrio",
+            "Q4_K_M",
+            "q8_0",
+            (model.context_length / 2).max(4096),
+            "Bom equilíbrio entre qualidade, velocidade e uso de VRAM.",
+        ),
+        (
+            "Velocidade",
+            "Q3_K_M",
+            "q4_0",
+            4096.min(model.context_length),
+            "Máxima velocidade. Qualidade reduzida, ideal para consultas rápidas.",
+        ),
     ];
 
     profiles
@@ -363,7 +410,11 @@ pub fn compute_serve_profiles(
                 name: name.to_string(),
                 quant: quant.to_string(),
                 n_gpu_layers: gpu_layers,
-                n_cpu_moe: if model.is_moe { (n_layers / 3).max(1) as i32 } else { 0 },
+                n_cpu_moe: if model.is_moe {
+                    (n_layers / 3).max(1) as i32
+                } else {
+                    0
+                },
                 cache_type: cache_type.to_string(),
                 context_size: ctx,
                 estimated_vram_gb: total_vram,
@@ -371,7 +422,10 @@ pub fn compute_serve_profiles(
                 note: if system.is_cpu_only {
                     format!("CPU-only: {}", note)
                 } else if total_vram > available_vram {
-                    format!("⚠ Não cabe na GPU (precisa {:.1} GB, tem {:.1} GB). {}", total_vram, available_vram, note)
+                    format!(
+                        "⚠ Não cabe na GPU (precisa {:.1} GB, tem {:.1} GB). {}",
+                        total_vram, available_vram, note
+                    )
                 } else {
                     note.to_string()
                 },
@@ -414,21 +468,35 @@ fn estimate_n_layers(model: &ModelCard) -> usize {
     let params = model.params_b;
     match model.architecture.to_lowercase().as_str() {
         "llama" | "mistral" | "qwen" => {
-            if params <= 1.5 { 24 }
-            else if params <= 3.0 { 28 }
-            else if params <= 8.0 { 32 }
-            else if params <= 14.0 { 40 }
-            else if params <= 35.0 { 60 }
-            else if params <= 72.0 { 80 }
-            else { 100 }
+            if params <= 1.5 {
+                24
+            } else if params <= 3.0 {
+                28
+            } else if params <= 8.0 {
+                32
+            } else if params <= 14.0 {
+                40
+            } else if params <= 35.0 {
+                60
+            } else if params <= 72.0 {
+                80
+            } else {
+                100
+            }
         }
         "phi" => {
-            if params <= 3.0 { 32 }
-            else { 40 }
+            if params <= 3.0 {
+                32
+            } else {
+                40
+            }
         }
         "gemma" => {
-            if params <= 3.0 { 26 }
-            else { 42 }
+            if params <= 3.0 {
+                26
+            } else {
+                42
+            }
         }
         _ => {
             // Generic estimate
@@ -439,15 +507,19 @@ fn estimate_n_layers(model: &ModelCard) -> usize {
 
 // ── Speed estimation ───────────────────────────────────────────────────────
 
-fn estimate_speed(model: &ModelCard, quant: &str, system: &HardwareProfile, offload_frac: f64) -> f64 {
+fn estimate_speed(
+    model: &ModelCard,
+    quant: &str,
+    system: &HardwareProfile,
+    offload_frac: f64,
+) -> f64 {
     let params = model.active_params_b.unwrap_or(model.params_b);
     let bytes_per_param = quant_bytes_per_param(quant);
     let total_gb = params * bytes_per_param;
 
     let gpu_bw = if let Some(gpu) = system.gpus.first() {
-        gpu.bandwidth_gb_s.unwrap_or_else(|| {
-            mlx_hardware_fit::estimate_gpu_bandwidth(&gpu.name, &gpu.backend)
-        })
+        gpu.bandwidth_gb_s
+            .unwrap_or_else(|| mlx_hardware_fit::estimate_gpu_bandwidth(&gpu.name, &gpu.backend))
     } else {
         mlx_hardware_fit::estimate_gpu_bandwidth("CPU", "cpu")
     };
@@ -562,7 +634,11 @@ fn context_score(ctx: usize, use_case: &str) -> f64 {
 // ── Quant inference ────────────────────────────────────────────────────────
 
 /// Best quant that fits within VRAM budget.
-pub fn best_quant_for_budget(model: &ModelCard, budget_gb: f64, context_size: usize) -> Option<String> {
+pub fn best_quant_for_budget(
+    model: &ModelCard,
+    budget_gb: f64,
+    context_size: usize,
+) -> Option<String> {
     if budget_gb <= 0.0 {
         // CPU-only: pick Q4_K_M as reasonable default
         return Some("Q4_K_M".to_string());
@@ -598,7 +674,9 @@ pub fn infer_quant_from_name(name: &str) -> Option<String> {
         }
     }
     // Also check IQ quants
-    for prefix in &["IQ4_NL", "IQ4_XS", "IQ3_M", "IQ3_S", "IQ3_XXS", "IQ2_M", "IQ2_S", "IQ2_XXS"] {
+    for prefix in &[
+        "IQ4_NL", "IQ4_XS", "IQ3_M", "IQ3_S", "IQ3_XXS", "IQ2_M", "IQ2_S", "IQ2_XXS",
+    ] {
         if name_upper.contains(prefix) {
             return Some(prefix.to_string());
         }
@@ -627,10 +705,7 @@ pub fn params_b_from_name(name: &str) -> Option<f64> {
         if let Some(idx) = name_lower.rfind(pattern) {
             let before = &name_lower[..idx];
             // Find number before the pattern
-            if let Some(num_str) = before
-                .rsplit(|c: char| !c.is_numeric() && c != '.')
-                .next()
-            {
+            if let Some(num_str) = before.rsplit(|c: char| !c.is_numeric() && c != '.').next() {
                 if let Ok(num) = num_str.parse::<f64>() {
                     if num > 0.0 && num < 1000.0 {
                         return Some(num);
@@ -647,7 +722,10 @@ pub fn infer_use_case(name: &str) -> &str {
     let name_lower = name.to_lowercase();
     if name_lower.contains("code") || name_lower.contains("coder") {
         "coding"
-    } else if name_lower.contains("creative") || name_lower.contains("writer") || name_lower.contains("story") {
+    } else if name_lower.contains("creative")
+        || name_lower.contains("writer")
+        || name_lower.contains("story")
+    {
         "creative"
     } else if name_lower.contains("analy") || name_lower.contains("research") {
         "analysis"
@@ -792,7 +870,17 @@ mod tests {
     fn test_rank_models() {
         let system = test_hardware();
         let models = vec![test_model_7b(), test_model_70b()];
-        let ranked = rank_models(&system, &models, None, Some("score"), None, None, None, None, false);
+        let ranked = rank_models(
+            &system,
+            &models,
+            None,
+            Some("score"),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
         assert_eq!(ranked.len(), 2);
         // 7B should rank higher than 70B on 24 GB VRAM
         assert!(ranked[0].composite_score > ranked[1].composite_score);
@@ -820,8 +908,14 @@ mod tests {
 
     #[test]
     fn test_infer_quant_from_name() {
-        assert_eq!(infer_quant_from_name("llama-3-8b-Q4_K_M"), Some("Q4_K_M".to_string()));
-        assert_eq!(infer_quant_from_name("model-FP16"), Some("FP16".to_string()));
+        assert_eq!(
+            infer_quant_from_name("llama-3-8b-Q4_K_M"),
+            Some("Q4_K_M".to_string())
+        );
+        assert_eq!(
+            infer_quant_from_name("model-FP16"),
+            Some("FP16".to_string())
+        );
         assert_eq!(infer_quant_from_name("plain-model"), None);
     }
 
@@ -839,7 +933,17 @@ mod tests {
     fn test_cpu_only_ranking_is_honest() {
         let system = test_hardware_cpu_only();
         let models = vec![test_model_7b(), test_model_70b()];
-        let ranked = rank_models(&system, &models, None, Some("score"), None, None, None, None, false);
+        let ranked = rank_models(
+            &system,
+            &models,
+            None,
+            Some("score"),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
 
         // 7B should rank higher than 70B on CPU-only
         assert_eq!(ranked.len(), 2);
@@ -875,10 +979,22 @@ mod tests {
         };
         let large = test_model_70b();
 
-        let ranked = rank_models(&system, &[tiny.clone(), large.clone()], None, Some("score"), None, None, None, None, false);
+        let ranked = rank_models(
+            &system,
+            &[tiny.clone(), large.clone()],
+            None,
+            Some("score"),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
         // Tiny model should rank higher on CPU-only
-        assert!(ranked[0].composite_score > ranked[1].composite_score,
-            "Tiny models must rank higher than large models on CPU-only");
+        assert!(
+            ranked[0].composite_score > ranked[1].composite_score,
+            "Tiny models must rank higher than large models on CPU-only"
+        );
     }
 
     #[test]
@@ -889,7 +1005,10 @@ mod tests {
         assert_eq!(profiles.len(), 3);
         // All profiles should mention CPU-only
         for p in &profiles {
-            assert!(p.note.contains("CPU-only"), "CPU-only profiles must note CPU-only mode");
+            assert!(
+                p.note.contains("CPU-only"),
+                "CPU-only profiles must note CPU-only mode"
+            );
             assert_eq!(p.n_gpu_layers, 0, "CPU-only must have 0 GPU layers");
             assert!(p.fits, "CPU-only profiles should always fit (RAM-based)");
         }

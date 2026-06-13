@@ -16,32 +16,32 @@ use tracing::debug;
 /// A curated entry for a cloud model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CloudModelEntry {
-    pub id: String,          // e.g. "deepseek-v4-pro"
-    pub label: String,       // e.g. "DeepSeek V4 Pro"
-    pub family: String,      // e.g. "deepseek"
-    pub context: usize,      // max context window
-    pub flags: Vec<String>,  // e.g. ["reasoning", "tool_use"]
+    pub id: String,         // e.g. "deepseek-v4-pro"
+    pub label: String,      // e.g. "DeepSeek V4 Pro"
+    pub family: String,     // e.g. "deepseek"
+    pub context: usize,     // max context window
+    pub flags: Vec<String>, // e.g. ["reasoning", "tool_use"]
 }
 
 /// A provider group in the unified model list.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelGroup {
-    pub provider: String,            // e.g. "local", "deepseek", "openai"
-    pub kind: String,                // "local" | "cloud"
-    pub label: String,               // e.g. "Local", "DeepSeek"
+    pub provider: String, // e.g. "local", "deepseek", "openai"
+    pub kind: String,     // "local" | "cloud"
+    pub label: String,    // e.g. "Local", "DeepSeek"
     pub requires_api_key: bool,
-    pub configured: bool,            // has API key in vault
-    pub status: String,              // "active" | "inactive" | "degraded"
+    pub configured: bool, // has API key in vault
+    pub status: String,   // "active" | "inactive" | "degraded"
     pub models: Vec<ModelGroupEntry>,
 }
 
 /// A single model in a group (simplified for the UI).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelGroupEntry {
-    pub id: String,           // qualified id: "deepseek:deepseek-v4-pro" or "ollama::qwen3.5:9b"
-    pub label: String,        // display name
-    pub provider: String,     // group provider key
-    pub badge: String,        // "local" | "cloud"
+    pub id: String,    // qualified id: "deepseek:deepseek-v4-pro" or "ollama::qwen3.5:9b"
+    pub label: String, // display name
+    pub provider: String, // group provider key
+    pub badge: String, // "local" | "cloud"
     pub context: usize,
     pub flags: Vec<String>,
 }
@@ -192,7 +192,7 @@ fn curated_cloud_models() -> BTreeMap<String, Vec<CloudModelEntry>> {
 pub struct CloudProviderConfig {
     pub provider_key: String,
     pub label: String,
-    pub vault_key: String,       // e.g. "deepseek.api_key"
+    pub vault_key: String, // e.g. "deepseek.api_key"
     pub default_base_url: String,
     pub api_kind: HttpApiKind,
     pub env_key: Option<String>, // fallback env var
@@ -307,19 +307,17 @@ pub async fn build_unified_models(
         let models = if let Some(curated) = catalog.get(&config.provider_key) {
             // Try dynamic discovery first, fall back to curated.
             match try_dynamic_discovery(config).await {
-                Ok(discovered) if !discovered.is_empty() => {
-                    discovered
-                        .into_iter()
-                        .map(|m| ModelGroupEntry {
-                            id: format!("{}:{}", config.provider_key, m.id),
-                            label: m.label,
-                            provider: config.provider_key.clone(),
-                            badge: "cloud".to_string(),
-                            context: m.context,
-                            flags: m.flags,
-                        })
-                        .collect()
-                }
+                Ok(discovered) if !discovered.is_empty() => discovered
+                    .into_iter()
+                    .map(|m| ModelGroupEntry {
+                        id: format!("{}:{}", config.provider_key, m.id),
+                        label: m.label,
+                        provider: config.provider_key.clone(),
+                        badge: "cloud".to_string(),
+                        context: m.context,
+                        flags: m.flags,
+                    })
+                    .collect(),
                 _ => {
                     // Use curated catalog.
                     curated
@@ -414,12 +412,12 @@ async fn try_dynamic_discovery(
     let api_key = get_api_key(None, config).ok_or("no API key")?;
 
     let url = if config.api_kind == HttpApiKind::Anthropic {
-        format!("{}/v1/models", config.default_base_url.trim_end_matches('/'))
-    } else {
         format!(
-            "{}/models",
+            "{}/v1/models",
             config.default_base_url.trim_end_matches('/')
         )
+    } else {
+        format!("{}/models", config.default_base_url.trim_end_matches('/'))
     };
 
     let response = client
@@ -433,10 +431,7 @@ async fn try_dynamic_discovery(
         return Err(format!("HTTP {}", response.status()));
     }
 
-    let json: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| e.to_string())?;
+    let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
 
     // OpenAI-compatible format: { "data": [{ "id": "model-name", ... }] }
     let models: Vec<CloudModelEntry> = json

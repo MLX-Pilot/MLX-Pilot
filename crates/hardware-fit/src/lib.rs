@@ -172,21 +172,27 @@ pub async fn detect_system(fresh: bool) -> Result<HardwareProfile, String> {
 
 async fn detect_nvidia() -> Result<Vec<GpuInfo>, String> {
     // Try nvidia-smi with common paths
-    let binary = find_binary(&["nvidia-smi", "nvidia-smi.exe"], &[
-        // Common Windows paths
-        "C:\\Windows\\System32\\nvidia-smi.exe",
-        "C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe",
-    ]);
+    let binary = find_binary(
+        &["nvidia-smi", "nvidia-smi.exe"],
+        &[
+            // Common Windows paths
+            "C:\\Windows\\System32\\nvidia-smi.exe",
+            "C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe",
+        ],
+    );
 
     let binary = match binary {
         Some(b) => b,
         None => return Err("nvidia-smi not found".to_string()),
     };
 
-    let output = run_cmd(&binary, &[
-        "--query-gpu=name,memory.total,compute_cap",
-        "--format=csv,noheader,nounits",
-    ])
+    let output = run_cmd(
+        &binary,
+        &[
+            "--query-gpu=name,memory.total,compute_cap",
+            "--format=csv,noheader,nounits",
+        ],
+    )
     .await?;
 
     let mut gpus = Vec::new();
@@ -228,22 +234,23 @@ async fn detect_nvidia() -> Result<Vec<GpuInfo>, String> {
 // ── AMD detection ──────────────────────────────────────────────────────────
 
 async fn detect_amd() -> Result<Vec<GpuInfo>, String> {
-    let binary = find_binary(&["rocm-smi", "rocm-smi.exe"], &[
-        "C:\\Program Files\\AMD\\ROCm\\bin\\rocm-smi.exe",
-        "/opt/rocm/bin/rocm-smi",
-    ]);
+    let binary = find_binary(
+        &["rocm-smi", "rocm-smi.exe"],
+        &[
+            "C:\\Program Files\\AMD\\ROCm\\bin\\rocm-smi.exe",
+            "/opt/rocm/bin/rocm-smi",
+        ],
+    );
 
     let binary = match binary {
         Some(b) => b,
         None => return Err("rocm-smi not found".to_string()),
     };
 
-    let output = run_cmd(&binary, &[
-        "--showproductname",
-        "--showmeminfo",
-        "vram",
-        "--csv",
-    ])
+    let output = run_cmd(
+        &binary,
+        &["--showproductname", "--showmeminfo", "vram", "--csv"],
+    )
     .await?;
 
     let mut gpus = Vec::new();
@@ -257,7 +264,10 @@ async fn detect_amd() -> Result<Vec<GpuInfo>, String> {
         if parts.len() < 3 {
             continue;
         }
-        let name = parts.get(1).map(|s| s.to_string()).unwrap_or_else(|| format!("AMD GPU {}", i));
+        let name = parts
+            .get(1)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("AMD GPU {}", i));
         let vram_mib_str = parts.get(2).map(|s| s.to_string()).unwrap_or_default();
         let vram_mib: f64 = vram_mib_str
             .trim_end_matches(" MiB")
@@ -295,12 +305,16 @@ async fn detect_amd_sysfs() -> Result<Vec<GpuInfo>, String> {
         if let Ok(vendor) = std::fs::read_to_string(&vendor_path) {
             if vendor.trim() == "0x1002" {
                 // AMD vendor ID
-                let name = std::fs::read_to_string(format!("/sys/class/drm/card{}/device/product_name", i))
-                    .unwrap_or_else(|_| format!("AMD GPU {}", i));
+                let name = std::fs::read_to_string(format!(
+                    "/sys/class/drm/card{}/device/product_name",
+                    i
+                ))
+                .unwrap_or_else(|_| format!("AMD GPU {}", i));
                 // Try to read VRAM from mem_info_vram_total
-                let vram_bytes = std::fs::read_to_string(
-                    format!("/sys/class/drm/card{}/device/mem_info_vram_total", i),
-                )
+                let vram_bytes = std::fs::read_to_string(format!(
+                    "/sys/class/drm/card{}/device/mem_info_vram_total",
+                    i
+                ))
                 .ok()
                 .and_then(|s| s.trim().parse::<u64>().ok())
                 .unwrap_or(0);
@@ -332,7 +346,9 @@ async fn detect_apple_silicon() -> Result<Vec<GpuInfo>, String> {
     }
 
     // Check if Apple Silicon via sysctl
-    let model = run_cmd("sysctl", &["-n", "hw.model"]).await.unwrap_or_default();
+    let model = run_cmd("sysctl", &["-n", "hw.model"])
+        .await
+        .unwrap_or_default();
     let is_apple_silicon = model.contains("Mac") && !model.contains("Intel");
 
     if !is_apple_silicon {
@@ -427,9 +443,8 @@ fn get_cpu_name() -> String {
 fn get_cpu_count() -> usize {
     use sysinfo::System;
     let sys = System::new_all();
-    sys.physical_core_count().unwrap_or_else(|| {
-        sys.cpus().len()
-    })
+    sys.physical_core_count()
+        .unwrap_or_else(|| sys.cpus().len())
 }
 
 fn get_ram_gb() -> f64 {
@@ -450,63 +465,149 @@ pub fn estimate_gpu_bandwidth(gpu_name: &str, backend: &str) -> f64 {
     let name_lower = gpu_name.to_lowercase();
 
     // NVIDIA RTX 50 series
-    if name_lower.contains("rtx 5090") { return 1792.0; }
-    if name_lower.contains("rtx 5080") { return 960.0; }
-    if name_lower.contains("rtx 5070") { return 672.0; }
-    if name_lower.contains("rtx 5060") { return 448.0; }
+    if name_lower.contains("rtx 5090") {
+        return 1792.0;
+    }
+    if name_lower.contains("rtx 5080") {
+        return 960.0;
+    }
+    if name_lower.contains("rtx 5070") {
+        return 672.0;
+    }
+    if name_lower.contains("rtx 5060") {
+        return 448.0;
+    }
 
     // NVIDIA RTX 40 series
-    if name_lower.contains("rtx 4090") { return 1008.0; }
-    if name_lower.contains("rtx 4080") { return 716.0; }
-    if name_lower.contains("rtx 4070") { return 504.0; }
-    if name_lower.contains("rtx 4060") { return 272.0; }
+    if name_lower.contains("rtx 4090") {
+        return 1008.0;
+    }
+    if name_lower.contains("rtx 4080") {
+        return 716.0;
+    }
+    if name_lower.contains("rtx 4070") {
+        return 504.0;
+    }
+    if name_lower.contains("rtx 4060") {
+        return 272.0;
+    }
 
     // NVIDIA RTX 30 series
-    if name_lower.contains("rtx 3090") { return 936.0; }
-    if name_lower.contains("rtx 3080") { return 760.0; }
-    if name_lower.contains("rtx 3070") { return 448.0; }
-    if name_lower.contains("rtx 3060") { return 360.0; }
+    if name_lower.contains("rtx 3090") {
+        return 936.0;
+    }
+    if name_lower.contains("rtx 3080") {
+        return 760.0;
+    }
+    if name_lower.contains("rtx 3070") {
+        return 448.0;
+    }
+    if name_lower.contains("rtx 3060") {
+        return 360.0;
+    }
 
     // NVIDIA RTX 20 series
-    if name_lower.contains("rtx 2080") { return 448.0; }
-    if name_lower.contains("rtx 2070") { return 448.0; }
-    if name_lower.contains("rtx 2060") { return 336.0; }
+    if name_lower.contains("rtx 2080") {
+        return 448.0;
+    }
+    if name_lower.contains("rtx 2070") {
+        return 448.0;
+    }
+    if name_lower.contains("rtx 2060") {
+        return 336.0;
+    }
 
     // NVIDIA GTX series
-    if name_lower.contains("gtx 1080") { return 320.0; }
-    if name_lower.contains("gtx 1070") { return 256.0; }
-    if name_lower.contains("gtx 1060") { return 192.0; }
-    if name_lower.contains("gtx 1660") { return 192.0; }
-    if name_lower.contains("gtx 1650") { return 128.0; }
+    if name_lower.contains("gtx 1080") {
+        return 320.0;
+    }
+    if name_lower.contains("gtx 1070") {
+        return 256.0;
+    }
+    if name_lower.contains("gtx 1060") {
+        return 192.0;
+    }
+    if name_lower.contains("gtx 1660") {
+        return 192.0;
+    }
+    if name_lower.contains("gtx 1650") {
+        return 128.0;
+    }
 
     // NVIDIA data center
-    if name_lower.contains("h100") { return 3350.0; }
-    if name_lower.contains("h200") { return 4800.0; }
-    if name_lower.contains("a100") { return 2039.0; }
-    if name_lower.contains("a6000") { return 768.0; }
-    if name_lower.contains("v100") { return 900.0; }
-    if name_lower.contains("t4") { return 320.0; }
+    if name_lower.contains("h100") {
+        return 3350.0;
+    }
+    if name_lower.contains("h200") {
+        return 4800.0;
+    }
+    if name_lower.contains("a100") {
+        return 2039.0;
+    }
+    if name_lower.contains("a6000") {
+        return 768.0;
+    }
+    if name_lower.contains("v100") {
+        return 900.0;
+    }
+    if name_lower.contains("t4") {
+        return 320.0;
+    }
 
     // AMD Radeon
-    if name_lower.contains("7900 xtx") { return 960.0; }
-    if name_lower.contains("7900 xt") { return 800.0; }
-    if name_lower.contains("7800 xt") { return 624.0; }
-    if name_lower.contains("7700 xt") { return 432.0; }
-    if name_lower.contains("7600") { return 288.0; }
-    if name_lower.contains("6950 xt") { return 576.0; }
-    if name_lower.contains("6900 xt") { return 512.0; }
-    if name_lower.contains("6800 xt") { return 512.0; }
-    if name_lower.contains("6800") { return 512.0; }
-    if name_lower.contains("6700 xt") { return 384.0; }
-    if name_lower.contains("6600") { return 224.0; }
-    if name_lower.contains("9070") { return 640.0; }
-    if name_lower.contains("9060") { return 432.0; }
+    if name_lower.contains("7900 xtx") {
+        return 960.0;
+    }
+    if name_lower.contains("7900 xt") {
+        return 800.0;
+    }
+    if name_lower.contains("7800 xt") {
+        return 624.0;
+    }
+    if name_lower.contains("7700 xt") {
+        return 432.0;
+    }
+    if name_lower.contains("7600") {
+        return 288.0;
+    }
+    if name_lower.contains("6950 xt") {
+        return 576.0;
+    }
+    if name_lower.contains("6900 xt") {
+        return 512.0;
+    }
+    if name_lower.contains("6800 xt") {
+        return 512.0;
+    }
+    if name_lower.contains("6800") {
+        return 512.0;
+    }
+    if name_lower.contains("6700 xt") {
+        return 384.0;
+    }
+    if name_lower.contains("6600") {
+        return 224.0;
+    }
+    if name_lower.contains("9070") {
+        return 640.0;
+    }
+    if name_lower.contains("9060") {
+        return 432.0;
+    }
 
     // AMD Instinct
-    if name_lower.contains("mi300x") { return 5300.0; }
-    if name_lower.contains("mi250x") { return 1600.0; }
-    if name_lower.contains("mi210") { return 1600.0; }
-    if name_lower.contains("mi100") { return 1200.0; }
+    if name_lower.contains("mi300x") {
+        return 5300.0;
+    }
+    if name_lower.contains("mi250x") {
+        return 1600.0;
+    }
+    if name_lower.contains("mi210") {
+        return 1600.0;
+    }
+    if name_lower.contains("mi100") {
+        return 1200.0;
+    }
 
     // Fallback by backend
     match backend {
@@ -527,7 +628,8 @@ pub fn estimate_gpu_bandwidth(gpu_name: &str, backend: &str) -> f64 {
 // ── GPU grouping ───────────────────────────────────────────────────────────
 
 pub fn group_gpus(gpus: &[GpuInfo]) -> Vec<GpuGroup> {
-    let mut groups: std::collections::BTreeMap<String, GpuGroup> = std::collections::BTreeMap::new();
+    let mut groups: std::collections::BTreeMap<String, GpuGroup> =
+        std::collections::BTreeMap::new();
     for gpu in gpus {
         let key = format!("{}|{}", gpu.name, gpu.backend);
         groups
@@ -631,19 +733,13 @@ async fn run_cmd(cmd: &str, args: &[&str]) -> Result<String, String> {
 fn find_binary(names: &[&str], extra_paths: &[&str]) -> Option<String> {
     // Try names directly first (will use PATH)
     for name in names {
-        if let Ok(output) = std::process::Command::new("which")
-            .arg(name)
-            .output()
-        {
+        if let Ok(output) = std::process::Command::new("which").arg(name).output() {
             if output.status.success() {
                 return Some(name.to_string());
             }
         }
         // Windows: try "where"
-        if let Ok(output) = std::process::Command::new("where")
-            .arg(name)
-            .output()
-        {
+        if let Ok(output) = std::process::Command::new("where").arg(name).output() {
             if output.status.success() {
                 return Some(name.to_string());
             }
