@@ -12,11 +12,53 @@ import { esc, fmtBytes, fmtNum, modelIcon } from '../core/dom.js';
 import { switchTab } from '../core/router.js';
 import { API_SLOW_TIMEOUT_MS, CURRENT_MODEL_KEY, state } from '../core/state.js';
 import { addSystemMsg } from './chat.js';
-import { capabilityBadge, ensureAgentCompatibleModel, humanizeModelLabel, isAgentPanelActive, isToolReadyModel, modelCapabilityMode, modelCapabilityReason, persistAgentModelSelection, resolveModelId, visibleModelsForCurrentPanel } from './providers.js';
+import { capabilityBadge, ensureAgentCompatibleModel, humanizeModelLabel, isAgentPanelActive, isLocalProvider, isToolReadyModel, modelCapabilityMode, modelCapabilityReason, persistAgentModelSelection, resolveModelId, visibleModelsForCurrentPanel } from './providers.js';
 import { ensureVisibleModel, saveModelCache, updateAgentWorkspaceSummary } from './runtime.js';
 // === end auto-imports ===
 
   // -- Models -------------------------------------------------
+  function descriptorFromGroup(group, model) {
+    const flags = Array.isArray(model.flags) ? model.flags : [];
+    return {
+      id: model.id,
+      name: model.label || model.id,
+      provider: model.provider || group.provider,
+      path: model.id,
+      is_available: true,
+      agent_tool_mode: flags.includes('tool_use') ? 'tool_ready' : 'chat_only',
+      agent_tool_reason: flags.includes('tool_use')
+        ? 'O provider declara suporte a tool use.'
+        : 'Modelo disponivel para chat; tool use nao foi declarado.',
+      agent_recommended: flags.includes('recommended'),
+      model_kind: group.kind,
+      model_badge: model.badge || group.kind,
+      model_group: group.provider,
+      model_group_label: group.label,
+      model_group_status: group.status,
+      context: model.context || 0,
+      flags,
+    };
+  }
+
+  function fallbackLocalGroup(installedModels) {
+    return {
+      provider: 'local',
+      kind: 'local',
+      label: 'Local',
+      status: 'active',
+      models: installedModels
+        .filter(model => model.is_available !== false)
+        .map(model => ({
+          id: model.id,
+          label: model.name || model.id,
+          provider: model.provider,
+          badge: 'local',
+          context: 0,
+          flags: model.agent_recommended ? ['recommended'] : [],
+        })),
+    };
+  }
+
   export async function loadModels({ force = false } = {}) {
     if (state.modelsLoading) return state.modelsPromise;
     if (!force && state.modelsLoaded && !state.modelsStale) return state.models;
@@ -26,11 +68,39 @@ import { ensureVisibleModel, saveModelCache, updateAgentWorkspaceSummary } from 
 
     state.modelsPromise = (async () => {
       try {
-        const models = await api('/models');
-        state.models = Array.isArray(models) ? models : [];
-        if (state.agentConfig?.model_id) ensureVisibleModel(state.agentConfig.model_id, state.agentConfig.provider);
-        if (state.currentModel) state.currentModel = resolveModelId(state.currentModel, state.agentConfig?.provider);
-        if (state.currentModel) ensureVisibleModel(state.currentModel, state.agentConfig?.provider);
+        const [installedResult, groupedResult] = await Promise.allSettled([
+          api('/models'),
+          api('/models/all', { timeoutMs: API_SLOW_TIMEOUT_MS }),
+        ]);
+        if (installedResult.status === 'rejected') throw installedResult.reason;
+
+        state.installedModels = Array.isArray(installedResult.value) ? installedResult.value : [];
+        if (groupedResult.status === 'rejected') {
+          console.warn('Unified model catalog load failed:', groupedResult.reason);
+        }
+        const returnedGroups = groupedResult.status === 'fulfilled' && Array.isArray(groupedResult.value)
+          ? groupedResult.value
+          : [];
+        state.modelGroups = returnedGroups.length
+          ? returnedGroups
+          : [fallbackLocalGroup(state.installedModels)];
+        state.models = state.modelGroups.flatMap(group =>
+          (Array.isArray(group.models) ? group.models : []).map(model => descriptorFromGroup(group, model))
+        );
+        if (state.agentConfig?.model_id && isLocalProvider(state.agentConfig.provider)) {
+          ensureVisibleModel(state.agentConfig.model_id, state.agentConfig.provider);
+        }
+        if (state.currentModel) {
+          state.currentModel = resolveModelId(state.currentModel, state.agentConfig?.provider);
+          const currentAvailable = state.models.some(model =>
+            model.id === state.currentModel && model.is_available !== false
+          );
+          if (!currentAvailable && !isLocalProvider(state.agentConfig?.provider)) {
+            state.currentModel = null;
+          } else if (state.currentModel) {
+            ensureVisibleModel(state.currentModel, state.agentConfig?.provider);
+          }
+        }
         if (state.agentConfig && (!state.agentConfig.model_id || isAgentPanelActive())) {
           void ensureAgentCompatibleModel({ persist: isAgentPanelActive() });
         }
@@ -44,6 +114,8 @@ import { ensureVisibleModel, saveModelCache, updateAgentWorkspaceSummary } from 
         console.error('Models load failed:', e);
         if (!state.modelsLoaded) {
           state.models = [];
+          state.installedModels = [];
+          state.modelGroups = [];
           renderModelPicker();
         }
         renderInstalledModels();
@@ -81,27 +153,58 @@ import { ensureVisibleModel, saveModelCache, updateAgentWorkspaceSummary } from 
       menu.innerHTML = '<div class="model-menu-item" style="pointer-events:none;color:var(--text-tertiary)">Nenhum modelo encontrado</div>';
       return;
     }
-    visibleModels.forEach(m => {
-      const badge = capabilityBadge(modelCapabilityMode(m));
-      const item = document.createElement('div');
-      item.className = 'model-menu-item' + (state.currentModel === m.id ? ' selected' : '');
-      item.dataset.model = m.id;
-      item.title = modelCapabilityReason(m);
-      item.innerHTML = `
-        <div class="model-menu-info">
-          <span class="model-menu-name">${esc(m.name || m.id)}</span>
-          <span class="model-menu-meta">${esc(m.provider || '')}</span>
-        </div>
-        <div class="model-menu-badges">
-          <span class="model-capability-badge ${badge.tone}">${badge.label}</span>
-        </div>`;
-      item.addEventListener('click', (e) => {
-        e.stopPropagation();
-        selectModel(m.id, { persistAgentConfig: isAgentPanelActive() });
-        menu.classList.add('hidden');
-      });
-      menu.appendChild(item);
+    const grouped = new Map();
+    visibleModels.forEach(model => {
+      const key = model.model_group || (model.model_kind === 'cloud' ? model.provider : 'local');
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          label: model.model_group_label || (model.model_kind === 'cloud' ? model.provider : 'Local'),
+          kind: model.model_kind || 'local',
+          status: model.model_group_status || 'active',
+          models: [],
+        });
+      }
+      grouped.get(key).models.push(model);
     });
+
+    grouped.forEach(group => {
+      const header = document.createElement('div');
+      header.className = 'model-menu-group';
+      header.innerHTML = `
+        <span>${esc(group.label)}</span>
+        <span class="model-origin-badge ${esc(group.kind)}">${group.kind === 'cloud' ? 'Cloud' : 'Local'}</span>
+        ${group.status === 'degraded' ? '<span class="model-group-status">Catalogo fallback</span>' : ''}`;
+      menu.appendChild(header);
+
+      group.models.forEach(m => {
+        const badge = capabilityBadge(modelCapabilityMode(m));
+        const item = document.createElement('div');
+        item.className = 'model-menu-item' + (state.currentModel === m.id ? ' selected' : '');
+        item.dataset.model = m.id;
+        item.title = modelCapabilityReason(m);
+        item.innerHTML = `
+          <div class="model-menu-info">
+            <span class="model-menu-name">${esc(m.name || m.id)}</span>
+            <span class="model-menu-meta">${esc(m.provider || '')}</span>
+          </div>
+          <div class="model-menu-badges">
+            <span class="model-origin-badge ${esc(m.model_badge || group.kind)}">${group.kind === 'cloud' ? 'Cloud' : 'Local'}</span>
+            <span class="model-capability-badge ${badge.tone}">${badge.label}</span>
+          </div>`;
+        item.addEventListener('click', (e) => {
+          e.stopPropagation();
+          selectModel(m.id, { persistAgentConfig: isAgentPanelActive() });
+          menu.classList.add('hidden');
+        });
+        menu.appendChild(item);
+      });
+    });
+    if (visibleModels.some(model => model.model_kind === 'cloud')) {
+      const notice = document.createElement('div');
+      notice.className = 'model-menu-cloud-notice';
+      notice.textContent = 'Modelos cloud enviam a conversa ao provider e podem gerar custos.';
+      menu.appendChild(notice);
+    }
     if (!state.currentModel && visibleModels.length > 0) {
       selectModel(visibleModels[0].id, { persistAgentConfig: isAgentPanelActive() });
     }
@@ -132,8 +235,8 @@ import { ensureVisibleModel, saveModelCache, updateAgentWorkspaceSummary } from 
         count.textContent = 'Carregando modelos...';
       } else {
         const suffix = state.modelsLoading ? ' • atualizando...' : '';
-        const toolReadyCount = state.models.filter(isToolReadyModel).length;
-        count.textContent = `${state.models.length} modelo${state.models.length !== 1 ? 's' : ''} instalado${state.models.length !== 1 ? 's' : ''} • ${toolReadyCount} Tool-ready${suffix}`;
+        const toolReadyCount = state.installedModels.filter(isToolReadyModel).length;
+        count.textContent = `${state.installedModels.length} modelo${state.installedModels.length !== 1 ? 's' : ''} instalado${state.installedModels.length !== 1 ? 's' : ''} • ${toolReadyCount} Tool-ready${suffix}`;
       }
     }
     list.innerHTML = '';
@@ -141,11 +244,11 @@ import { ensureVisibleModel, saveModelCache, updateAgentWorkspaceSummary } from 
       list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-tertiary)">Carregando modelos...</div>';
       return;
     }
-    if (state.models.length === 0) {
+    if (state.installedModels.length === 0) {
       list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-tertiary)">Nenhum modelo instalado</div>';
       return;
     }
-    state.models.forEach(m => {
+    state.installedModels.forEach(m => {
       const badge = capabilityBadge(modelCapabilityMode(m));
       const available = m.is_available !== false;
       const item = document.createElement('div');

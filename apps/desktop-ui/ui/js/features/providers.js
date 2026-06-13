@@ -11,7 +11,7 @@ import { api } from '../core/api.js';
 import { esc } from '../core/dom.js';
 import { AGENT_LOCAL_PROVIDER_CHOICE, AGENT_PROVIDER_PROFILE_TYPES, CLOUD_PROVIDER_DEFAULTS, state } from '../core/state.js';
 import { selectModel } from './models.js';
-import { ensureVisibleModel, hydrateModelShell, updateAgentWorkspaceSummary } from './runtime.js';
+import { hydrateModelShell, updateAgentWorkspaceSummary } from './runtime.js';
 import { activateAgentProviderProfile } from './settings.js';
 // === end auto-imports ===
 
@@ -83,6 +83,8 @@ import { activateAgentProviderProfile } from './settings.js';
     if (raw.startsWith('ollama::') || fallbackPrefix === 'ollama::') return 'ollama';
     if (raw.startsWith('mlx::') || fallbackPrefix === 'mlx::') return 'mlx';
     if (raw.startsWith('llama::') || fallbackPrefix === 'llama::') return 'llamacpp';
+    const cloudPrefix = raw.match(/^([a-z0-9_-]+):/i)?.[1];
+    if (cloudPrefix && CLOUD_PROVIDER_DEFAULTS[cloudPrefix]) return cloudPrefix;
     return fallback || state.agentConfig?.provider || state.provider || 'configured';
   }
 
@@ -192,14 +194,18 @@ import { activateAgentProviderProfile } from './settings.js';
 
   export function defaultCloudModelForProvider(provider) {
     const normalized = normalizeProviderId(provider);
+    const catalogModel = state.models.find(model =>
+      normalizeProviderId(model.provider) === normalized && model.is_available !== false
+    );
     if (
       state.agentConfig
       && normalizeProviderId(state.agentConfig.provider) === normalized
       && String(state.agentConfig.model_id || '').trim()
     ) {
-      return state.agentConfig.model_id;
+      const configured = resolveModelId(state.agentConfig.model_id, normalized);
+      if (state.models.some(model => model.id === configured)) return configured;
     }
-    return CLOUD_PROVIDER_DEFAULTS[normalized]?.modelId || '';
+    return catalogModel?.id || CLOUD_PROVIDER_DEFAULTS[normalized]?.modelId || '';
   }
 
   function slugifyProfileId(value) {
@@ -472,6 +478,22 @@ import { activateAgentProviderProfile } from './settings.js';
       });
     });
 
+    state.modelGroups
+      .filter(group => group.kind === 'cloud' && group.configured !== false)
+      .forEach(group => {
+        const providerId = normalizeProviderId(group.provider);
+        if (!providerId || options.some(option => option.provider === providerId)) return;
+        options.push({
+          value: `cloud:${providerId}`,
+          label: group.label || providerDisplayName(providerId),
+          provider: providerId,
+          kind: 'cloud',
+          profileId: null,
+          modelId: defaultCloudModelForProvider(providerId),
+          description: 'Provider cloud configurado no cofre.',
+        });
+      });
+
     state.agentProviderOptions = options;
     return options;
   }
@@ -532,22 +554,7 @@ import { activateAgentProviderProfile } from './settings.js';
   }
 
   export function visibleModelsForCurrentPanel() {
-    const availableModels = state.models.filter(model => model.is_available !== false);
-    if (!isAgentPanelActive()) return availableModels;
-    const providerOption = selectedAgentProviderOption();
-    if (providerOption?.kind === 'cloud') {
-      const cloudModelId = resolveModelId(
-        providerOption.modelId || state.agentConfig?.model_id || '',
-        providerOption.provider,
-      );
-      if (!cloudModelId) return [];
-      const current = state.models.find((model) => model.id === cloudModelId);
-      return current ? [current] : [];
-    }
-    // Show every local model — tool-readiness is surfaced as a badge, never used to hide models.
-    return availableModels.filter((model) =>
-      isLocalProvider(model.provider || inferModelProvider(model.id, ''))
-    );
+    return state.models.filter(model => model.is_available !== false);
   }
 
   export function capabilityBadge(mode) {
@@ -564,6 +571,9 @@ import { activateAgentProviderProfile } from './settings.js';
     if (inferredProvider === 'ollama') return raw.replace(/^ollama::/i, '');
     if (inferredProvider === 'mlx') return raw.replace(/^mlx::/i, '');
     if (inferredProvider === 'llamacpp') return raw.replace(/^llama::/i, '');
+    if (!isLocalProvider(inferredProvider)) {
+      return raw.replace(new RegExp(`^${inferredProvider}:`, 'i'), '');
+    }
     return raw;
   }
 
@@ -604,8 +614,21 @@ import { activateAgentProviderProfile } from './settings.js';
   export async function ensureAgentCompatibleModel({ persist = false } = {}) {
     const providerOption = selectedAgentProviderOption();
     if (providerOption?.kind === 'cloud') {
-      if (providerOption.modelId) {
-        ensureVisibleModel(providerOption.modelId, providerOption.provider);
+      const requestedId = resolveModelId(
+        providerOption.modelId || state.agentConfig?.model_id || '',
+        providerOption.provider,
+      );
+      const selected = state.models.find(model =>
+        model.id === requestedId
+        && normalizeProviderId(model.provider) === normalizeProviderId(providerOption.provider)
+      ) || state.models.find(model =>
+        normalizeProviderId(model.provider) === normalizeProviderId(providerOption.provider)
+        && model.is_available !== false
+      );
+      if (!selected) return false;
+      if (activeAgentModelId() !== selected.id) {
+        selectModel(selected.id);
+        if (persist) await persistAgentModelSelection(selected.id);
       }
       return true;
     }

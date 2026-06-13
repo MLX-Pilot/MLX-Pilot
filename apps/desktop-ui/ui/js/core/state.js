@@ -31,7 +31,7 @@ export const CLOUD_PROVIDER_DEFAULTS = {
   },
   deepseek: {
     label: 'DeepSeek',
-    modelId: 'deepseek-chat',
+    modelId: 'deepseek-v4-flash',
     secretKeys: ['DEEPSEEK_API_KEY'],
   },
   groq: {
@@ -94,6 +94,8 @@ export const cachedCurrentModel = readStorage(CURRENT_MODEL_KEY);
 export const state = {
   daemonUrl: window.__MLX_PILOT_DAEMON_URL__ || readStorage('mlxPilotDaemonUrl') || DEFAULT_DAEMON_URL,
   models: Array.isArray(cachedModels) ? cachedModels : [],
+  installedModels: [],
+  modelGroups: [],
   modelsLoaded: Array.isArray(cachedModels) && cachedModels.length > 0,
   modelsLoading: false,
   modelsStale: true,

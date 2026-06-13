@@ -104,6 +104,7 @@ async function flush(count = 4) {
 
 function createFixture({
   modelsResponse,
+  modelGroupsResponse,
   cachedModels,
   cachedCurrentModel,
   agentConfigResponse,
@@ -123,6 +124,30 @@ function createFixture({
   const hiddenEnvironment = environmentResponseHidden ?? { variables: [] };
   const revealedEnvironment = environmentResponseRevealed ?? hiddenEnvironment;
   let downloads = Array.isArray(initialDownloads) ? [...initialDownloads] : [];
+  const installedModels = modelsResponse ?? [
+    {
+      id: "ollama::qwen3.5:9b",
+      name: "qwen3.5:9b [Ollama]",
+      provider: "ollama",
+      is_available: true,
+      agent_tool_mode: "tool_ready",
+      agent_recommended: true,
+    },
+    {
+      id: "ollama::deepseek-r1:8b",
+      name: "deepseek-r1:8b [Ollama]",
+      provider: "ollama",
+      is_available: true,
+      agent_tool_mode: "chat_only",
+    },
+    {
+      id: "mlx-community/Qwen3-4B-4bit",
+      name: "Qwen3 4B [MLX]",
+      provider: "mlx",
+      is_available: true,
+      agent_tool_mode: "chat_only",
+    },
+  ];
 
   const dom = new JSDOM(indexHtml, {
     url: "http://localhost/",
@@ -254,30 +279,27 @@ function createFixture({
     }
 
     if (path === "/models") {
-      return jsonResponse(modelsResponse ?? [
-        {
-          id: "ollama::qwen3.5:9b",
-          name: "qwen3.5:9b [Ollama]",
-          provider: "ollama",
-          is_available: true,
-          agent_tool_mode: "tool_ready",
-          agent_recommended: true,
-        },
-        {
-          id: "ollama::deepseek-r1:8b",
-          name: "deepseek-r1:8b [Ollama]",
-          provider: "ollama",
-          is_available: true,
-          agent_tool_mode: "chat_only",
-        },
-        {
-          id: "mlx-community/Qwen3-4B-4bit",
-          name: "Qwen3 4B [MLX]",
-          provider: "mlx",
-          is_available: true,
-          agent_tool_mode: "chat_only",
-        },
-      ]);
+      return jsonResponse(installedModels);
+    }
+
+    if (path === "/models/all") {
+      return jsonResponse(modelGroupsResponse ?? [{
+        provider: "local",
+        kind: "local",
+        label: "Local",
+        configured: true,
+        status: "active",
+        models: installedModels
+          .filter((model) => model.is_available !== false)
+          .map((model) => ({
+            id: model.id,
+            label: model.name,
+            provider: model.provider,
+            badge: "local",
+            context: 0,
+            flags: model.agent_tool_mode === "tool_ready" ? ["tool_use"] : [],
+          })),
+      }]);
     }
 
     if (requestUrl.pathname === "/catalog/models") {
@@ -752,6 +774,92 @@ test("agent mantem modelo local chat-only visivel e selecionado", async () => {
       && entry.method === "POST"
       && entry.body?.model_id === "qwen3.5:9b"
     ));
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("seletor mostra modelos locais e DeepSeek configurado sem depender do provider ativo", async () => {
+  const fixture = createFixture({
+    agentConfigResponse: {
+      provider: "ollama",
+      model_id: "qwen3.5:9b",
+      execution_mode: "full",
+      approval_mode: "ask",
+    },
+    modelGroupsResponse: [
+      {
+        provider: "local",
+        kind: "local",
+        label: "Local",
+        configured: true,
+        status: "active",
+        models: [{
+          id: "ollama::qwen3.5:9b",
+          label: "qwen3.5:9b [Ollama]",
+          provider: "ollama",
+          badge: "local",
+          context: 0,
+          flags: ["tool_use"],
+        }],
+      },
+      {
+        provider: "deepseek",
+        kind: "cloud",
+        label: "DeepSeek",
+        configured: true,
+        status: "degraded",
+        models: [
+          {
+            id: "deepseek:deepseek-v4-flash",
+            label: "DeepSeek V4 Flash",
+            provider: "deepseek",
+            badge: "cloud",
+            context: 1000000,
+            flags: ["fast", "tool_use"],
+          },
+          {
+            id: "deepseek:deepseek-v4-pro",
+            label: "DeepSeek V4 Pro",
+            provider: "deepseek",
+            badge: "cloud",
+            context: 1000000,
+            flags: ["reasoning", "tool_use"],
+          },
+        ],
+      },
+    ],
+  });
+
+  try {
+    await flush(12);
+    fixture.document.querySelector('.tab[data-panel="agent"]')?.click();
+    fixture.document.getElementById("model-picker-btn")?.click();
+    await flush(3);
+
+    const menu = fixture.document.getElementById("model-menu");
+    assert.match(menu?.textContent || "", /Local/);
+    assert.match(menu?.textContent || "", /DeepSeek/);
+    assert.match(menu?.textContent || "", /DeepSeek V4 Flash/);
+    assert.match(menu?.textContent || "", /DeepSeek V4 Pro/);
+    assert.doesNotMatch(menu?.textContent || "", /deepseek-chat/i);
+
+    const proItem = [...(menu?.querySelectorAll("[data-model]") || [])]
+      .find((item) => item.dataset.model === "deepseek:deepseek-v4-pro");
+    proItem?.click();
+    await flush(5);
+
+    assert.ok(fixture.fetchCalls.some((entry) =>
+      entry.path === "/agent/config"
+      && entry.method === "POST"
+      && entry.body?.provider === "deepseek"
+      && entry.body?.model_id === "deepseek-v4-pro"
+    ));
+
+    fixture.document.querySelector('.tab[data-panel="discover"]')?.click();
+    fixture.document.querySelector('.discover-tab[data-dtab="installed"]')?.click();
+    await flush(3);
+    assert.doesNotMatch(fixture.document.getElementById("installed-list")?.textContent || "", /DeepSeek V4/);
   } finally {
     fixture.cleanup();
   }
