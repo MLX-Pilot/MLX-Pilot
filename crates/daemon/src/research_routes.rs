@@ -122,18 +122,27 @@ async fn resolve_research_model(
         if local.iter().any(|m| m.id == id || m.path == id) {
             return Ok(id.to_string());
         }
-        // Not local — try each configured cloud provider, qualify with provider prefix
-        if let Some(ref vault) = state.vault {
-            for cfg in crate::model_catalog::cloud_provider_configs() {
-                if crate::model_catalog::get_api_key(Some(vault), &cfg).is_some() {
-                    return Ok(format!("{}:{}", cfg.provider_key, id));
-                }
-            }
-        }
-        return Err(format!(
-            "Modelo '{}' não encontrado. Verifique se ele está carregado ou disponível como cloud.",
-            id
-        ));
+        // Not found locally — reject with clear message.
+        // User must either load the model locally or use an explicit cloud prefix
+        // (e.g., deepseek:deepseek-chat).
+        let configured_clouds: Vec<String> = if let Some(ref vault) = state.vault {
+            crate::model_catalog::cloud_provider_configs()
+                .iter()
+                .filter(|cfg| crate::model_catalog::get_api_key(Some(vault), cfg).is_some())
+                .map(|cfg| format!("{}:<modelo>", cfg.provider_key))
+                .collect()
+        } else {
+            vec![]
+        };
+        let hint = if !configured_clouds.is_empty() {
+            format!(
+                ". Use um prefixo cloud ({}) ou carregue o modelo localmente.",
+                configured_clouds.join(", ")
+            )
+        } else {
+            ". Carregue um modelo local ou configure uma API key cloud no cofre.".to_string()
+        };
+        return Err(format!("Modelo '{}' não encontrado{}", id, hint));
     }
 
     // "auto" — pick first available local model
