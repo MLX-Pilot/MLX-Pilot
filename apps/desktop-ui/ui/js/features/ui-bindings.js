@@ -7,7 +7,7 @@
  */
 
 // === auto-imports (generated — do not edit) ===
-import { activeAgentModelId, activeModelId, addMetrics, bootSequence, createNewSession, ensureAgentChatReady, ensureRuntimeReadyForModel, inferModelProvider, loadSessions, pushConsoleEntry, renderAgentChatEmptyState, renderAssistantOutput, resizeTextArea, saveDaemonConfig, sendAgentMessageStreaming, sendChatMessage, updateAgentWorkspaceSummary } from '../../app.js';
+import { activeAgentModelId, activeModelId, bootSequence, ensureAgentChatReady, ensureRuntimeReadyForModel, inferModelProvider, pushConsoleEntry, renderAgentChatEmptyState, resizeTextArea, saveDaemonConfig, updateAgentWorkspaceSummary } from '../../app.js';
 import { api } from '../core/api.js';
 import { esc } from '../core/dom.js';
 import { renderMarkdown } from '../core/markdown.js';
@@ -15,6 +15,7 @@ import { switchTab } from '../core/router.js';
 import { state } from '../core/state.js';
 import { runAgentShortcut } from './agent-shortcuts.js';
 import { loadAudit, loadChannels, renderAuditFeed } from './agent.js';
+import { addMetrics, createNewSession, loadSessions, renderAssistantOutput, sendAgentMessageStreaming, sendChatMessage } from './chat.js';
 import { clearConsole, consoleText, loadConsoleSnapshot, saveEnvironment } from './console.js';
 // === end auto-imports ===
 

@@ -22,6 +22,7 @@ const MODULE_FILES = [
   "js/core/dom.js",
   "js/core/markdown.js",
   "app.js",
+  "js/features/chat.js",
   "js/features/agent.js",
   "js/features/console.js",
   "js/core/router.js",
