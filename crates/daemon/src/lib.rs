@@ -1257,32 +1257,168 @@ async fn rename_model(
 }
 
 async fn delete_model(
+    State(state): State<AppState>,
     AxumPath(model_id): AxumPath<String>,
+    Query(query): Query<DeleteModelQuery>,
 ) -> Result<Json<ModelMutationResponse>, AppError> {
-    let model_id_raw = model_id.trim();
-    let model_id = normalize_mlx_model_id(model_id_raw);
-    validate_local_model_id(&model_id)?;
-
-    let models_dir = AppConfig::load_settings().apply_env().models_dir;
-    let target = models_dir.join(&model_id);
-    if !target.exists() || !target.is_dir() {
-        return Err(AppError::NotFound(format!(
-            "modelo local '{}' nao encontrado",
-            model_id
-        )));
+    let qualified_id = model_id.trim();
+    if qualified_id.is_empty() {
+        return Err(AppError::Provider(ProviderError::InvalidRequest {
+            details: "model_id nao pode ser vazio".to_string(),
+        }));
     }
 
-    fs::remove_dir_all(&target).map_err(|source_err| {
+    let provider = query
+        .provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_ascii_lowercase)
+        .or_else(|| infer_model_provider(qualified_id));
+
+    let removed_id = match provider.as_deref() {
+        Some("ollama") => {
+            let provider_id = strip_model_provider_prefix(qualified_id, "ollama");
+            state.ollama_provider.delete_model(provider_id).await?;
+            provider_id.to_string()
+        }
+        Some("huggingface") => {
+            state
+                .catalog
+                .remove_installed_model(qualified_id)
+                .await?
+                .directory_name
+        }
+        Some("mlx") => {
+            let provider_id = strip_model_provider_prefix(qualified_id, "mlx");
+            let models = state.mlx_provider.list_models().await?;
+            remove_known_filesystem_model(
+                provider_id,
+                &models,
+                &state.mlx_provider.config().models_dir,
+            )?;
+            provider_id.to_string()
+        }
+        Some("llamacpp" | "llama" | "llama.cpp") => {
+            let provider_id = strip_model_provider_prefix(qualified_id, "llama");
+            let models = state.llamacpp_provider.list_models().await?;
+            remove_known_filesystem_model(
+                provider_id,
+                &models,
+                &state.llamacpp_provider.config().models_dir,
+            )?;
+            provider_id.to_string()
+        }
+        Some(other) => {
+            return Err(AppError::Provider(ProviderError::InvalidRequest {
+                details: format!("provider '{}' nao suporta remocao local", other),
+            }));
+        }
+        None => {
+            let installed = state.catalog.list_installed_models().await?;
+            if installed
+                .iter()
+                .any(|entry| entry.directory_name == qualified_id)
+            {
+                state
+                    .catalog
+                    .remove_installed_model(qualified_id)
+                    .await?
+                    .directory_name
+            } else {
+                let local_id = normalize_mlx_model_id(qualified_id);
+                validate_local_model_id(&local_id)?;
+                let models = state.mlx_provider.list_models().await?;
+                remove_known_filesystem_model(
+                    &local_id,
+                    &models,
+                    &state.mlx_provider.config().models_dir,
+                )?;
+                local_id
+            }
+        }
+    };
+
+    Ok(Json(ModelMutationResponse {
+        message: format!("modelo '{}' removido", removed_id),
+        model_id: removed_id,
+    }))
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct DeleteModelQuery {
+    provider: Option<String>,
+}
+
+fn infer_model_provider(model_id: &str) -> Option<String> {
+    let (prefix, _) = model_id.split_once("::")?;
+    match prefix.trim().to_ascii_lowercase().as_str() {
+        "ollama" => Some("ollama".to_string()),
+        "mlx" => Some("mlx".to_string()),
+        "llama" | "llamacpp" | "llama.cpp" => Some("llamacpp".to_string()),
+        _ => None,
+    }
+}
+
+fn strip_model_provider_prefix<'a>(model_id: &'a str, expected: &str) -> &'a str {
+    let Some((prefix, raw_id)) = model_id.split_once("::") else {
+        return model_id.trim();
+    };
+    if prefix.trim().eq_ignore_ascii_case(expected)
+        || (expected == "llama"
+            && matches!(
+                prefix.trim().to_ascii_lowercase().as_str(),
+                "llamacpp" | "llama.cpp"
+            ))
+    {
+        return raw_id.trim();
+    }
+    model_id.trim()
+}
+
+fn remove_known_filesystem_model(
+    model_id: &str,
+    models: &[ModelDescriptor],
+    models_root: &FsPath,
+) -> Result<(), AppError> {
+    let model = models
+        .iter()
+        .find(|entry| entry.id == model_id)
+        .ok_or_else(|| AppError::NotFound(format!("modelo local '{}' nao encontrado", model_id)))?;
+    let target = FsPathBuf::from(&model.path);
+    let root = models_root.canonicalize().map_err(|source| {
         AppError::Provider(ProviderError::Io {
-            context: format!("falha ao apagar modelo local '{}'", model_id),
-            source: source_err,
+            context: format!(
+                "falha resolvendo pasta de modelos '{}'",
+                models_root.display()
+            ),
+            source,
+        })
+    })?;
+    let resolved = target.canonicalize().map_err(|source| {
+        AppError::Provider(ProviderError::Io {
+            context: format!("falha resolvendo modelo local '{}'", target.display()),
+            source,
         })
     })?;
 
-    Ok(Json(ModelMutationResponse {
-        message: format!("modelo '{}' removido", model_id),
-        model_id,
-    }))
+    if resolved == root || !resolved.starts_with(&root) {
+        return Err(AppError::Provider(ProviderError::InvalidRequest {
+            details: "o modelo resolvido esta fora da pasta local permitida".to_string(),
+        }));
+    }
+
+    if resolved.is_dir() {
+        fs::remove_dir_all(&resolved)
+    } else {
+        fs::remove_file(&resolved)
+    }
+    .map_err(|source| {
+        AppError::Provider(ProviderError::Io {
+            context: format!("falha ao apagar modelo local '{}'", model_id),
+            source,
+        })
+    })
 }
 
 fn validate_local_model_id(model_id: &str) -> Result<(), AppError> {
@@ -1392,6 +1528,7 @@ async fn chat_stream(
 mod tests {
     use super::{
         annotate_agent_model_compatibility, find_workspace_root_from, has_workspace_marker,
+        infer_model_provider, strip_model_provider_prefix,
     };
     use mlx_ollama_core::ModelDescriptor;
     use std::fs;
@@ -1450,6 +1587,22 @@ mod tests {
             agent_recommended: false,
         });
         assert_eq!(chat_only.agent_tool_mode.as_deref(), Some("chat_only"));
+    }
+
+    #[test]
+    fn resolves_provider_prefixes_for_model_deletion() {
+        assert_eq!(
+            infer_model_provider("ollama::dfebrero/Llama-3.2:latest").as_deref(),
+            Some("ollama")
+        );
+        assert_eq!(
+            strip_model_provider_prefix("ollama::dfebrero/Llama-3.2:latest", "ollama"),
+            "dfebrero/Llama-3.2:latest"
+        );
+        assert_eq!(
+            strip_model_provider_prefix("llama::models/qwen.gguf", "llama"),
+            "models/qwen.gguf"
+        );
     }
 }
 

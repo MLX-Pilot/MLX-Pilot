@@ -323,6 +323,29 @@ impl CatalogService {
             })?
     }
 
+    pub async fn remove_installed_model(
+        &self,
+        directory_name: &str,
+    ) -> Result<InstalledCatalogModel, CatalogError> {
+        let requested = directory_name.trim();
+        let installed = self.list_installed_models().await?;
+        let model = installed
+            .into_iter()
+            .find(|entry| entry.directory_name == requested)
+            .ok_or_else(|| {
+                CatalogError::NotFound(format!("modelo de catalogo '{}' nao encontrado", requested))
+            })?;
+
+        tokio::fs::remove_dir_all(&model.path)
+            .await
+            .map_err(|source| CatalogError::Io {
+                context: format!("removendo modelo {}", model.path.display()),
+                source,
+            })?;
+
+        Ok(model)
+    }
+
     async fn execute_download(&self, job_id: String, cancel_flag: Arc<AtomicBool>) {
         self.patch_job(&job_id, |job| {
             job.status = DownloadStatus::Running;
@@ -1106,5 +1129,36 @@ mod tests {
             "RedHatAI/Llama-3.2-1B-Instruct-FP8-dynamic"
         );
         assert_eq!(models[0].source, HF_SOURCE_ID);
+    }
+
+    #[tokio::test]
+    async fn removes_only_a_discovered_catalog_model() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let directory_name = "huggingface--acme-model";
+        let model_dir = root.path().join(directory_name);
+        fs::create_dir_all(&model_dir).expect("model directory");
+        fs::write(model_dir.join("config.json"), b"{}").expect("config");
+        fs::write(model_dir.join("model.safetensors"), b"weights").expect("weights");
+
+        let service = CatalogService::new(CatalogConfig {
+            hf_api_base: "http://127.0.0.1:9".to_string(),
+            hf_token: None,
+            downloads_root: root.path().to_path_buf(),
+            search_limit_default: 10,
+            download_timeout: Duration::from_secs(1),
+        })
+        .expect("catalog service");
+
+        let removed = service
+            .remove_installed_model(directory_name)
+            .await
+            .expect("remove installed model");
+
+        assert_eq!(removed.directory_name, directory_name);
+        assert!(!model_dir.exists());
+        assert!(matches!(
+            service.remove_installed_model("../outside").await,
+            Err(CatalogError::NotFound(_))
+        ));
     }
 }
