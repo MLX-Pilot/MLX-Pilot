@@ -17,6 +17,7 @@ const indexHtml = await readFile(new URL("../ui/index.html", import.meta.url), "
 // app.js bootstrap last) and write every import/export statement on a SINGLE
 // line, so the line-based stripper below stays exact.
 const MODULE_FILES = [
+  "js/core/state.js",
   "js/core/dom.js",
   "js/core/markdown.js",
   "app.js",
