@@ -159,6 +159,22 @@
               </span>
               Comparar
             </button>
+            <button class="tab" data-panel="research" role="tab">
+              <span class="tab-icon">
+                <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <circle cx="10" cy="10" r="7" /><path d="M10 6v8M6 10h8" />
+                </svg>
+              </span>
+              Pesquisa
+            </button>
+            <button class="tab" data-panel="hardware" role="tab">
+              <span class="tab-icon">
+                <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <rect x="2" y="4" width="16" height="10" rx="2" /><path d="M6 18h8M10 14v4" />
+                </svg>
+              </span>
+              Hardware
+            </button>
             <button class="tab" data-panel="settings" role="tab">
               <span class="tab-icon">
                 <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -623,6 +639,132 @@
           </div>
         </section>
 
+        <!-- RESEARCH PANEL (Wave 5) -->
+        <section class="panel" id="panel-research">
+          <div class="wave1-root">
+            <div class="wave1-head">
+              <div>
+                <h2>Deep Research</h2>
+                <p class="sub">Pesquisa iterativa multi-etapa com relatório visual</p>
+              </div>
+            </div>
+            <div class="wave1-card" id="research-form-card">
+              <div style="margin-bottom:10px">
+                <label class="wave1-label" for="research-query">Pergunta de pesquisa</label>
+                <textarea id="research-query" class="wave1-textarea" rows="2" placeholder="Ex: Quais são as principais técnicas de fine-tuning para LLMs em 2025?"></textarea>
+              </div>
+              <div class="wave1-toolbar">
+                <select id="research-model" class="wave1-select"><option value="auto">Auto (detectar)</option></select>
+                <select id="research-rounds" class="wave1-select">
+                  <option value="2">2 rounds</option>
+                  <option value="3" selected>3 rounds</option>
+                  <option value="5">5 rounds</option>
+                  <option value="8">8 rounds</option>
+                </select>
+                <select id="research-provider" class="wave1-select">
+                  <option value="">Busca: Auto</option>
+                  <option value="duckduckgo">DuckDuckGo</option>
+                  <option value="brave">Brave</option>
+                </select>
+                <select id="research-category" class="wave1-select">
+                  <option value="">Categoria: Auto</option>
+                  <option value="product">Produto</option>
+                  <option value="comparison">Comparação</option>
+                  <option value="howto">Guia</option>
+                  <option value="factcheck">Fact-check</option>
+                </select>
+              </div>
+              <button class="wave1-btn" id="btn-research-start">
+                <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="7"/><path d="M10 6v8M6 10h8"/></svg>
+                Iniciar Pesquisa
+              </button>
+              <span id="research-start-msg" style="font-size:12px;color:var(--text-tertiary);margin-left:10px"></span>
+            </div>
+            <!-- Active jobs -->
+            <div id="research-jobs-section" style="display:none;margin-top:14px">
+              <h3 style="font-size:13px;color:var(--text-secondary);margin-bottom:8px">Pesquisas em Andamento</h3>
+              <div id="research-jobs-list"></div>
+            </div>
+            <!-- Library -->
+            <div class="wave1-head" style="margin-top:20px">
+              <h3 style="font-size:14px;color:var(--text-secondary)">Biblioteca de Pesquisas</h3>
+              <button class="wave1-btn ghost sm" id="btn-refresh-library">Atualizar</button>
+            </div>
+            <div id="research-library-list">
+              <div class="wave1-empty">Nenhuma pesquisa concluída</div>
+            </div>
+            <!-- Report viewer -->
+            <div id="research-report-viewer" style="display:none;margin-top:12px">
+              <div class="wave1-toolbar">
+                <button class="wave1-btn ghost sm" id="btn-report-back">&larr; Biblioteca</button>
+                <button class="wave1-btn ghost sm" id="btn-report-pdf">Exportar PDF</button>
+                <button class="wave1-btn ghost sm" id="btn-report-html">Exportar HTML</button>
+                <button class="wave1-btn ghost sm" id="btn-report-spinoff">Abrir no Chat</button>
+                <button class="wave1-btn danger sm" id="btn-report-delete">Excluir</button>
+              </div>
+              <iframe id="research-report-iframe" style="width:100%;height:70vh;border:1px solid var(--border);border-radius:8px;background:var(--bg-elevated)"></iframe>
+            </div>
+          </div>
+        </section>
+
+        <!-- HARDWARE PANEL (Wave 5) -->
+        <section class="panel" id="panel-hardware">
+          <div class="wave1-root">
+            <div class="wave1-head">
+              <div>
+                <h2>Hardware &amp; Model Fit</h2>
+                <p class="sub">Detecte seu hardware e descubra quais modelos rodam bem</p>
+              </div>
+              <button class="wave1-btn" id="btn-hw-scan">
+                <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7"/><path d="M10 6v8M6 10h8"/></svg>
+                Escanear Hardware
+              </button>
+            </div>
+            <!-- Hardware cards -->
+            <div class="wave1-grid" id="hw-cards">
+              <div class="wave1-empty">Clique em "Escanear Hardware" para detectar seu sistema</div>
+            </div>
+            <!-- Manual simulator -->
+            <details style="margin-top:14px;font-size:12px;color:var(--text-secondary)">
+              <summary style="cursor:pointer">Simulador de Hardware Manual</summary>
+              <div class="wave1-toolbar" style="margin-top:8px">
+                <input type="number" id="hw-sim-gpu-count" class="wave1-input" placeholder="GPUs" min="0" style="width:80px" />
+                <input type="number" id="hw-sim-vram" class="wave1-input" placeholder="VRAM (GB)" min="0" step="0.5" style="width:100px" />
+                <input type="number" id="hw-sim-ram" class="wave1-input" placeholder="RAM (GB)" min="0" step="1" style="width:100px" />
+                <select id="hw-sim-backend" class="wave1-select">
+                  <option value="">Backend: Auto</option>
+                  <option value="cuda">CUDA</option>
+                  <option value="rocm">ROCm</option>
+                  <option value="metal">Metal</option>
+                  <option value="cpu">CPU-only</option>
+                </select>
+                <button class="wave1-btn ghost sm" id="btn-hw-sim-apply">Aplicar</button>
+              </div>
+            </details>
+            <!-- Model table -->
+            <div id="hw-models-section" style="display:none;margin-top:16px">
+              <div class="wave1-toolbar">
+                <h3 style="font-size:13px;color:var(--text-secondary);margin:0">Modelos Ranqueados</h3>
+                <select id="hw-sort" class="wave1-select" style="width:auto"><option value="score">Score</option><option value="speed">Velocidade</option><option value="quality">Qualidade</option><option value="vram">VRAM</option></select>
+                <select id="hw-use-case" class="wave1-select" style="width:auto"><option value="general">Geral</option><option value="coding">Código</option><option value="creative">Criativo</option><option value="analysis">Análise</option></select>
+              </div>
+              <div style="overflow-x:auto">
+                <table style="width:100%;border-collapse:collapse;font-size:12px">
+                  <thead><tr style="text-align:left;border-bottom:1px solid var(--border,#2a2a44)">
+                    <th style="padding:8px">Modelo</th><th style="padding:8px">Params</th><th style="padding:8px">Quant</th><th style="padding:8px">VRAM</th><th style="padding:8px">Tok/s</th><th style="padding:8px">Fit</th><th style="padding:8px">Score</th><th style="padding:8px"></th>
+                  </tr></thead>
+                  <tbody id="hw-model-table-body"><tr><td colspan="8" class="wave1-empty">Escaneie o hardware primeiro</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+            <!-- Serve profiles -->
+            <div id="hw-profiles-section" style="display:none;margin-top:14px">
+              <h3 style="font-size:13px;color:var(--text-secondary);margin-bottom:8px">Perfis de Serve</h3>
+              <div id="hw-profiles-list" style="display:flex;gap:10px;flex-wrap:wrap"></div>
+            </div>
+          </div>
+        </section>
+
         <!-- SETTINGS PANEL -->
         <section class="panel" id="panel-settings">
           <div class="panel-scroll">
@@ -736,5 +878,6 @@
 
   <script src="app.js"></script>
   <script src="wave1.js"></script>
+  <script src="wave5.js"></script>
 </body>
 </html>
