@@ -23,6 +23,8 @@ use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
+use url::Url;
+use urlencoding;
 
 // ── Error type ──────────────────────────────────────────────────────────────
 
@@ -130,9 +132,10 @@ pub trait SearchProvider: Send + Sync {
 
 // ── DuckDuckGo provider (free, no API key) ──────────────────────────────────
 ///
-/// Uses the DuckDuckGo Instant Answer API (api.duckduckgo.com) which is free
-/// and does not require an API key. Returns web results, related topics, and
-/// the abstract/summary for the query.
+/// Scrapes the no-JS DuckDuckGo HTML search page (`html.duckduckgo.com/html/`)
+/// which returns real web search results — unlike the Instant Answer API
+/// (`api.duckduckgo.com`) that only returns Wikipedia-style abstracts.
+/// Same approach Odysseus uses as the free fallback provider.
 
 pub struct DuckDuckGoProvider {
     client: Client,
@@ -142,27 +145,35 @@ impl DuckDuckGoProvider {
     pub fn new() -> Self {
         Self {
             client: Client::builder()
-                .timeout(Duration::from_secs(10))
-                .user_agent("Mozilla/5.0 (compatible; MLXPilot/1.0)")
+                .timeout(Duration::from_secs(15))
+                .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
                 .build()
                 .expect("Failed to build HTTP client"),
         }
     }
 
-    /// Strip HTML tags from a DuckDuckGo result text.
-    fn strip_html(text: &str) -> String {
-        // Simple HTML tag stripping: remove <a> tags and other HTML tags.
-        let mut out = String::new();
-        let mut in_tag = false;
-        for ch in text.chars() {
-            match ch {
-                '<' => in_tag = true,
-                '>' => in_tag = false,
-                _ if !in_tag => out.push(ch),
-                _ => {}
+    /// Resolve a DuckDuckGo redirect URL (`//duckduckgo.com/l/?uddg=...`) to the real target.
+    fn resolve_redirect(href: &str) -> String {
+        let href = href.trim();
+        // Already a direct URL
+        if href.starts_with("http://") || href.starts_with("https://") {
+            return href.to_string();
+        }
+        // Protocol-relative redirect: //duckduckgo.com/l/?uddg=<encoded_url>
+        if href.starts_with("//") {
+            let full = format!("https:{}", href);
+            if let Ok(parsed) = url::Url::parse(&full) {
+                // Extract the `uddg` query parameter (DuckDuckGo redirect target)
+                for (key, value) in parsed.query_pairs() {
+                    if key == "uddg" {
+                        if let Ok(decoded) = urlencoding::decode(&value) {
+                            return decoded.into_owned();
+                        }
+                    }
+                }
             }
         }
-        out.trim().to_string()
+        href.to_string()
     }
 }
 
@@ -183,22 +194,18 @@ impl SearchProvider for DuckDuckGoProvider {
 
     async fn search(&self, query: &SearchQuery) -> Result<Vec<SearchResult>, SearchError> {
         let max_results = query.max_results.unwrap_or(5).min(20);
-        let safe = if query.safe_search.unwrap_or(true) { "1" } else { "-1" };
+        // kp: 1 = strict, -1 = moderate, -2 = off
+        let safe_param = if query.safe_search.unwrap_or(true) { "1" } else { "-1" };
 
+        // ── Primary: scrape html.duckduckgo.com (same as Odysseus) ──────
         let response = self
             .client
-            .get("https://api.duckduckgo.com/")
-            .query(&[
-                ("q", query.q.as_str()),
-                ("format", "json"),
-                ("no_html", "1"),
-                ("skip_disambig", "1"),
-                ("p", safe),
-            ])
-            .header("Accept", "application/json")
+            .get("https://html.duckduckgo.com/html/")
+            .query(&[("q", query.q.as_str()), ("kp", safe_param)])
+            .header("Accept", "text/html")
             .send()
             .await
-            .map_err(|e| SearchError::Network(e.to_string()))?;
+            .map_err(|e| SearchError::Network(format!("DuckDuckGo request failed: {e}")))?;
 
         if !response.status().is_success() {
             return Err(SearchError::Provider(format!(
@@ -207,104 +214,55 @@ impl SearchProvider for DuckDuckGoProvider {
             )));
         }
 
-        let json: serde_json::Value = response
-            .json()
+        let html_text = response
+            .text()
             .await
-            .map_err(|e| SearchError::Provider(e.to_string()))?;
+            .map_err(|e| SearchError::Provider(format!("DuckDuckGo read error: {e}")))?;
+
+        let document = Html::parse_document(&html_text);
+        let result_sel = Selector::parse(".result").map_err(|e| SearchError::Provider(e.to_string()))?;
+        let link_sel = Selector::parse(".result__a").map_err(|e| SearchError::Provider(e.to_string()))?;
+        let snippet_sel = Selector::parse(".result__snippet").map_err(|e| SearchError::Provider(e.to_string()))?;
 
         let mut results = Vec::new();
 
-        // 1. Direct result links (official sites, etc.)
-        if let Some(direct_results) = json.get("Results").and_then(|v| v.as_array()) {
-            for entry in direct_results {
-                if results.len() >= max_results {
-                    break;
-                }
-                let url = entry
-                    .get("FirstURL")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let text = entry
-                    .get("Text")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                if url.is_empty() {
+        for result_el in document.select(&result_sel) {
+            if results.len() >= max_results {
+                break;
+            }
+            // Extract link
+            let (title, url) = if let Some(link) = result_el.select(&link_sel).next() {
+                let raw_href = link.value().attr("href").unwrap_or("");
+                let resolved = Self::resolve_redirect(raw_href);
+                let text = link.text().collect::<Vec<_>>().join(" ").trim().to_string();
+                if resolved.is_empty() || resolved == raw_href && !resolved.starts_with("http") {
                     continue;
                 }
-                results.push(SearchResult {
-                    title: Self::strip_html(&text),
-                    url,
-                    snippet: String::new(),
-                    provider: "duckduckgo".to_string(),
-                });
+                (text, resolved)
+            } else {
+                continue;
+            };
+
+            // Extract snippet
+            let snippet = result_el
+                .select(&snippet_sel)
+                .next()
+                .map(|s| s.text().collect::<Vec<_>>().join(" ").trim().to_string())
+                .unwrap_or_default();
+
+            if url.is_empty() {
+                continue;
             }
+
+            results.push(SearchResult {
+                title: if title.is_empty() { url.clone() } else { title },
+                url,
+                snippet,
+                provider: "duckduckgo".to_string(),
+            });
         }
 
-        // 2. Related topics
-        if let Some(related) = json.get("RelatedTopics").and_then(|v| v.as_array()) {
-            for entry in related {
-                if results.len() >= max_results {
-                    break;
-                }
-                let url = entry
-                    .get("FirstURL")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let text = entry
-                    .get("Text")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                if url.is_empty() {
-                    continue;
-                }
-                results.push(SearchResult {
-                    title: Self::strip_html(&text),
-                    url,
-                    snippet: String::new(),
-                    provider: "duckduckgo".to_string(),
-                });
-            }
-        }
-
-        // 3. Abstract (Wikipedia-style summary) — as a bonus result
-        if results.len() < max_results {
-            if let Some(abstract_url) = json
-                .get("AbstractURL")
-                .and_then(|v| v.as_str())
-                .filter(|u| !u.is_empty())
-            {
-                let abstract_text = json
-                    .get("AbstractText")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let heading = json
-                    .get("Heading")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let title = if heading.is_empty() {
-                    abstract_text.chars().take(80).collect()
-                } else {
-                    heading
-                };
-                results.push(SearchResult {
-                    title,
-                    url: abstract_url.to_string(),
-                    snippet: if abstract_text.len() > 200 {
-                        abstract_text.chars().take(200).collect()
-                    } else {
-                        abstract_text
-                    },
-                    provider: "duckduckgo".to_string(),
-                });
-            }
-        }
-
+        debug!("DuckDuckGo HTML search: {} results for '{}'", results.len(), query.q);
         Ok(results)
     }
 }
