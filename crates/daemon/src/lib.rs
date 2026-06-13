@@ -916,25 +916,42 @@ async fn update_config(Json(new_config): Json<AppConfig>) -> Result<Json<AppConf
 async fn list_models(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ModelDescriptor>>, AppError> {
-    let models = list_chat_models(&state)
-        .await?
-        .into_iter()
-        .map(annotate_agent_model_compatibility)
-        .collect::<Vec<_>>();
+    let models = list_models_with_catalog(&state).await?;
     Ok(Json(models))
 }
 
 async fn list_models_all(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<model_catalog::ModelGroup>>, AppError> {
-    let local = list_chat_models(&state)
-        .await?
-        .into_iter()
-        .map(annotate_agent_model_compatibility)
-        .collect::<Vec<_>>();
+    let local = list_models_with_catalog(&state).await?;
     let airgap = false; // TODO: read from config/settings
     let groups = model_catalog::build_unified_models(local, state.vault.as_deref(), airgap).await;
     Ok(Json(groups))
+}
+
+async fn list_models_with_catalog(state: &AppState) -> Result<Vec<ModelDescriptor>, AppError> {
+    let mut models = list_chat_models(state).await?;
+    for installed in state.catalog.list_installed_models().await? {
+        let path = installed.path.display().to_string();
+        if models.iter().any(|model| model.path == path) {
+            continue;
+        }
+        models.push(ModelDescriptor {
+            id: installed.directory_name,
+            name: format!("{} [Hugging Face]", installed.model_id),
+            provider: installed.source,
+            path,
+            is_available: false,
+            agent_tool_mode: None,
+            agent_tool_reason: None,
+            agent_recommended: false,
+        });
+    }
+    models.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    Ok(models
+        .into_iter()
+        .map(annotate_agent_model_compatibility)
+        .collect())
 }
 
 async fn agent_plugins(
@@ -1946,15 +1963,19 @@ async fn list_chat_models(state: &AppState) -> Result<Vec<ModelDescriptor>, Prov
             let (mlx_result, llamacpp_result, ollama_result) =
                 tokio::join!(mlx_future, llamacpp_future, ollama_future);
 
-            let mlx_models = match mlx_result {
-                Ok(Ok(models)) => models,
-                Ok(Err(error)) => {
-                    warn!("mlx unavailable while listing models in auto mode: {error}");
-                    Vec::new()
-                }
-                Err(_) => {
-                    warn!("mlx model listing timed out in auto mode");
-                    Vec::new()
+            let mlx_models = if cfg!(target_os = "windows") {
+                Vec::new()
+            } else {
+                match mlx_result {
+                    Ok(Ok(models)) => models,
+                    Ok(Err(error)) => {
+                        warn!("mlx unavailable while listing models in auto mode: {error}");
+                        Vec::new()
+                    }
+                    Err(_) => {
+                        warn!("mlx model listing timed out in auto mode");
+                        Vec::new()
+                    }
                 }
             };
 
@@ -2038,7 +2059,16 @@ async fn list_chat_models(state: &AppState) -> Result<Vec<ModelDescriptor>, Prov
 fn annotate_agent_model_compatibility(mut model: ModelDescriptor) -> ModelDescriptor {
     let combined = format!("{} {}", model.id, model.name).to_ascii_lowercase();
 
-    let (mode, reason, recommended) = if model.provider.trim().eq_ignore_ascii_case("ollama") {
+    let (mode, reason, recommended) = if !model.is_available {
+        (
+            Some("unavailable".to_string()),
+            Some(
+                "modelo instalado, mas o provider necessario nao esta disponivel nesta plataforma"
+                    .to_string(),
+            ),
+            false,
+        )
+    } else if model.provider.trim().eq_ignore_ascii_case("ollama") {
         if is_embedding_or_vision_model(&combined) {
             (
                 Some("chat_only".to_string()),

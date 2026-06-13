@@ -388,7 +388,7 @@ import { loadAgentConfig, loadDaemonConfig } from './settings.js';
     const degraded = phase === 'degraded';
     const starting = phase === 'starting'
       || ['checking', 'downloading', 'installing', 'updating', 'validating'].includes(phase);
-    const label = online ? 'Online' : degraded ? 'Degradado' : starting ? 'Iniciando' : 'Offline';
+    const label = online ? 'Online' : degraded ? 'Online limitado' : starting ? 'Iniciando' : 'Offline';
     const badge = document.getElementById('status-badge');
     if (badge) {
       badge.innerHTML = `<span class="badge-dot ${online ? 'online' : 'offline'}"></span><span>${label}</span>`;

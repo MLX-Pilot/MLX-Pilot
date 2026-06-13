@@ -24,6 +24,9 @@ pub struct ProviderStartupStatus {
     pub external_server_detected: Option<bool>,
     pub external_server_version: Option<String>,
     pub external_server_pid: Option<u32>,
+    pub system_executable_path: Option<String>,
+    pub system_client_version: Option<String>,
+    pub system_payload_valid: Option<bool>,
     pub gpu_expected: Option<bool>,
     pub gpu_detected: Option<bool>,
     pub gpu_name: Option<String>,
@@ -48,6 +51,9 @@ impl ProviderStartupStatus {
             external_server_detected: None,
             external_server_version: None,
             external_server_pid: None,
+            system_executable_path: None,
+            system_client_version: None,
+            system_payload_valid: None,
             gpu_expected: None,
             gpu_detected: None,
             gpu_name: None,
@@ -185,7 +191,7 @@ impl StartupCoordinator {
             };
             let ollama_task = tokio::spawn(async move {
                 if let Err(error) = ollama.prepare_runtime(selected_ollama_model).await {
-                    warn!(%error, "managed Ollama startup failed");
+                    warn!(%error, "Ollama startup failed");
                 }
             });
 
@@ -303,6 +309,9 @@ fn ollama_provider_view(status: &OllamaRuntimeStatus) -> ProviderStartupStatus {
         external_server_detected: Some(status.external_server_detected),
         external_server_version: status.external_server_version.clone(),
         external_server_pid: status.external_server_pid,
+        system_executable_path: status.system_executable_path.clone(),
+        system_client_version: status.system_client_version.clone(),
+        system_payload_valid: status.system_payload_valid,
         gpu_expected: Some(status.gpu.expected),
         gpu_detected: Some(status.gpu.detected),
         gpu_name: status.gpu.name.clone(),

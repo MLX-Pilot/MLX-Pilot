@@ -82,6 +82,12 @@ pub struct OllamaRuntimeStatus {
     pub external_server_detected: bool,
     pub external_server_version: Option<String>,
     pub external_server_pid: Option<u32>,
+    #[serde(default)]
+    pub system_executable_path: Option<String>,
+    #[serde(default)]
+    pub system_client_version: Option<String>,
+    #[serde(default)]
+    pub system_payload_valid: Option<bool>,
     pub gpu: GpuStatus,
     pub selected_model: Option<String>,
     pub model_available: Option<bool>,
@@ -114,6 +120,9 @@ impl Default for OllamaRuntimeStatus {
             external_server_detected: false,
             external_server_version: None,
             external_server_pid: None,
+            system_executable_path: None,
+            system_client_version: None,
+            system_payload_valid: None,
             gpu: GpuStatus::default(),
             selected_model: None,
             model_available: None,
@@ -335,15 +344,39 @@ impl OllamaRuntime {
 
         let gpu = discover_nvidia_gpu().await;
         let external = detect_external_ollama(&self.client, &self.cfg.base_url).await;
+        let system = detect_system_ollama().await;
         self.update_status(|status| {
             status.gpu = gpu.clone();
             status.external_server_detected = external.detected;
             status.external_server_version = external.version.clone();
             status.external_server_pid = external.pid;
+            status.system_executable_path = system
+                .as_ref()
+                .map(|runtime| runtime.executable.display().to_string());
+            status.system_client_version = system
+                .as_ref()
+                .and_then(|runtime| runtime.client_version.clone());
+            status.system_payload_valid = system.as_ref().map(|runtime| runtime.payload_valid);
             status.step = "checking".to_string();
-            status.message = "Verificando instalacao e processos do Ollama".to_string();
+            status.message = match system.as_ref() {
+                Some(runtime) if runtime.payload_valid => {
+                    "Instalacao do Ollama encontrada no sistema".to_string()
+                }
+                Some(runtime) => format!(
+                    "Ollama {} encontrado, mas a instalacao esta incompleta",
+                    runtime
+                        .client_version
+                        .as_deref()
+                        .unwrap_or("sem versao detectavel")
+                ),
+                None => "Verificando instalacao e processos do Ollama".to_string(),
+            };
         })
         .await;
+        let system_executable_log = system
+            .as_ref()
+            .map(|runtime| runtime.executable.display().to_string())
+            .unwrap_or_else(|| "none".to_string());
         info!(
             gpu_expected = gpu.expected,
             gpu_name = gpu.name.as_deref().unwrap_or("none"),
@@ -351,21 +384,40 @@ impl OllamaRuntime {
             external_server_detected = external.detected,
             external_server_pid = external.pid.unwrap_or_default(),
             external_server_version = external.version.as_deref().unwrap_or("none"),
+            system_executable = %system_executable_log,
+            system_client_version = system
+                .as_ref()
+                .and_then(|runtime| runtime.client_version.as_deref())
+                .unwrap_or("none"),
+            system_payload_valid = system
+                .as_ref()
+                .map(|runtime| runtime.payload_valid)
+                .unwrap_or(false),
             "Ollama runtime discovery completed"
         );
 
-        let executable = match self.valid_active_runtime().await {
-            Ok(Some(runtime)) => runtime,
-            Ok(None) if self.cfg.auto_install => self.install_or_update().await?,
+        let (executable, process_origin) = match self.valid_active_runtime().await {
+            Ok(Some(runtime)) => (runtime, "managed"),
+            Ok(None) if system.as_ref().is_some_and(|runtime| runtime.payload_valid) => {
+                let runtime = system.as_ref().expect("valid system runtime payload");
+                self.update_status(|status| {
+                    status.executable_path = Some(runtime.executable.display().to_string());
+                    status.message = "Usando a instalacao existente do Ollama".to_string();
+                })
+                .await;
+                (runtime.executable.clone(), "system")
+            }
+            Ok(None) if self.cfg.auto_install => {
+                (self.install_or_update(system.as_ref()).await?, "managed")
+            }
             Ok(None) => {
                 return Err(ProviderError::Unavailable {
-                    details: "runtime Ollama gerenciado ausente e instalacao automatica desativada"
-                        .to_string(),
+                    details: unavailable_system_runtime_message(system.as_ref()),
                 })
             }
             Err(error) if self.cfg.auto_install => {
                 warn!("runtime Ollama ativo invalido, preparando substituto: {error}");
-                self.install_or_update().await?
+                (self.install_or_update(system.as_ref()).await?, "managed")
             }
             Err(error) => return Err(error),
         };
@@ -377,8 +429,23 @@ impl OllamaRuntime {
             });
         }
 
-        self.start_and_validate(&executable, selected_model, false)
-            .await
+        let startup = self
+            .start_and_validate(&executable, selected_model, false, process_origin)
+            .await;
+        if process_origin == "system"
+            && self.cfg.auto_install
+            && startup.as_ref().is_err_and(is_incompatible_server_version)
+        {
+            warn!(
+                error = %startup.as_ref().expect_err("incompatible system runtime"),
+                "system Ollama server version is incompatible; preparing isolated runtime"
+            );
+            let managed = self.install_or_update(system.as_ref()).await?;
+            return self
+                .start_and_validate(&managed, selected_model, false, "managed")
+                .await;
+        }
+        startup
     }
 
     async fn reset_status(&self, selected_model: Option<String>) {
@@ -449,7 +516,10 @@ impl OllamaRuntime {
         Ok(Some(executable))
     }
 
-    async fn install_or_update(&self) -> Result<PathBuf, ProviderError> {
+    async fn install_or_update(
+        &self,
+        system: Option<&SystemOllama>,
+    ) -> Result<PathBuf, ProviderError> {
         let lock_path = self.cfg.root.join("install.lock");
         let lock = OpenOptions::new()
             .create(true)
@@ -497,7 +567,18 @@ impl OllamaRuntime {
         })?;
         let archive_path = staging.join("ollama.zip.part");
 
-        if let Err(error) = self.download_archive(&url, &archive_path).await {
+        let download_message = system
+            .and_then(|runtime| runtime.client_version.as_deref())
+            .map(|version| {
+                format!(
+                    "Preparando runtime isolado; instalacao do sistema {version} esta incompleta"
+                )
+            })
+            .unwrap_or_else(|| "Baixando runtime isolado do Ollama".to_string());
+        if let Err(error) = self
+            .download_archive(&url, &archive_path, &download_message)
+            .await
+        {
             let _ = fs::remove_dir_all(&staging);
             let _ = lock.unlock();
             return Err(error);
@@ -506,7 +587,7 @@ impl OllamaRuntime {
         self.update_status(|status| {
             status.phase = RuntimePhase::Installing;
             status.step = "installing".to_string();
-            status.message = "Instalando o motor local".to_string();
+            status.message = "Preparando runtime isolado do Ollama".to_string();
             status.can_cancel = true;
             status.progress_percent = None;
         })
@@ -609,11 +690,17 @@ impl OllamaRuntime {
         Ok(executable)
     }
 
-    async fn download_archive(&self, url: &str, destination: &Path) -> Result<(), ProviderError> {
+    async fn download_archive(
+        &self,
+        url: &str,
+        destination: &Path,
+        message: &str,
+    ) -> Result<(), ProviderError> {
+        let message = message.to_string();
         self.update_status(|status| {
             status.phase = RuntimePhase::Downloading;
             status.step = "downloading".to_string();
-            status.message = "Atualizando o motor local".to_string();
+            status.message = message;
             status.can_cancel = true;
             status.progress_percent = None;
             status.bytes_downloaded = 0;
@@ -682,6 +769,7 @@ impl OllamaRuntime {
         executable: &Path,
         selected_model: Option<&str>,
         recovery: bool,
+        process_origin: &'static str,
     ) -> Result<(), ProviderError> {
         self.ensure_not_cancelled()?;
         self.stop_owned_process().await;
@@ -745,7 +833,7 @@ impl OllamaRuntime {
         }
 
         let child = command.spawn().map_err(|source| ProviderError::Io {
-            context: format!("iniciando Ollama gerenciado em {}", executable.display()),
+            context: format!("iniciando Ollama em {}", executable.display()),
             source,
         })?;
         let pid = child.id().ok_or_else(|| ProviderError::Unavailable {
@@ -776,15 +864,15 @@ impl OllamaRuntime {
         info!(
             executable = %executable.display(),
             pid,
-            process_origin = "managed",
+            process_origin,
             base_url = %self.cfg.base_url,
             models_dir = %self.cfg.models_dir.display(),
             recovery,
-            "started managed Ollama process"
+            "started Ollama process"
         );
         self.update_status(|status| {
             status.pid = Some(pid);
-            status.process_origin = "managed".to_string();
+            status.process_origin = process_origin.to_string();
             status.executable_path = Some(executable.display().to_string());
         })
         .await;
@@ -826,7 +914,13 @@ impl OllamaRuntime {
                 status.recovery_attempted = true;
             })
             .await;
-            return Box::pin(self.start_and_validate(executable, selected_model, true)).await;
+            return Box::pin(self.start_and_validate(
+                executable,
+                selected_model,
+                true,
+                process_origin,
+            ))
+            .await;
         }
         if gpu_expected && !gpu_detected {
             return Err(ProviderError::Unavailable {
@@ -839,6 +933,14 @@ impl OllamaRuntime {
         }
 
         let version = api_version(&self.client, &self.cfg.base_url).await?;
+        if !version_is_compatible(&version) {
+            return Err(ProviderError::Unavailable {
+                details: format!(
+                    "servidor Ollama iniciou na versao {version}, fora do intervalo compativel {}",
+                    self.status.read().await.compatible_range
+                ),
+            });
+        }
         self.persist_last_validation().await;
         self.update_status(|status| {
             status.phase = RuntimePhase::Ready;
@@ -1362,6 +1464,103 @@ struct ExternalOllama {
     pid: Option<u32>,
 }
 
+#[derive(Debug)]
+struct SystemOllama {
+    executable: PathBuf,
+    client_version: Option<String>,
+    payload_valid: bool,
+}
+
+async fn detect_system_ollama() -> Option<SystemOllama> {
+    let mut fallback = None;
+    for executable in system_ollama_candidates() {
+        if !executable.is_file() {
+            continue;
+        }
+        let client_version = executable_version(&executable).await.ok();
+        let payload_valid = validate_runtime_payload(&executable).is_ok();
+        let runtime = SystemOllama {
+            executable,
+            client_version,
+            payload_valid,
+        };
+        if runtime.payload_valid {
+            return Some(runtime);
+        }
+        if fallback.is_none() {
+            fallback = Some(runtime);
+        }
+    }
+    fallback
+}
+
+fn system_ollama_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(path) = std::env::var("APP_OLLAMA_SYSTEM_EXECUTABLE") {
+        if !path.trim().is_empty() {
+            candidates.push(PathBuf::from(path));
+        }
+    }
+    if cfg!(windows) {
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            if !local.trim().is_empty() {
+                candidates.push(
+                    PathBuf::from(local)
+                        .join("Programs")
+                        .join("Ollama")
+                        .join("ollama.exe"),
+                );
+            }
+        }
+        if let Ok(program_files) = std::env::var("ProgramFiles") {
+            if !program_files.trim().is_empty() {
+                candidates.push(
+                    PathBuf::from(program_files)
+                        .join("Ollama")
+                        .join("ollama.exe"),
+                );
+            }
+        }
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        for directory in std::env::split_paths(&path) {
+            candidates.push(directory.join(executable_name()));
+        }
+    }
+
+    let mut unique = Vec::new();
+    for candidate in candidates {
+        if !unique
+            .iter()
+            .any(|existing: &PathBuf| existing == &candidate)
+        {
+            unique.push(candidate);
+        }
+    }
+    unique
+}
+
+fn unavailable_system_runtime_message(system: Option<&SystemOllama>) -> String {
+    match system {
+        Some(runtime) => format!(
+            "A instalacao do Ollama {} esta incompleta e a preparacao do runtime isolado esta desativada",
+            runtime.client_version.as_deref().unwrap_or("sem versao detectavel")
+        ),
+        None => {
+            "Ollama compativel nao encontrado e a preparacao do runtime isolado esta desativada"
+                .to_string()
+        }
+    }
+}
+
+fn is_incompatible_server_version(error: &ProviderError) -> bool {
+    matches!(
+        error,
+        ProviderError::Unavailable { details }
+            if details.starts_with("servidor Ollama iniciou na versao")
+    )
+}
+
 async fn detect_external_ollama(
     client: &reqwest::Client,
     managed_base_url: &str,
@@ -1747,6 +1946,19 @@ mod tests {
     }
 
     #[test]
+    fn isolated_runtime_fallback_only_matches_server_version_errors() {
+        let incompatible = ProviderError::Unavailable {
+            details: "servidor Ollama iniciou na versao 0.21.0, fora do intervalo compativel"
+                .to_string(),
+        };
+        let network = ProviderError::Unavailable {
+            details: "servidor Ollama nao respondeu".to_string(),
+        };
+        assert!(is_incompatible_server_version(&incompatible));
+        assert!(!is_incompatible_server_version(&network));
+    }
+
+    #[test]
     fn parses_gpu_and_cpu_discovery_lines() {
         let gpu = parse_compute_backend(
             r#"time=... level=INFO msg="inference compute" id=GPU-1 library=CUDA compute=12.0 description="NVIDIA GeForce RTX 5070" total="11.9 GiB""#,
@@ -1866,7 +2078,7 @@ mod tests {
         });
         let operation = {
             let runtime = runtime.clone();
-            tokio::spawn(async move { runtime.install_or_update().await })
+            tokio::spawn(async move { runtime.install_or_update(None).await })
         };
         sleep(Duration::from_millis(35)).await;
         runtime.cancel();

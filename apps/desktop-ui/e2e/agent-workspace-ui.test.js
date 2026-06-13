@@ -640,6 +640,46 @@ test("workspace preserves cached model shell when no installed model is returned
   }
 });
 
+test("installed Hugging Face download stays visible but cannot be selected for chat", async () => {
+  const fixture = createFixture({
+    modelsResponse: [
+      {
+        id: "huggingface--RedHatAI-Llama-3.2-1B-Instruct-FP8-dynamic",
+        name: "RedHatAI/Llama-3.2-1B-Instruct-FP8-dynamic [Hugging Face]",
+        provider: "huggingface",
+        is_available: false,
+        agent_tool_mode: "unavailable",
+        agent_tool_reason: "modelo instalado, mas sem runtime configurado",
+      },
+      {
+        id: "ollama::qwen3.5:9b",
+        name: "qwen3.5:9b [Ollama]",
+        provider: "ollama",
+        is_available: true,
+        agent_tool_mode: "tool_ready",
+      },
+    ],
+  });
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="discover"]')?.click();
+    await flush(3);
+    fixture.document.querySelector('.discover-tab[data-dtab="installed"]')?.click();
+    await flush(3);
+
+    const installedText = fixture.document.getElementById("installed-list")?.textContent || "";
+    assert.match(installedText, /RedHatAI\/Llama-3\.2-1B-Instruct-FP8-dynamic/);
+    const unavailableChat = fixture.document.querySelector(
+      '[data-act="chat"][data-id="huggingface--RedHatAI-Llama-3.2-1B-Instruct-FP8-dynamic"]'
+    );
+    assert.equal(unavailableChat?.disabled, true);
+    assert.doesNotMatch(fixture.document.getElementById("model-menu")?.textContent || "", /RedHatAI/);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test("catalog shows download percentage and supports cancellation", async () => {
   const fixture = createFixture({
     useRealTimers: true,
@@ -1156,7 +1196,7 @@ test("degraded Ollama blocks only models routed to Ollama", async () => {
     await flush(3);
     assert.ok(!fixture.fetchCalls.some((entry) => entry.path === "/chat/stream"));
     assert.match(fixture.document.getElementById("chat-messages")?.textContent || "", /Ollama nao esta pronto/);
-    assert.equal(fixture.document.getElementById("agent-daemon-status")?.textContent, "Degradado");
+    assert.equal(fixture.document.getElementById("agent-daemon-status")?.textContent, "Online limitado");
   } finally {
     fixture.cleanup();
   }

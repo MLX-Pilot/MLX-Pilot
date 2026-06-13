@@ -147,6 +147,7 @@ import { ensureVisibleModel, saveModelCache, updateAgentWorkspaceSummary } from 
     }
     state.models.forEach(m => {
       const badge = capabilityBadge(modelCapabilityMode(m));
+      const available = m.is_available !== false;
       const item = document.createElement('div');
       item.className = 'installed-item';
       const ic = modelIcon(m.id);
@@ -158,7 +159,7 @@ import { ensureVisibleModel, saveModelCache, updateAgentWorkspaceSummary } from 
           <span class="installed-capability"><span class="model-capability-badge ${badge.tone}" title="${esc(modelCapabilityReason(m))}">${badge.label}</span></span>
         </div>
         <div class="installed-actions">
-          <button class="action-btn" data-act="chat" data-id="${esc(m.id)}">Chat</button>
+          <button class="action-btn" data-act="chat" data-id="${esc(m.id)}" ${available ? '' : 'disabled title="Provider indisponivel neste sistema"'}>Chat</button>
           <button class="action-btn danger" data-act="del" data-id="${esc(m.id)}">Remover</button>
         </div>`;
       list.appendChild(item);

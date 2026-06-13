@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -11,6 +12,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
 
 const HF_SOURCE_ID: &str = "huggingface";
+const CATALOG_MANIFEST_FILE: &str = ".mlx-pilot-catalog.json";
 
 #[derive(Debug, Clone)]
 pub struct CatalogConfig {
@@ -310,6 +312,17 @@ impl CatalogService {
         jobs.get(job_id).cloned()
     }
 
+    pub async fn list_installed_models(&self) -> Result<Vec<InstalledCatalogModel>, CatalogError> {
+        let root = self.cfg.downloads_root.clone();
+        tokio::task::spawn_blocking(move || scan_installed_catalog_models(&root))
+            .await
+            .map_err(|error| {
+                CatalogError::Unavailable(format!(
+                    "falha aguardando descoberta de modelos instalados: {error}"
+                ))
+            })?
+    }
+
     async fn execute_download(&self, job_id: String, cancel_flag: Arc<AtomicBool>) {
         self.patch_job(&job_id, |job| {
             job.status = DownloadStatus::Running;
@@ -565,6 +578,15 @@ impl CatalogService {
             .await;
         }
 
+        let manifest = CatalogInstallManifest {
+            schema_version: 1,
+            source: HF_SOURCE_ID.to_string(),
+            model_id: model_id.to_string(),
+        };
+        if let Ok(bytes) = serde_json::to_vec_pretty(&manifest) {
+            let _ = tokio::fs::write(destination.join(CATALOG_MANIFEST_FILE), bytes).await;
+        }
+
         Ok(format!("download concluido em {}", destination.display()))
     }
 
@@ -660,6 +682,21 @@ pub struct DownloadJob {
     pub can_cancel: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct InstalledCatalogModel {
+    pub source: String,
+    pub model_id: String,
+    pub directory_name: String,
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CatalogInstallManifest {
+    schema_version: u32,
+    source: String,
+    model_id: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DownloadStatus {
@@ -700,6 +737,87 @@ impl std::fmt::Display for CatalogError {
 }
 
 impl std::error::Error for CatalogError {}
+
+fn scan_installed_catalog_models(root: &Path) -> Result<Vec<InstalledCatalogModel>, CatalogError> {
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+
+    let entries = fs::read_dir(root).map_err(|source| CatalogError::Io {
+        context: format!("lendo pasta de modelos {}", root.display()),
+        source,
+    })?;
+    let mut models = Vec::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let directory_name = entry.file_name().to_string_lossy().to_string();
+        let Some(fallback_id) = directory_name.strip_prefix("huggingface--") else {
+            continue;
+        };
+        if !catalog_model_payload_complete(&path) {
+            continue;
+        }
+
+        let manifest = fs::read(path.join(CATALOG_MANIFEST_FILE))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<CatalogInstallManifest>(&bytes).ok());
+        let source = manifest
+            .as_ref()
+            .map(|value| value.source.clone())
+            .unwrap_or_else(|| HF_SOURCE_ID.to_string());
+        let model_id = manifest
+            .map(|value| value.model_id)
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| fallback_id.to_string());
+
+        models.push(InstalledCatalogModel {
+            source,
+            model_id,
+            directory_name,
+            path,
+        });
+    }
+
+    models.sort_by(|left, right| {
+        left.model_id
+            .to_lowercase()
+            .cmp(&right.model_id.to_lowercase())
+    });
+    Ok(models)
+}
+
+fn catalog_model_payload_complete(root: &Path) -> bool {
+    let mut pending = vec![root.to_path_buf()];
+    let mut has_config = false;
+    let mut has_weights = false;
+
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = fs::read_dir(directory) else {
+            return false;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            if name.ends_with(".part") {
+                return false;
+            }
+            has_config |= name == "config.json";
+            has_weights |= name.ends_with(".safetensors")
+                || name.ends_with(".gguf")
+                || name == "pytorch_model.bin";
+        }
+    }
+
+    has_weights && (has_config || root.join(CATALOG_MANIFEST_FILE).is_file())
+}
 
 #[derive(Debug, Deserialize)]
 struct HfModelSearchItem {
@@ -954,5 +1072,39 @@ mod tests {
     fn progress_prefers_known_byte_total() {
         assert_eq!(calc_progress_percent(50, 100, 0, 4), 50.0);
         assert_eq!(calc_progress_percent(0, 0, 2, 4), 50.0);
+    }
+
+    #[test]
+    fn discovers_completed_huggingface_downloads_and_ignores_partial_payloads() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let complete = root
+            .path()
+            .join("huggingface--RedHatAI-Llama-3.2-1B-Instruct-FP8-dynamic");
+        fs::create_dir_all(&complete).expect("complete directory");
+        fs::write(complete.join("config.json"), b"{}").expect("config");
+        fs::write(complete.join("model.safetensors"), b"weights").expect("weights");
+        fs::write(
+            complete.join(CATALOG_MANIFEST_FILE),
+            serde_json::to_vec(&CatalogInstallManifest {
+                schema_version: 1,
+                source: HF_SOURCE_ID.to_string(),
+                model_id: "RedHatAI/Llama-3.2-1B-Instruct-FP8-dynamic".to_string(),
+            })
+            .expect("manifest"),
+        )
+        .expect("write manifest");
+
+        let partial = root.path().join("huggingface--acme-partial");
+        fs::create_dir_all(&partial).expect("partial directory");
+        fs::write(partial.join("config.json"), b"{}").expect("partial config");
+        fs::write(partial.join("model.safetensors.part"), b"partial").expect("partial weights");
+
+        let models = scan_installed_catalog_models(root.path()).expect("scan");
+        assert_eq!(models.len(), 1);
+        assert_eq!(
+            models[0].model_id,
+            "RedHatAI/Llama-3.2-1B-Instruct-FP8-dynamic"
+        );
+        assert_eq!(models[0].source, HF_SOURCE_ID);
     }
 }

@@ -158,15 +158,18 @@ import { activateAgentProviderProfile } from './settings.js';
   export function recommendedAgentModelId() {
     const isLocal = model => isLocalProvider(model.provider || inferModelProvider(model.id, ''));
     const preferred = state.models.find(model =>
-      isToolReadyModel(model)
+      model.is_available !== false
+      && isToolReadyModel(model)
       && isLocal(model)
       && (model.agent_recommended || /qwen3\.5:9b/i.test(`${model.id || ''} ${model.name || ''}`))
     );
     if (preferred) return preferred.id;
-    const toolReady = state.models.find(model => isToolReadyModel(model) && isLocal(model));
+    const toolReady = state.models.find(model =>
+      model.is_available !== false && isToolReadyModel(model) && isLocal(model)
+    );
     if (toolReady) return toolReady.id;
     // No tool-ready model (e.g. local llama.cpp): fall back to the first available local model.
-    return state.models.find(isLocal)?.id || '';
+    return state.models.find(model => model.is_available !== false && isLocal(model))?.id || '';
   }
 
   function configuredEnvironmentKeys() {
@@ -529,7 +532,8 @@ import { activateAgentProviderProfile } from './settings.js';
   }
 
   export function visibleModelsForCurrentPanel() {
-    if (!isAgentPanelActive()) return state.models;
+    const availableModels = state.models.filter(model => model.is_available !== false);
+    if (!isAgentPanelActive()) return availableModels;
     const providerOption = selectedAgentProviderOption();
     if (providerOption?.kind === 'cloud') {
       const cloudModelId = resolveModelId(
@@ -541,12 +545,13 @@ import { activateAgentProviderProfile } from './settings.js';
       return current ? [current] : [];
     }
     // Show every local model — tool-readiness is surfaced as a badge, never used to hide models.
-    return state.models.filter((model) =>
+    return availableModels.filter((model) =>
       isLocalProvider(model.provider || inferModelProvider(model.id, ''))
     );
   }
 
   export function capabilityBadge(mode) {
+    if (mode === 'unavailable') return { label: 'Indisponivel', tone: 'unknown' };
     if (mode === 'tool_ready') return { label: 'Tool-ready', tone: 'tool-ready' };
     if (mode === 'chat_only') return { label: 'Chat-only', tone: 'chat-only' };
     return { label: 'Verificar', tone: 'unknown' };
