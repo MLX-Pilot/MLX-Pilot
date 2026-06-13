@@ -30,7 +30,8 @@ Neste projeto, o daemon e um servidor HTTP local (por padrao `127.0.0.1:11435`) 
 - Integracao com Hugging Face para busca, detalhes e downloads.
 
 3. Interface desktop (Tauri)
-- App nativo com abas de Chat e Descobrir Modelos.
+- App nativo com abas de Chat, Modelos/Descobrir, Agent, IA Visual, Console, Historico, Memoria, Comparar, Deep Research, Hardware e Settings.
+- Frontend em ES Modules nativos (`ui/js/core`, `ui/js/features`, `ui/css`), servido estaticamente pelo Tauri, sem bundler/passo de build de frontend.
 
 ### Workspace Cargo
 
@@ -120,25 +121,28 @@ npm run test:e2e:agent-workspace-ui
 ## Estrutura do repositorio
 
 ```text
-mlx-ollama-pilot/
-|-- Cargo.toml
+mlx-pilot/
+|-- Cargo.toml                  # workspace Rust
 |-- crates/
-|   |-- core/
-|   |-- agent-core/
-|   |-- agent-tools/
-|   |-- agent-skills/
-|   |-- providers/
-|   |   |-- mlx/
-|   |   |-- llamacpp/
-|   |   |-- ollama/
-|   |   '-- http_llm_provider/
-|   |-- bench_agent/
-|   '-- daemon/
+|   |-- core/                   # contratos de dominio (tipos, trait ModelProvider)
+|   |-- daemon/                 # servidor HTTP (o "daemon")
+|   |-- agent-core/             # agent loop, policy, approval, audit, skills runtime
+|   |-- agent-tools/            # ferramentas (read/write/edit/exec) + sandbox de IO
+|   |-- agent-skills/           # parser/loader de skills
+|   |-- research/               # deep research (Wave 5)
+|   |-- hardware-fit/           # analise de hardware (Wave 5)
+|   |-- model-fit/              # recomendacao de modelos (Wave 5)
+|   '-- providers/
+|       |-- mlx/                # Apple Silicon
+|       |-- llamacpp/           # llama.cpp embutido
+|       |-- ollama/             # compatibilidade Ollama
+|       '-- http_llm_provider/  # remoto (OpenAI/Anthropic/...)
 |-- apps/
 |   '-- desktop-ui/
-|       |-- ui/
-|       '-- src-tauri/
-'-- scripts/
+|       |-- ui/                 # frontend estatico (ESM: js/core, js/features, css/)
+|       |-- e2e/                # testes e2e (JSDOM)
+|       '-- src-tauri/          # app Tauri (embute e sobe o daemon)
+'-- scripts/                    # conveniencia (run-desktop.sh, fetch-llama-engine.ps1, ...)
 ```
 
 | Pasta | Papel |
@@ -151,113 +155,139 @@ mlx-ollama-pilot/
 | `crates/providers/llamacpp` | Provider llama.cpp embutido. |
 | `crates/providers/ollama` | Provider Ollama. |
 | `crates/providers/http_llm_provider` | Provider HTTP generico (OpenAI-compatible/Anthropic). |
-| `crates/daemon` | Servidor HTTP principal. |
-| `apps/desktop-ui` | App desktop Tauri e frontend. |
-| `scripts` | Scripts de conveniencia (`run-desktop.sh`, `stop-daemon.sh`) para macOS/Linux. |
+| `crates/research` | Deep Research (Wave 5). |
+| `crates/hardware-fit` | Analise de hardware e fit de modelos (Wave 5). |
+| `crates/model-fit` | Heuristicas de recomendacao de modelos (Wave 5). |
+| `crates/daemon` | Servidor HTTP principal (o daemon). |
+| `apps/desktop-ui` | App desktop Tauri + frontend estatico (ESM). O app embute e sobe o daemon. |
+| `scripts` | Scripts de conveniencia (`run-desktop.sh`, `stop-daemon.sh`, `fetch-llama-engine.ps1`). |
 
 ---
 
 ## Requisitos
 
-### Requisitos gerais
+Para rodar em **modo desenvolvimento** (direto do codigo, sem gerar instalador), o
+app desktop **ja sobe o daemon embutido sozinho** — voce nao precisa de um
+terminal separado para o daemon nem da CLI do Tauri.
 
-- Rust (toolchain estavel via `rustup`)
-- Python com `mlx-lm` no ambiente usado pelo daemon (quando for usar MLX)
-- Modelos locais
+### Comum a todos os sistemas
+
+- Rust estavel via [rustup](https://rustup.rs)
+- Git
+- (Opcional) Node.js >= 18 — apenas para os atalhos `npm run ...` e os testes e2e
+- (Opcional) Python com `mlx-lm` — apenas para inferencia MLX em Apple Silicon
+
+> A CLI do Tauri (`tauri-cli`) NAO e necessaria para rodar em dev. Ela so e usada
+> para gerar instalador (`cargo tauri build`, ver "Build de release").
 
 ### Windows
-
-Instale Rust e Build Tools:
 
 ```powershell
 winget install -e --id Rustlang.Rustup
 winget install -e --id Microsoft.VisualStudio.2022.BuildTools
 ```
 
-No instalador do Visual Studio Build Tools, selecione:
-- `Desktop development with C++`
-- `MSVC v143`
-- `Windows 10/11 SDK`
+No instalador do Build Tools selecione: `Desktop development with C++`,
+`MSVC v143` e `Windows 10/11 SDK`.
 
-Validacao:
+A WebView (WebView2) ja vem no Windows 11. No Windows 10, instale o
+"Evergreen WebView2 Runtime" da Microsoft, se ainda nao tiver.
+
+Reabra o terminal e valide (se `cargo` nao estiver no PATH, rode antes
+`$env:Path += ";$env:USERPROFILE\.cargo\bin"`):
 
 ```powershell
-rustup --version
+rustc --version
 cargo --version
 ```
 
-Se `cargo` nao estiver no PATH:
+### macOS
 
-```powershell
-$env:Path += ";$env:USERPROFILE\.cargo\bin"
-cargo --version
+```bash
+xcode-select --install                                    # toolchain de build
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-Instale a CLI do Tauri:
+A WebView (WKWebView) ja faz parte do macOS — nada extra a instalar.
+Em Apple Silicon, para usar MLX, tenha Python + `mlx-lm` no ambiente do daemon.
 
-```powershell
-cargo install tauri-cli --locked
+### Linux
+
+Rust:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-### macOS/Linux
+Dependencias de sistema do Tauri 2 (WebKitGTK e afins):
 
-- Rust (`rustup`)
-- Ferramentas de build nativas do sistema
-- (Opcional) `scripts/run-desktop.sh` e `scripts/stop-daemon.sh` para fluxo rapido
+```bash
+# Debian / Ubuntu
+sudo apt update
+sudo apt install -y build-essential curl wget file pkg-config libssl-dev \
+  libgtk-3-dev libwebkit2gtk-4.1-dev librsvg2-dev \
+  libayatana-appindicator3-dev libsoup-3.0-dev
+```
+
+```bash
+# Fedora
+sudo dnf install gtk3-devel webkit2gtk4.1-devel libsoup3-devel \
+  librsvg2-devel openssl-devel curl wget file
+
+# Arch
+sudo pacman -S --needed base-devel webkit2gtk-4.1 gtk3 libsoup3 librsvg openssl
+```
 
 ---
 
-## Como rodar (desenvolvimento)
+## Como rodar (desenvolvimento, sem gerar executavel)
 
-### Opcao A: somente daemon (API)
+Clone o repositorio e entre nele:
+
+```bash
+git clone https://github.com/MLX-Pilot/MLX-Pilot.git mlx-pilot
+cd mlx-pilot
+```
+
+### App desktop completo (recomendado) — um unico comando
+
+Compila e abre a janela do app. O **daemon HTTP sobe junto, embutido** (porta
+padrao `127.0.0.1:11435`; se ela estiver ocupada, o app escolhe outra porta livre
+automaticamente). O mesmo comando funciona em **Windows, macOS e Linux**, a
+partir da raiz do repo:
+
+```bash
+cargo run -p mlx-ollama-desktop
+```
+
+Equivalente, usando os atalhos npm (de dentro de `apps/desktop-ui`):
+
+```bash
+cd apps/desktop-ui
+npm run desktop:dev
+```
+
+> A primeira compilacao baixa/compila o workspace e pode levar alguns minutos;
+> as execucoes seguintes sao rapidas.
+> Na primeira vez o daemon tenta provisionar o motor `llama.cpp` automaticamente
+> (`APP_LLAMACPP_AUTO_INSTALL=true`). Para desativar, exporte
+> `APP_LLAMACPP_AUTO_INSTALL=false` antes de rodar.
+
+### Somente o daemon (API HTTP, sem janela)
+
+Util para testar a API ou plugar outro frontend:
 
 ```bash
 cargo run -p mlx-ollama-daemon
 ```
 
-### Opcao B: daemon + desktop
+Sobe em `http://127.0.0.1:11435` — veja "Testar API rapidamente".
 
-#### Windows (PowerShell)
+### Atalho macOS/Linux (opcional)
 
-Terminal 1:
-
-```powershell
-cd g:\ai\mlx-ollama-pilot
-cargo run -p mlx-ollama-daemon
-```
-
-Terminal 2:
-
-```powershell
-cd g:\ai\mlx-ollama-pilot\apps\desktop-ui\src-tauri
-cargo tauri dev
-```
-
-Se estiver no **Developer Command Prompt for VS 2022** (`cmd`), use:
-
-```cmd
-cd /d g:\ai\mlx-ollama-pilot
-cargo run -p mlx-ollama-daemon
-```
-
-```cmd
-cd /d g:\ai\mlx-ollama-pilot\apps\desktop-ui\src-tauri
-cargo tauri dev
-```
-
-No `cmd`, `cd g:\...` pode nao trocar a unidade. Use `cd /d ...` (ou rode `g:` antes).
-
-#### macOS/Linux
-
-```bash
-./scripts/run-desktop.sh
-```
-
-Para parar o daemon:
-
-```bash
-./scripts/stop-daemon.sh
-```
+`scripts/run-desktop.sh` e `scripts/stop-daemon.sh` automatizam o fluxo no
+macOS/Linux (variaveis de ambiente, checagem de porta e logs em arquivo). Ajuste
+a variavel `ROOT_DIR` no topo do script para o caminho do seu clone antes de usar.
 
 ---
 
@@ -270,6 +300,15 @@ cargo build -p mlx-ollama-daemon --release
 ```
 
 ### Desktop (Tauri)
+
+Apenas para empacotar (nao e preciso para rodar em dev), instale a CLI do Tauri
+uma vez:
+
+```bash
+cargo install tauri-cli --locked
+```
+
+Depois gere o bundle:
 
 ```bash
 cd apps/desktop-ui/src-tauri
@@ -356,8 +395,9 @@ curl -X POST http://127.0.0.1:11435/chat \
 
 ## Resumo rapido
 
-- Backend: `crates/daemon`
+- Backend (daemon HTTP): `crates/daemon`
 - Providers: `crates/providers/*`
-- UI desktop: `apps/desktop-ui`
-- Execucao dev no Windows: dois terminais (`cargo run` + `cargo tauri dev`)
+- UI desktop (embute o daemon): `apps/desktop-ui`
+- Rodar em dev (Windows/macOS/Linux): `cargo run -p mlx-ollama-desktop` (ou `npm run desktop:dev`) — o daemon sobe junto, embutido, sem terminal separado
+- So a API HTTP: `cargo run -p mlx-ollama-daemon`
 - Distribuicao final: `cargo tauri build` + publicacao dos instaladores
