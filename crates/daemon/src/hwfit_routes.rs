@@ -6,14 +6,13 @@
 //! - `GET /api/hwfit/profiles` — serve profiles for a specific model
 //! - `POST /api/hwfit/simulate` — simulate hardware manually
 
-use axum::extract::{Query, State};
+use axum::extract::Query;
 use axum::http::StatusCode;
 use axum::Json;
-use mlx_hardware_fit::{self, GpuGroup, GpuInfo, HardwareProfile};
+use mlx_hardware_fit::{self, GpuGroup, GpuInfo};
 use mlx_model_fit::{self, FitAnalysis, ModelCard, ServeProfile};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use tracing::{debug, error, warn};
+use tracing::error;
 
 // ── Request types ──────────────────────────────────────────────────────────
 

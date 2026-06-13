@@ -2521,7 +2521,7 @@ async fn execute_install_spec(
                         kind: "download".to_string(),
                         label,
                         ok: false,
-                        code: status.as_u16().try_into().ok(),
+                        code: Some(status.as_u16().into()),
                         stdout: String::new(),
                         stderr: error.to_string(),
                         warnings: Vec::new(),
@@ -2584,7 +2584,7 @@ async fn execute_install_spec(
                 kind: "download".to_string(),
                 label,
                 ok: status.is_success(),
-                code: status.as_u16().try_into().ok(),
+                code: Some(status.as_u16().into()),
                 stdout: path.display().to_string(),
                 stderr: String::new(),
                 warnings: vec!["artifact_downloaded_only".to_string()],
@@ -3402,7 +3402,7 @@ async fn run_agent_once(
 
     let tool_registry = build_tool_registry(
         state,
-        &agent_cfg,
+        agent_cfg,
         &workspace,
         &resolved,
         request,
@@ -5286,8 +5286,10 @@ mod tests {
 
     #[test]
     fn effective_skill_enabled_respects_override_flag() {
-        let mut cfg = crate::config::AgentUiConfig::default();
-        cfg.enabled_skills = vec!["github".to_string()];
+        let mut cfg = crate::config::AgentUiConfig {
+            enabled_skills: vec!["github".to_string()],
+            ..Default::default()
+        };
         cfg.skill_overrides.insert(
             "github".to_string(),
             crate::config::AgentSkillOverride {
@@ -5682,7 +5684,7 @@ mod tests {
 
         let override_entry = agent_cfg.skill_overrides.get("github").unwrap();
         assert_eq!(override_entry.enabled, Some(true));
-        assert!(override_entry.env.get("GITHUB_TOKEN").is_none());
+        assert!(!override_entry.env.contains_key("GITHUB_TOKEN"));
         let reference = override_entry.env_refs.get("GITHUB_TOKEN").unwrap();
         assert!(reference.starts_with("vault://"));
 

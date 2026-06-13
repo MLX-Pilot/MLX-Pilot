@@ -190,8 +190,7 @@ impl MemoryStore {
             .fts_memory_search(query, limit.max(records.len()))
             .await?;
 
-        if can_semantic && query_embedding.is_some() {
-            let q_emb = query_embedding.as_ref().unwrap();
+        if let Some(q_emb) = can_semantic.then_some(query_embedding.as_ref()).flatten() {
             let sem_weight = self.semantic_weight;
             let fts_weight = 1.0 - sem_weight;
 

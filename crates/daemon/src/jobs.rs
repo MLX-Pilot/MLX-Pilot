@@ -715,7 +715,7 @@ async fn load_due_tasks(db_path: &Path) -> Result<Vec<ScheduledTask>, io::Error>
             .map_err(sql_error)?;
 
         let rows = stmt
-            .query_map([], |row| row_to_scheduled_task(row))
+            .query_map([], row_to_scheduled_task)
             .map_err(sql_error)?;
 
         let mut tasks = Vec::new();
@@ -768,6 +768,7 @@ async fn record_run_finish(db_path: &Path, run_id: i64, status: &str, error: Opt
     .await;
 }
 
+#[allow(dead_code)]
 async fn disable_task(db_path: &Path, task_id: &str) {
     let db_path = db_path.to_path_buf();
     let task_id = task_id.to_string();
@@ -783,6 +784,7 @@ async fn disable_task(db_path: &Path, task_id: &str) {
     .await;
 }
 
+#[allow(dead_code)]
 async fn touch_last_run(db_path: &Path, task_id: &str) {
     let db_path = db_path.to_path_buf();
     let task_id = task_id.to_string();
@@ -867,7 +869,7 @@ pub async fn list_scheduled_tasks(db_path: &Path) -> io::Result<Vec<ScheduledTas
             .map_err(sql_error)?;
 
         let rows = stmt
-            .query_map([], |row| row_to_scheduled_task(row))
+            .query_map([], row_to_scheduled_task)
             .map_err(sql_error)?;
 
         let mut tasks = Vec::new();

@@ -604,12 +604,10 @@ fn default_airllm_python_command() -> String {
         });
     if preferred.exists() {
         preferred.display().to_string()
+    } else if cfg!(windows) {
+        "py".to_string()
     } else {
-        if cfg!(windows) {
-            "py".to_string()
-        } else {
-            "python3".to_string()
-        }
+        "python3".to_string()
     }
 }
 

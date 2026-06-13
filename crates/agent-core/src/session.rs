@@ -296,7 +296,7 @@ impl SessionStore {
         self.ensure_session(session_id, None).await?;
         self.state.append_session_event(session_id, message).await?;
 
-        if message.kind == "user" && message.content.trim().len() > 0 {
+        if message.kind == "user" && !message.content.trim().is_empty() {
             if let Some(meta) = self.state.get_session_meta(session_id).await? {
                 if meta.message_count <= 1 && meta.name == "Nova conversa" {
                     let snippet: String = message.content.chars().take(30).collect();

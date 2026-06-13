@@ -216,8 +216,8 @@ pub async fn research_start(
         }
     }
 
-    let max_rounds = req.max_rounds.min(10).max(1);
-    let max_time_secs = req.max_time_secs.min(600).max(30);
+    let max_rounds = req.max_rounds.clamp(1, 10);
+    let max_time_secs = req.max_time_secs.clamp(30, 600);
     let query = req.query.trim().to_string();
     let search_provider = req.search_provider.clone();
     let category = req.category.clone();

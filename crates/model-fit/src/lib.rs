@@ -183,6 +183,7 @@ fn use_case_config(use_case: Option<&str>) -> UseCaseConfig {
 // ── Public API ─────────────────────────────────────────────────────────────
 
 /// Rank a catalog of models against detected hardware.
+#[allow(clippy::too_many_arguments)]
 pub fn rank_models(
     system: &HardwareProfile,
     models: &[ModelCard],
@@ -500,7 +501,7 @@ fn estimate_n_layers(model: &ModelCard) -> usize {
         }
         _ => {
             // Generic estimate
-            (params * 5.0).max(20.0).min(120.0) as usize
+            (params * 5.0).clamp(20.0, 120.0) as usize
         }
     }
 }

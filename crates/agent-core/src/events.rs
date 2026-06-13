@@ -9,6 +9,7 @@ use tokio::sync::broadcast;
 /// All events the agent can emit.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum AgentEvent {
     // ── Lifecycle ──
     RunStarted {
