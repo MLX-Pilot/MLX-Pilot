@@ -8,7 +8,7 @@
 // === auto-imports (generated — do not edit) ===
 import { pushConsoleEntry } from '../../app.js';
 import { api } from '../core/api.js';
-import { esc, fmtBytes, fmtNum, modelIcon } from '../core/dom.js';
+import { esc, fmtBytes, fmtNum, modelIcon, runConfirmation, showToast } from '../core/dom.js';
 import { switchTab } from '../core/router.js';
 import { API_SLOW_TIMEOUT_MS, CURRENT_MODEL_KEY, state } from '../core/state.js';
 import { addSystemMsg } from './chat.js';
@@ -149,12 +149,46 @@ import { ensureVisibleModel, saveModelCache, updateAgentWorkspaceSummary } from 
     if (!menu) return;
     menu.innerHTML = '';
     const visibleModels = visibleModelsForCurrentPanel();
-    if (visibleModels.length === 0) {
-      menu.innerHTML = '<div class="model-menu-item" style="pointer-events:none;color:var(--text-tertiary)">Nenhum modelo encontrado</div>';
+    const localModels = visibleModels.filter(model => model.model_kind !== 'cloud');
+    const cloudModels = visibleModels.filter(model => model.model_kind === 'cloud');
+    const scope = state.modelPickerScope === 'cloud' ? 'cloud' : 'local';
+    const scopedModels = scope === 'cloud' ? cloudModels : localModels;
+
+    const switcher = document.createElement('div');
+    switcher.className = 'model-menu-switch';
+    switcher.setAttribute('role', 'tablist');
+    switcher.innerHTML = `
+      <button type="button" role="tab" data-model-scope="local" class="${scope === 'local' ? 'active' : ''}" aria-selected="${scope === 'local'}">
+        Local <span>${localModels.length}</span>
+      </button>
+      <button type="button" role="tab" data-model-scope="cloud" class="${scope === 'cloud' ? 'active' : ''}" aria-selected="${scope === 'cloud'}">
+        Cloud <span>${cloudModels.length}</span>
+      </button>`;
+    switcher.querySelectorAll('[data-model-scope]').forEach(button => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        state.modelPickerScope = button.dataset.modelScope;
+        renderModelPicker();
+      });
+    });
+    menu.appendChild(switcher);
+
+    const scroll = document.createElement('div');
+    scroll.className = 'model-menu-scroll';
+    menu.appendChild(scroll);
+
+    if (scopedModels.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'model-menu-empty';
+      empty.textContent = scope === 'cloud'
+        ? 'Nenhum provider cloud configurado.'
+        : 'Nenhum modelo local disponível.';
+      scroll.appendChild(empty);
       return;
     }
+
     const grouped = new Map();
-    visibleModels.forEach(model => {
+    scopedModels.forEach(model => {
       const key = model.model_group || (model.model_kind === 'cloud' ? model.provider : 'local');
       if (!grouped.has(key)) {
         grouped.set(key, {
@@ -168,13 +202,14 @@ import { ensureVisibleModel, saveModelCache, updateAgentWorkspaceSummary } from 
     });
 
     grouped.forEach(group => {
-      const header = document.createElement('div');
-      header.className = 'model-menu-group';
-      header.innerHTML = `
-        <span>${esc(group.label)}</span>
-        <span class="model-origin-badge ${esc(group.kind)}">${group.kind === 'cloud' ? 'Cloud' : 'Local'}</span>
-        ${group.status === 'degraded' ? '<span class="model-group-status">Catalogo fallback</span>' : ''}`;
-      menu.appendChild(header);
+      if (scope === 'cloud') {
+        const header = document.createElement('div');
+        header.className = 'model-menu-group';
+        header.innerHTML = `
+          <span>${esc(group.label)}</span>
+          ${group.status === 'degraded' ? '<span class="model-group-status">Catalogo fallback</span>' : ''}`;
+        scroll.appendChild(header);
+      }
 
       group.models.forEach(m => {
         const badge = capabilityBadge(modelCapabilityMode(m));
@@ -196,17 +231,19 @@ import { ensureVisibleModel, saveModelCache, updateAgentWorkspaceSummary } from 
           selectModel(m.id, { persistAgentConfig: isAgentPanelActive() });
           menu.classList.add('hidden');
         });
-        menu.appendChild(item);
+        scroll.appendChild(item);
       });
     });
-    if (visibleModels.some(model => model.model_kind === 'cloud')) {
+    if (scope === 'cloud') {
       const notice = document.createElement('div');
       notice.className = 'model-menu-cloud-notice';
       notice.textContent = 'Modelos cloud enviam a conversa ao provider e podem gerar custos.';
-      menu.appendChild(notice);
+      scroll.appendChild(notice);
     }
-    if (!state.currentModel && visibleModels.length > 0) {
-      selectModel(visibleModels[0].id, { persistAgentConfig: isAgentPanelActive() });
+    if (!state.currentModel && localModels.length > 0) {
+      selectModel(localModels[0].id, { persistAgentConfig: isAgentPanelActive() });
+    } else if (!state.currentModel && scopedModels.length > 0) {
+      selectModel(scopedModels[0].id, { persistAgentConfig: isAgentPanelActive() });
     }
   }
 
@@ -263,18 +300,32 @@ import { ensureVisibleModel, saveModelCache, updateAgentWorkspaceSummary } from 
         </div>
         <div class="installed-actions">
           <button class="action-btn" data-act="chat" data-id="${esc(m.id)}" ${available ? '' : 'disabled title="Provider indisponivel neste sistema"'}>Chat</button>
-          <button class="action-btn danger" data-act="del" data-id="${esc(m.id)}">Remover</button>
+          <button class="action-btn danger" data-act="del" data-id="${esc(m.id)}" data-provider="${esc(m.provider || '')}">Remover</button>
         </div>`;
       list.appendChild(item);
     });
     list.querySelectorAll('[data-act="chat"]').forEach(b => b.addEventListener('click', () => { selectModel(b.dataset.id); switchTab('chat'); }));
     list.querySelectorAll('[data-act="del"]').forEach(b => b.addEventListener('click', async () => {
-      if (!confirm(`Remover modelo ${b.dataset.id}?`)) return;
-      try {
-        await api(`/models/${encodeURIComponent(b.dataset.id)}`, { method: 'DELETE' });
-        invalidateModels();
-        refreshModelsInBackground();
-      } catch (e) { alert('Erro: ' + e.message); }
+      const model = state.installedModels.find(entry => entry.id === b.dataset.id);
+      const provider = b.dataset.provider || model?.provider || '';
+      const query = provider ? `?provider=${encodeURIComponent(provider)}` : '';
+      const removed = await runConfirmation({
+        title: 'Remover modelo',
+        message: 'Esta ação apaga os arquivos locais do modelo e não pode ser desfeita.',
+        detail: model?.name || b.dataset.id,
+        confirmLabel: 'Remover',
+        pendingLabel: 'Removendo...',
+        action: () => api(`/models/${encodeURIComponent(b.dataset.id)}${query}`, { method: 'DELETE' }),
+      });
+      if (!removed) return;
+
+      state.installedModels = state.installedModels.filter(entry => entry.id !== b.dataset.id);
+      state.models = state.models.filter(entry => entry.id !== b.dataset.id);
+      invalidateModels();
+      renderInstalledModels();
+      renderModelPicker();
+      showToast('Modelo removido com sucesso.');
+      refreshModelsInBackground();
     }));
   }
 

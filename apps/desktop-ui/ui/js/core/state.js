@@ -101,6 +101,7 @@ export const state = {
   modelsStale: true,
   modelsPromise: null,
   currentModel: cachedCurrentModel || null,
+  modelPickerScope: 'local',
   messages: [],
   isStreaming: false,
   streamController: null,

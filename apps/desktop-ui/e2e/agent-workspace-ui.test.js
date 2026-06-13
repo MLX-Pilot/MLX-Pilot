@@ -113,6 +113,7 @@ function createFixture({
   catalogModelsResponse,
   initialDownloads,
   startupResponse,
+  modelDeleteError,
   useRealTimers = false,
 } = {}) {
   let sessions = [
@@ -124,7 +125,7 @@ function createFixture({
   const hiddenEnvironment = environmentResponseHidden ?? { variables: [] };
   const revealedEnvironment = environmentResponseRevealed ?? hiddenEnvironment;
   let downloads = Array.isArray(initialDownloads) ? [...initialDownloads] : [];
-  const installedModels = modelsResponse ?? [
+  let installedModels = modelsResponse ?? [
     {
       id: "ollama::qwen3.5:9b",
       name: "qwen3.5:9b [Ollama]",
@@ -158,6 +159,7 @@ function createFixture({
   const { window } = dom;
   const { document } = window;
   const nativeCalls = [];
+  const browserDialogCalls = [];
 
   window.TextEncoder = TextEncoder;
   window.TextDecoder = TextDecoder;
@@ -198,8 +200,11 @@ function createFixture({
     };
     window.clearTimeout = () => {};
   }
-  window.alert = () => {};
-  window.confirm = () => true;
+  window.alert = (message) => browserDialogCalls.push({ type: "alert", message });
+  window.confirm = (message) => {
+    browserDialogCalls.push({ type: "confirm", message });
+    return true;
+  };
   window.prompt = () => "slack";
   window.open = () => {};
   window.__TAURI__ = {
@@ -276,6 +281,16 @@ function createFixture({
       return jsonResponse({
         models_dir: "G:/models",
       });
+    }
+
+    if (requestUrl.pathname.startsWith("/models/") && method === "DELETE") {
+      if (modelDeleteError) {
+        return jsonResponse({ error: modelDeleteError }, 500);
+      }
+      const encodedId = requestUrl.pathname.slice("/models/".length);
+      const deletedId = decodeURIComponent(encodedId);
+      installedModels = installedModels.filter((model) => model.id !== deletedId);
+      return jsonResponse({ message: "modelo removido", model_id: deletedId });
     }
 
     if (path === "/models") {
@@ -519,6 +534,7 @@ function createFixture({
     document,
     fetchCalls,
     nativeCalls,
+    browserDialogCalls,
     cleanup() {
       dom.window.close();
     },
@@ -779,7 +795,7 @@ test("agent mantem modelo local chat-only visivel e selecionado", async () => {
   }
 });
 
-test("seletor mostra modelos locais e DeepSeek configurado sem depender do provider ativo", async () => {
+test("seletor alterna entre modelos locais e cloud configurados com area rolavel", async () => {
   const fixture = createFixture({
     agentConfigResponse: {
       provider: "ollama",
@@ -834,14 +850,23 @@ test("seletor mostra modelos locais e DeepSeek configurado sem depender do provi
   try {
     await flush(12);
     fixture.document.querySelector('.tab[data-panel="agent"]')?.click();
-    fixture.document.getElementById("model-picker-btn")?.click();
+    fixture.document.getElementById("model-trigger")?.click();
     await flush(3);
 
     const menu = fixture.document.getElementById("model-menu");
+    assert.ok(menu?.querySelector(".model-menu-scroll"));
     assert.match(menu?.textContent || "", /Local/);
+    assert.match(menu?.textContent || "", /qwen3\.5:9b/);
+    assert.doesNotMatch(menu?.textContent || "", /DeepSeek V4 Flash/);
+
+    menu?.querySelector('[data-model-scope="cloud"]')?.click();
+    await flush(2);
+
+    assert.match(menu?.textContent || "", /Cloud/);
     assert.match(menu?.textContent || "", /DeepSeek/);
     assert.match(menu?.textContent || "", /DeepSeek V4 Flash/);
     assert.match(menu?.textContent || "", /DeepSeek V4 Pro/);
+    assert.doesNotMatch(menu?.textContent || "", /qwen3\.5:9b/);
     assert.doesNotMatch(menu?.textContent || "", /deepseek-chat/i);
 
     const proItem = [...(menu?.querySelectorAll("[data-model]") || [])]
@@ -860,6 +885,73 @@ test("seletor mostra modelos locais e DeepSeek configurado sem depender do provi
     fixture.document.querySelector('.discover-tab[data-dtab="installed"]')?.click();
     await flush(3);
     assert.doesNotMatch(fixture.document.getElementById("installed-list")?.textContent || "", /DeepSeek V4/);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("remocao de modelo Ollama usa modal interno e preserva nome com namespace", async () => {
+  const modelId = "ollama::dfebrero/Llama-3.2-8X3B-MOE:latest";
+  const fixture = createFixture({
+    modelsResponse: [{
+      id: modelId,
+      name: "dfebrero/Llama-3.2-8X3B-MOE:latest [Ollama]",
+      provider: "ollama",
+      is_available: true,
+      agent_tool_mode: "chat_only",
+    }],
+  });
+
+  try {
+    await flush(10);
+    fixture.document.querySelector('.tab[data-panel="discover"]')?.click();
+    fixture.document.querySelector('.discover-tab[data-dtab="installed"]')?.click();
+    await flush(3);
+
+    fixture.document.querySelector(`[data-act="del"][data-id="${modelId}"]`)?.click();
+    await flush(2);
+
+    const dialog = fixture.document.querySelector(".app-dialog");
+    assert.ok(dialog);
+    assert.match(dialog?.textContent || "", /Remover modelo/);
+    assert.match(dialog?.textContent || "", /dfebrero\/Llama-3\.2-8X3B-MOE/);
+    assert.deepEqual(fixture.browserDialogCalls, []);
+
+    dialog?.querySelector(".app-dialog-confirm")?.click();
+    await flush(8);
+
+    assert.ok(fixture.fetchCalls.some((entry) =>
+      entry.method === "DELETE"
+      && entry.path.includes(encodeURIComponent(modelId))
+      && entry.path.endsWith("?provider=ollama")
+    ));
+    assert.equal(fixture.document.querySelector(".app-dialog"), null);
+    assert.doesNotMatch(fixture.document.getElementById("installed-list")?.textContent || "", /dfebrero/);
+    assert.deepEqual(fixture.browserDialogCalls, []);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("falha ao remover modelo aparece no modal sem alert do navegador", async () => {
+  const fixture = createFixture({
+    modelDeleteError: "Ollama recusou a remocao do modelo",
+  });
+
+  try {
+    await flush(10);
+    fixture.document.querySelector('.tab[data-panel="discover"]')?.click();
+    fixture.document.querySelector('.discover-tab[data-dtab="installed"]')?.click();
+    await flush(3);
+
+    fixture.document.querySelector('[data-act="del"]')?.click();
+    fixture.document.querySelector(".app-dialog-confirm")?.click();
+    await flush(5);
+
+    const error = fixture.document.querySelector(".app-dialog-error");
+    assert.match(error?.textContent || "", /Ollama recusou a remocao/);
+    assert.ok(!error?.classList.contains("hidden"));
+    assert.deepEqual(fixture.browserDialogCalls, []);
   } finally {
     fixture.cleanup();
   }
