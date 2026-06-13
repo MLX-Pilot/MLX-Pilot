@@ -81,7 +81,9 @@ struct AppState {
     pub state_db_path: FsPathBuf,
     pub search_service: Arc<search::SearchService>,
     pub search_config: search::SearchConfig,
+    #[allow(dead_code)]
     pub embedder: Option<Arc<dyn mlx_agent_core::embeddings::Embedder>>,
+    #[allow(dead_code)]
     pub vault: Option<Arc<SecretsVault>>,
     startup: startup::StartupCoordinator,
 }

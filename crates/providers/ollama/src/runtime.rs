@@ -50,7 +50,7 @@ impl RuntimePhase {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GpuStatus {
     pub expected: bool,
     pub detected: bool,
@@ -58,19 +58,6 @@ pub struct GpuStatus {
     pub vram_bytes: Option<u64>,
     pub backend: Option<String>,
     pub driver_version: Option<String>,
-}
-
-impl Default for GpuStatus {
-    fn default() -> Self {
-        Self {
-            expected: false,
-            detected: false,
-            name: None,
-            vram_bytes: None,
-            backend: None,
-            driver_version: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -395,9 +382,11 @@ impl OllamaRuntime {
     }
 
     async fn reset_status(&self, selected_model: Option<String>) {
-        let mut status = OllamaRuntimeStatus::default();
-        status.operation_id = Some(Uuid::new_v4().to_string());
-        status.selected_model = selected_model;
+        let status = OllamaRuntimeStatus {
+            operation_id: Some(Uuid::new_v4().to_string()),
+            selected_model,
+            ..Default::default()
+        };
         *self.status.write().await = status.clone();
         let _ = write_json_atomic(&self.cfg.root.join("runtime-state.json"), &status);
     }
@@ -464,6 +453,7 @@ impl OllamaRuntime {
         let lock_path = self.cfg.root.join("install.lock");
         let lock = OpenOptions::new()
             .create(true)
+            .truncate(true)
             .read(true)
             .write(true)
             .open(&lock_path)
@@ -1351,10 +1341,10 @@ fn replace_file(source: &Path, destination: &Path) -> Result<(), ProviderError> 
         if ok != 0 {
             return Ok(());
         }
-        return Err(ProviderError::Io {
+        Err(ProviderError::Io {
             context: format!("ativando {}", destination.display()),
             source: std::io::Error::last_os_error(),
-        });
+        })
     }
     #[cfg(not(windows))]
     {
@@ -1406,7 +1396,7 @@ async fn listening_pid(port: u16) -> Option<u32> {
         );
         let mut command = Command::new("powershell.exe");
         silence_console(&mut command);
-        return command
+        command
             .args(["-NoProfile", "-NonInteractive", "-Command", &script])
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -1419,7 +1409,7 @@ async fn listening_pid(port: u16) -> Option<u32> {
                     .trim()
                     .parse::<u32>()
                     .ok()
-            });
+            })
     }
     #[cfg(not(windows))]
     {
@@ -1685,14 +1675,14 @@ async fn process_executable_matches(pid: u32, expected: &Path) -> bool {
             .stderr(Stdio::null())
             .output()
             .await;
-        return output
+        output
             .ok()
             .filter(|output| output.status.success())
             .map(|output| {
                 let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 !path.is_empty() && paths_equal(Path::new(&path), expected)
             })
-            .unwrap_or(false);
+            .unwrap_or(false)
     }
     #[cfg(not(windows))]
     {
@@ -1719,10 +1709,10 @@ async fn terminate_pid(pid: u32) -> Result<(), ProviderError> {
         if output.status.success() {
             return Ok(());
         }
-        return Err(ProviderError::CommandFailed {
+        Err(ProviderError::CommandFailed {
             command: format!("taskkill /PID {pid} /T /F"),
             stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        });
+        })
     }
     #[cfg(not(windows))]
     {
@@ -1839,6 +1829,7 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let active = root.join("active.json");
         fs::write(&active, b"previous-valid-runtime").unwrap();
+        drop(_guard);
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();

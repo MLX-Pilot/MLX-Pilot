@@ -71,7 +71,7 @@ pub fn detect_variant() -> EngineVariant {
         if windows_has_vulkan_gpu() {
             return EngineVariant::Vulkan;
         }
-        return EngineVariant::Cpu;
+        EngineVariant::Cpu
     }
 
     // MLX/Metal on Apple Silicon is handled by the dedicated provider and the daemon's

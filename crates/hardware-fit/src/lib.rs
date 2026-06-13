@@ -757,7 +757,7 @@ fn find_binary(names: &[&str], extra_paths: &[&str]) -> Option<String> {
     if cfg!(windows) {
         for name in names {
             let output = std::process::Command::new("cmd")
-                .args(&["/c", "where", name])
+                .args(["/c", "where", name])
                 .output();
             if let Ok(out) = output {
                 if out.status.success() {

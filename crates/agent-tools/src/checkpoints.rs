@@ -127,7 +127,7 @@ pub async fn list_file_checkpoints(
                 .unwrap_or(true)
         })
         .collect::<Vec<_>>();
-    filtered.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+    filtered.sort_by_key(|right| std::cmp::Reverse(right.created_at));
     filtered.truncate(limit.clamp(1, 200));
     Ok(filtered
         .into_iter()

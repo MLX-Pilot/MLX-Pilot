@@ -328,6 +328,7 @@ impl ResearchEngine {
     }
 
     /// Run the full iterative research loop.
+    #[allow(clippy::too_many_arguments)]
     pub async fn run(
         &self,
         query: &str,
@@ -858,8 +859,8 @@ pub fn sanitize_html(html: &str) -> String {
 pub fn extract_title_from_markdown(md: &str) -> String {
     for line in md.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("# ") {
-            return trimmed[2..].trim().to_string();
+        if let Some(stripped) = trimmed.strip_prefix("# ") {
+            return stripped.trim().to_string();
         }
     }
     // Fallback: first non-empty line
@@ -1208,7 +1209,7 @@ pub fn generate_html_report(
 </body>
 </html>"#,
         title = html_escape(title),
-        category_html = if let Some(ref cat) = category {
+        category_html = if let Some(cat) = category {
             format!(r#"<div class="category">{}</div>"#, html_escape(cat))
         } else {
             String::new()

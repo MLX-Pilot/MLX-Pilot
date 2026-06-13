@@ -23,8 +23,6 @@ use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
-use url::Url;
-use urlencoding;
 
 // ── Error type ──────────────────────────────────────────────────────────────
 
@@ -36,12 +34,14 @@ pub enum SearchError {
     Network(String),
     #[error("ssrf blocked: {0}")]
     SsrfBlocked(String),
-    #[error("timeout")]
-    Timeout,
     #[error("not configured: {0}")]
     NotConfigured(String),
+    #[error("timeout")]
+    #[allow(dead_code)]
+    TimeoutDeprecated,
     #[error("rate limited")]
-    RateLimited,
+    #[allow(dead_code)]
+    RateLimitedDeprecated,
 }
 
 impl From<SearchError> for crate::AppError {
@@ -136,7 +136,6 @@ pub trait SearchProvider: Send + Sync {
 /// which returns real web search results — unlike the Instant Answer API
 /// (`api.duckduckgo.com`) that only returns Wikipedia-style abstracts.
 /// Same approach Odysseus uses as the free fallback provider.
-
 pub struct DuckDuckGoProvider {
     client: Client,
 }
@@ -790,6 +789,7 @@ fn extract_main_content(html: &str) -> (String, String) {
     (title, text)
 }
 
+#[allow(clippy::only_used_in_recursion)]
 fn collect_text(element: scraper::ElementRef<'_>, unwanted: &Selector, output: &mut Vec<String>) {
     for child in element.children() {
         match child.value() {
@@ -933,6 +933,7 @@ impl SearchService {
         Ok(results)
     }
 
+    #[allow(dead_code)]
     pub async fn multi_search(
         &self,
         query: &SearchQuery,

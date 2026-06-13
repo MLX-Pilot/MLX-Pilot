@@ -92,7 +92,7 @@ impl PluginManager {
             .compatibility
             .plugins
             .entry(plugin_id.clone())
-            .or_insert_with(PluginPersistedState::default);
+            .or_default();
         entry.enabled = enabled;
         let persisted = entry.clone();
         self.save_config(&cfg).map_err(|error| error.to_string())?;
@@ -127,7 +127,7 @@ impl PluginManager {
             .compatibility
             .plugins
             .entry(plugin_id.clone())
-            .or_insert_with(PluginPersistedState::default);
+            .or_default();
 
         entry.config = config;
         if let Some(value) = enabled {
