@@ -19,12 +19,12 @@ use axum::response::Sse;
 use axum::Json;
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection};
-use tokio_stream::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::{broadcast, RwLock, Semaphore};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::{Stream, StreamExt};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
@@ -198,12 +198,7 @@ impl JobRegistry {
                     let _ = progress_tx.send(JobProgress {
                         job_id: job_id.clone(),
                         percent: 0,
-                        phase: if is_cancelled {
-                            "cancelled"
-                        } else {
-                            "error"
-                        }
-                        .to_string(),
+                        phase: if is_cancelled { "cancelled" } else { "error" }.to_string(),
                         message: if is_cancelled {
                             "Job cancelled".to_string()
                         } else {
@@ -333,7 +328,11 @@ pub async fn job_stream(
     State(state): State<crate::AppState>,
     AxumPath(job_id): AxumPath<String>,
 ) -> Result<Sse<impl Stream<Item = Result<axum::response::sse::Event, io::Error>>>, StatusCode> {
-    let rx = state.jobs.subscribe(&job_id).await.ok_or(StatusCode::NOT_FOUND)?;
+    let rx = state
+        .jobs
+        .subscribe(&job_id)
+        .await
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     let stream = BroadcastStream::new(rx).map(|result| match result {
         Ok(progress) => {
@@ -364,9 +363,7 @@ pub async fn job_cancel(
 }
 
 /// Axum handler to list all jobs.
-pub async fn job_list(
-    State(state): State<crate::AppState>,
-) -> Json<Vec<JobRecord>> {
+pub async fn job_list(State(state): State<crate::AppState>) -> Json<Vec<JobRecord>> {
     Json(state.jobs.list().await)
 }
 
@@ -424,26 +421,26 @@ pub struct TaskRun {
 /// Spawn a test job with 5 steps that reports incremental progress.
 /// Used for smoke-testing the SSE and cancel flow.
 pub async fn spawn_test_job(state: &crate::AppState) -> JobId {
-    state.jobs.spawn("test_dummy", |ctx| async move {
-        for i in 0..5 {
-            if ctx.is_cancelled() {
-                return Err("Cancelled at checkpoint".to_string());
+    state
+        .jobs
+        .spawn("test_dummy", |ctx| async move {
+            for i in 0..5 {
+                if ctx.is_cancelled() {
+                    return Err("Cancelled at checkpoint".to_string());
+                }
+                let percent = ((i + 1) * 20) as u8;
+                let phase = format!("step_{}", i + 1);
+                let msg = format!("Running step {}/5 — checkpoint {}", i + 1, i + 1);
+                ctx.progress(percent, &phase, &msg);
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
-            let percent = ((i + 1) * 20) as u8;
-            let phase = format!("step_{}", i + 1);
-            let msg = format!("Running step {}/5 — checkpoint {}", i + 1, i + 1);
-            ctx.progress(percent, &phase, &msg);
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        }
-        Ok(serde_json::json!({"steps_completed": 5, "status": "success"}))
-    })
-    .await
+            Ok(serde_json::json!({"steps_completed": 5, "status": "success"}))
+        })
+        .await
 }
 
 /// Axum handler: POST /jobs/test — creates a dummy 5-step job.
-pub async fn job_test(
-    State(state): State<crate::AppState>,
-) -> Json<JobRecord> {
+pub async fn job_test(State(state): State<crate::AppState>) -> Json<JobRecord> {
     let job_id = spawn_test_job(&state).await;
     let record = state.jobs.get(&job_id).await.unwrap();
     Json(record)
@@ -511,7 +508,9 @@ impl Scheduler {
     }
 
     async fn tick(&self) -> Result<(), String> {
-        let tasks = load_due_tasks(&self.db_path).await.map_err(|e| e.to_string())?;
+        let tasks = load_due_tasks(&self.db_path)
+            .await
+            .map_err(|e| e.to_string())?;
         if tasks.is_empty() {
             return Ok(());
         }
@@ -555,7 +554,10 @@ impl Scheduler {
 
 fn open_sqlite(db_path: &Path) -> Result<Connection, io::Error> {
     let conn = Connection::open(db_path).map_err(|e| {
-        io::Error::other(format!("Failed to open SQLite at {}: {e}", db_path.display()))
+        io::Error::other(format!(
+            "Failed to open SQLite at {}: {e}",
+            db_path.display()
+        ))
     })?;
     conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")
         .map_err(|e| io::Error::other(format!("Failed to set pragmas: {e}")))?;
@@ -615,19 +617,27 @@ fn row_to_scheduled_task(row: &rusqlite::Row) -> rusqlite::Result<ScheduledTask>
         schedule_kind: row.get(2)?,
         cron_expr: row.get(3)?,
         interval_secs: row.get(4)?,
-        run_at: row
-            .get::<_, Option<String>>(5)?
-            .and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
+        run_at: row.get::<_, Option<String>>(5)?.and_then(|s| {
+            DateTime::parse_from_rfc3339(&s)
+                .ok()
+                .map(|dt| dt.with_timezone(&Utc))
+        }),
         job_kind: row.get(6)?,
         payload_json: row.get(7)?,
         enabled: row.get::<_, bool>(8).unwrap_or(true),
         created_at: row
             .get::<_, Option<String>>(9)?
-            .and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc)))
+            .and_then(|s| {
+                DateTime::parse_from_rfc3339(&s)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&Utc))
+            })
             .unwrap_or_else(Utc::now),
-        last_run_at: row
-            .get::<_, Option<String>>(10)?
-            .and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
+        last_run_at: row.get::<_, Option<String>>(10)?.and_then(|s| {
+            DateTime::parse_from_rfc3339(&s)
+                .ok()
+                .map(|dt| dt.with_timezone(&Utc))
+        }),
     })
 }
 
@@ -653,7 +663,11 @@ pub async fn scheduler_create_task(
         schedule_kind: req.schedule_kind,
         cron_expr: req.cron_expr,
         interval_secs: req.interval_secs,
-        run_at: req.run_at.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
+        run_at: req.run_at.and_then(|s| {
+            DateTime::parse_from_rfc3339(&s)
+                .ok()
+                .map(|dt| dt.with_timezone(&Utc))
+        }),
         job_kind: req.job_kind.unwrap_or_else(|| "generic".to_string()),
         payload_json: req.payload_json,
         enabled: req.enabled,
@@ -866,10 +880,7 @@ pub async fn list_scheduled_tasks(db_path: &Path) -> io::Result<Vec<ScheduledTas
     .map_err(|e| io::Error::other(e.to_string()))?
 }
 
-pub async fn upsert_scheduled_task(
-    db_path: &Path,
-    task: &ScheduledTask,
-) -> io::Result<()> {
+pub async fn upsert_scheduled_task(db_path: &Path, task: &ScheduledTask) -> io::Result<()> {
     let db_path = db_path.to_path_buf();
     let task = task.clone();
     tokio::task::spawn_blocking(move || {
@@ -905,11 +916,8 @@ pub async fn delete_scheduled_task(db_path: &Path, id: &str) -> io::Result<()> {
     let id = id.to_string();
     tokio::task::spawn_blocking(move || {
         let conn = open_sqlite(&db_path)?;
-        conn.execute(
-            "DELETE FROM scheduled_tasks WHERE id = ?1",
-            params![id],
-        )
-        .map_err(sql_error)?;
+        conn.execute("DELETE FROM scheduled_tasks WHERE id = ?1", params![id])
+            .map_err(sql_error)?;
         Ok(())
     })
     .await
@@ -941,15 +949,23 @@ pub async fn list_task_runs(
                     id: row.get(0)?,
                     task_id: row.get(1)?,
                     job_id: row.get(2)?,
-                    status: row.get::<_, String>(3).unwrap_or_else(|_| "unknown".to_string()),
+                    status: row
+                        .get::<_, String>(3)
+                        .unwrap_or_else(|_| "unknown".to_string()),
                     started_at: row
                         .get::<_, String>(4)
                         .ok()
-                        .and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc)))
+                        .and_then(|s| {
+                            DateTime::parse_from_rfc3339(&s)
+                                .ok()
+                                .map(|dt| dt.with_timezone(&Utc))
+                        })
                         .unwrap_or_else(Utc::now),
-                    finished_at: row
-                        .get::<_, Option<String>>(5)?
-                        .and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
+                    finished_at: row.get::<_, Option<String>>(5)?.and_then(|s| {
+                        DateTime::parse_from_rfc3339(&s)
+                            .ok()
+                            .map(|dt| dt.with_timezone(&Utc))
+                    }),
                     error: row.get(6)?,
                 })
             })

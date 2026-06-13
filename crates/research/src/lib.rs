@@ -137,21 +137,32 @@ impl Default for ResearchConfig {
 
 /// Async search function: (query, provider, max_results) → Vec<Source>.
 pub type SearchFn = Arc<
-    dyn Fn(String, Option<String>, usize) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<Source>, String>> + Send>>
+    dyn Fn(
+            String,
+            Option<String>,
+            usize,
+        )
+            -> Pin<Box<dyn std::future::Future<Output = Result<Vec<Source>, String>> + Send>>
         + Send
         + Sync,
 >;
 
 /// Async fetch function: (url) → (title, body_text).
 pub type FetchFn = Arc<
-    dyn Fn(String) -> Pin<Box<dyn std::future::Future<Output = Result<(String, String), String>> + Send>>
+    dyn Fn(
+            String,
+        )
+            -> Pin<Box<dyn std::future::Future<Output = Result<(String, String), String>> + Send>>
         + Send
         + Sync,
 >;
 
 /// Async LLM call: (system_prompt, user_prompt) → response_text.
 pub type LlmFn = Arc<
-    dyn Fn(String, String) -> Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send>>
+    dyn Fn(
+            String,
+            String,
+        ) -> Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send>>
         + Send
         + Sync,
 >;
@@ -192,7 +203,13 @@ fn plan_prompt(question: &str) -> (String, String) {
     (system, user)
 }
 
-fn query_gen_prompt(question: &str, n: usize, round: usize, seen: &[String], report_so_far: &str) -> (String, String) {
+fn query_gen_prompt(
+    question: &str,
+    n: usize,
+    round: usize,
+    seen: &[String],
+    report_so_far: &str,
+) -> (String, String) {
     let system = "You are a search query generator. Generate focused search queries to find specific information. Return ONLY a JSON array of strings, no other text.".to_string();
     let seen_str = if seen.is_empty() {
         "none yet".to_string()
@@ -229,7 +246,11 @@ fn extract_prompt(full_text: &str, question: &str, max_chars: usize) -> (String,
     (system, user)
 }
 
-fn synthesize_prompt(question: &str, current_report: &str, new_findings: &[Finding]) -> (String, String) {
+fn synthesize_prompt(
+    question: &str,
+    current_report: &str,
+    new_findings: &[Finding],
+) -> (String, String) {
     let system = "You are a research synthesizer. Integrate new findings into the existing report. Maintain a clear structure with sections. Cite sources inline as [Source: title].".to_string();
     let findings_text = new_findings
         .iter()
@@ -262,8 +283,12 @@ fn stop_prompt(question: &str, report: &str, round: usize, max_rounds: usize) ->
 fn final_report_prompt(question: &str, report: &str, category: Option<&str>) -> (String, String) {
     let system = "You are a report writer. Write a polished, well-structured markdown report. Use headings, bullet points, and source citations. Target 800+ words.".to_string();
     let cat_hint = match category {
-        Some("product") => "This is a product review/comparison. Include a comparison table if relevant.",
-        Some("comparison") => "This is a comparison. Use a structured comparison format with pros/cons.",
+        Some("product") => {
+            "This is a product review/comparison. Include a comparison table if relevant."
+        }
+        Some("comparison") => {
+            "This is a comparison. Use a structured comparison format with pros/cons."
+        }
         Some("howto") => "This is a how-to guide. Include step-by-step instructions.",
         Some("factcheck") => "This is a fact-check. Clearly separate facts from analysis.",
         _ => "",
@@ -288,8 +313,18 @@ pub struct ResearchEngine {
 }
 
 impl ResearchEngine {
-    pub fn new(config: ResearchConfig, search_fn: SearchFn, fetch_fn: FetchFn, llm_fn: LlmFn) -> Self {
-        Self { config, search_fn, fetch_fn, llm_fn }
+    pub fn new(
+        config: ResearchConfig,
+        search_fn: SearchFn,
+        fetch_fn: FetchFn,
+        llm_fn: LlmFn,
+    ) -> Self {
+        Self {
+            config,
+            search_fn,
+            fetch_fn,
+            llm_fn,
+        }
     }
 
     /// Run the full iterative research loop.
@@ -423,9 +458,8 @@ impl ResearchEngine {
             let seen_vec: Vec<String> = all_queries.iter().cloned().collect();
             let (qsys, qusr) = query_gen_prompt(query, 2, round_num, &seen_vec, &current_report);
             let queries = match (self.llm_fn)(qsys, qusr).await {
-                Ok(raw) => parse_json_string_array(&raw).unwrap_or_else(|| {
-                    vec![format!("{} round {}", query, round_num)]
-                }),
+                Ok(raw) => parse_json_string_array(&raw)
+                    .unwrap_or_else(|| vec![format!("{} round {}", query, round_num)]),
                 Err(e) => {
                     session.status = ResearchStatus::Error;
                     session.error = Some(format!("LLM query generation error: {e}"));
@@ -443,7 +477,8 @@ impl ResearchEngine {
 
             if queries.is_empty() {
                 empty_rounds += 1;
-                if empty_rounds >= self.config.max_empty_rounds && round_num >= self.config.min_rounds
+                if empty_rounds >= self.config.max_empty_rounds
+                    && round_num >= self.config.min_rounds
                 {
                     info!("Research {} stopping: {} empty rounds", id, empty_rounds);
                     break;
@@ -489,7 +524,9 @@ impl ResearchEngine {
                     report_after: current_report.clone(),
                     stop_decision: None,
                 });
-                if empty_rounds >= self.config.max_empty_rounds && round_num >= self.config.min_rounds {
+                if empty_rounds >= self.config.max_empty_rounds
+                    && round_num >= self.config.min_rounds
+                {
                     break;
                 }
                 continue;
@@ -512,12 +549,17 @@ impl ResearchEngine {
 
                 match (self.fetch_fn)(src.url.clone()).await {
                     Ok((title, text)) => {
-                        let (esys, eusr) = extract_prompt(&text, query, self.config.max_content_chars);
+                        let (esys, eusr) =
+                            extract_prompt(&text, query, self.config.max_content_chars);
                         match (self.llm_fn)(esys, eusr).await {
                             Ok(extracted) => {
                                 let finding = Finding {
                                     source_url: src.url.clone(),
-                                    source_title: if title.is_empty() { src.title.clone() } else { title },
+                                    source_title: if title.is_empty() {
+                                        src.title.clone()
+                                    } else {
+                                        title
+                                    },
                                     extracted_text: extracted,
                                     round: round_num,
                                 };
@@ -525,7 +567,8 @@ impl ResearchEngine {
                             }
                             Err(e) => {
                                 session.status = ResearchStatus::Error;
-                                session.error = Some(format!("LLM extraction error for {}: {e}", src.url));
+                                session.error =
+                                    Some(format!("LLM extraction error for {}: {e}", src.url));
                                 session.finished_at = Some(Utc::now());
                                 return session;
                             }
@@ -577,7 +620,8 @@ impl ResearchEngine {
             let stop_decision = if round_num < self.config.min_rounds {
                 "CONTINUE (minimum rounds not reached)".to_string()
             } else {
-                let (tsys, tusr) = stop_prompt(query, &current_report, round_num, self.config.max_rounds);
+                let (tsys, tusr) =
+                    stop_prompt(query, &current_report, round_num, self.config.max_rounds);
                 match (self.llm_fn)(tsys, tusr).await {
                     Ok(d) => d,
                     Err(e) => {
@@ -602,7 +646,10 @@ impl ResearchEngine {
             });
 
             if should_stop {
-                info!("Research {} stopping at round {}: {}", id, round_num, stop_decision);
+                info!(
+                    "Research {} stopping at round {}: {}",
+                    id, round_num, stop_decision
+                );
                 break;
             }
         }
@@ -727,7 +774,12 @@ fn parse_json_string_array(raw: &str) -> Option<Vec<String>> {
     // Fallback: split by newlines and clean up
     let lines: Vec<String> = cleaned
         .lines()
-        .map(|l| l.trim().trim_start_matches('-').trim_start_matches(|c: char| c.is_numeric() || c == '.').trim())
+        .map(|l| {
+            l.trim()
+                .trim_start_matches('-')
+                .trim_start_matches(|c: char| c.is_numeric() || c == '.')
+                .trim()
+        })
         .filter(|l| !l.is_empty())
         .map(|l| l.trim_matches('"').to_string())
         .collect();
@@ -740,7 +792,9 @@ fn parse_json_string_array(raw: &str) -> Option<Vec<String>> {
 }
 
 fn classify_category_prompt(question: &str) -> (String, String) {
-    let system = "Classify this research question into ONE category. Reply with only the category word.".to_string();
+    let system =
+        "Classify this research question into ONE category. Reply with only the category word."
+            .to_string();
     let user = format!(
         "Question: {}\n\nCategories: product, comparison, howto, factcheck, general\n\nCategory:",
         question
@@ -775,10 +829,23 @@ pub fn sanitize_html(html: &str) -> String {
         .add_tags(&["blockquote"])
         .add_tags(&["table", "thead", "tbody", "tr", "th", "td"])
         .add_tags(&["img", "figure", "figcaption"])
-        .add_tags(&["div", "span", "section", "nav", "main", "article", "header", "footer"])
+        .add_tags(&[
+            "div", "span", "section", "nav", "main", "article", "header", "footer",
+        ])
         .add_tags(&["details", "summary"])
         .add_tags(&["button"])
-        .add_tag_attributes("img", &["src", "alt", "title", "width", "height", "loading", "data-hidden"])
+        .add_tag_attributes(
+            "img",
+            &[
+                "src",
+                "alt",
+                "title",
+                "width",
+                "height",
+                "loading",
+                "data-hidden",
+            ],
+        )
         .add_tag_attributes("td", &["align"])
         .add_tag_attributes("th", &["align"])
         .add_tag_attributes("col", &["span", "width"])
@@ -810,11 +877,15 @@ fn extract_headings(md: &str) -> Vec<(String, String, usize)> {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("## ") {
             let text = rest.trim();
-            let id = text.to_lowercase().replace(|c: char| !c.is_alphanumeric(), "-");
+            let id = text
+                .to_lowercase()
+                .replace(|c: char| !c.is_alphanumeric(), "-");
             headings.push((id, text.to_string(), 2));
         } else if let Some(rest) = trimmed.strip_prefix("### ") {
             let text = rest.trim();
-            let id = text.to_lowercase().replace(|c: char| !c.is_alphanumeric(), "-");
+            let id = text
+                .to_lowercase()
+                .replace(|c: char| !c.is_alphanumeric(), "-");
             headings.push((id, text.to_string(), 3));
         }
     }
@@ -837,7 +908,11 @@ pub fn generate_html_report(
     // Build TOC
     let mut toc_html = String::new();
     for (id, text, level) in &headings {
-        let indent = if *level == 3 { "padding-left: 16px;" } else { "" };
+        let indent = if *level == 3 {
+            "padding-left: 16px;"
+        } else {
+            ""
+        };
         toc_html.push_str(&format!(
             "<li style=\"{}\"><a href=\"#heading-{}\">{}</a></li>",
             indent,
@@ -1166,7 +1241,8 @@ pub fn persist_session(data_dir: &Path, session: &ResearchSession) -> Result<(),
     let dir = data_dir.join("research");
     std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create research dir: {e}"))?;
     let path = dir.join(format!("{}.json", session.id));
-    let json = serde_json::to_string_pretty(session).map_err(|e| format!("Serialization error: {e}"))?;
+    let json =
+        serde_json::to_string_pretty(session).map_err(|e| format!("Serialization error: {e}"))?;
     std::fs::write(&path, json).map_err(|e| format!("Failed to write session: {e}"))?;
     debug!("Persisted research session {}", session.id);
     Ok(())
@@ -1187,7 +1263,8 @@ pub fn list_sessions(data_dir: &Path) -> Result<Vec<ResearchSession>, String> {
         return Ok(Vec::new());
     }
     let mut sessions = Vec::new();
-    let entries = std::fs::read_dir(&dir).map_err(|e| format!("Failed to read research dir: {e}"))?;
+    let entries =
+        std::fs::read_dir(&dir).map_err(|e| format!("Failed to read research dir: {e}"))?;
     for entry in entries {
         let entry = entry.map_err(|e| format!("Dir entry error: {e}"))?;
         let path = entry.path();
@@ -1334,7 +1411,9 @@ mod tests {
     }
 
     fn mock_fetch_fn() -> FetchFn {
-        Arc::new(|_url| Box::pin(async { Ok(("Test Title".into(), "Test body text for extraction.".into())) }))
+        Arc::new(|_url| {
+            Box::pin(async { Ok(("Test Title".into(), "Test body text for extraction.".into())) })
+        })
     }
 
     fn failing_llm_fn() -> LlmFn {
@@ -1348,7 +1427,8 @@ mod tests {
     #[tokio::test]
     async fn test_engine_aborts_on_planning_llm_error() {
         let config = ResearchConfig::default();
-        let engine = ResearchEngine::new(config, mock_search_fn(), mock_fetch_fn(), failing_llm_fn());
+        let engine =
+            ResearchEngine::new(config, mock_search_fn(), mock_fetch_fn(), failing_llm_fn());
         let token = CancellationToken::new();
         let events = std::sync::Mutex::new(Vec::new());
 
@@ -1397,13 +1477,17 @@ mod tests {
             .await;
 
         assert_eq!(session.status, ResearchStatus::Error);
-        assert!(session.error.unwrap().contains("LLM query generation error"));
+        assert!(session
+            .error
+            .unwrap()
+            .contains("LLM query generation error"));
     }
 
     #[tokio::test]
     async fn test_engine_honours_cancellation() {
         let config = ResearchConfig::default();
-        let engine = ResearchEngine::new(config, mock_search_fn(), mock_fetch_fn(), ok_llm_fn("OK"));
+        let engine =
+            ResearchEngine::new(config, mock_search_fn(), mock_fetch_fn(), ok_llm_fn("OK"));
         let token = CancellationToken::new();
         token.cancel(); // Cancel immediately
 

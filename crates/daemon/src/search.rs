@@ -112,7 +112,7 @@ impl Default for SearchConfig {
             brave_api_key: None,
             safe_search: true,
             max_results: 5,
-            cache_ttl_secs: 900,    // 15 min
+            cache_ttl_secs: 900, // 15 min
             fetch_timeout_secs: 8,
             fetch_max_bytes: 2_097_152, // 2 MB
         }
@@ -195,7 +195,11 @@ impl SearchProvider for DuckDuckGoProvider {
     async fn search(&self, query: &SearchQuery) -> Result<Vec<SearchResult>, SearchError> {
         let max_results = query.max_results.unwrap_or(5).min(20);
         // kp: 1 = strict, -1 = moderate, -2 = off
-        let safe_param = if query.safe_search.unwrap_or(true) { "1" } else { "-1" };
+        let safe_param = if query.safe_search.unwrap_or(true) {
+            "1"
+        } else {
+            "-1"
+        };
 
         // ── Primary: scrape html.duckduckgo.com (same as Odysseus) ──────
         let response = self
@@ -220,9 +224,12 @@ impl SearchProvider for DuckDuckGoProvider {
             .map_err(|e| SearchError::Provider(format!("DuckDuckGo read error: {e}")))?;
 
         let document = Html::parse_document(&html_text);
-        let result_sel = Selector::parse(".result").map_err(|e| SearchError::Provider(e.to_string()))?;
-        let link_sel = Selector::parse(".result__a").map_err(|e| SearchError::Provider(e.to_string()))?;
-        let snippet_sel = Selector::parse(".result__snippet").map_err(|e| SearchError::Provider(e.to_string()))?;
+        let result_sel =
+            Selector::parse(".result").map_err(|e| SearchError::Provider(e.to_string()))?;
+        let link_sel =
+            Selector::parse(".result__a").map_err(|e| SearchError::Provider(e.to_string()))?;
+        let snippet_sel = Selector::parse(".result__snippet")
+            .map_err(|e| SearchError::Provider(e.to_string()))?;
 
         let mut results = Vec::new();
 
@@ -262,7 +269,11 @@ impl SearchProvider for DuckDuckGoProvider {
             });
         }
 
-        debug!("DuckDuckGo HTML search: {} results for '{}'", results.len(), query.q);
+        debug!(
+            "DuckDuckGo HTML search: {} results for '{}'",
+            results.len(),
+            query.q
+        );
         Ok(results)
     }
 }
@@ -277,7 +288,10 @@ pub struct SearxngProvider {
 
 impl SearxngProvider {
     pub fn new(instance_url: Option<String>) -> Self {
-        let configured = instance_url.as_ref().map(|u| !u.trim().is_empty()).unwrap_or(false);
+        let configured = instance_url
+            .as_ref()
+            .map(|u| !u.trim().is_empty())
+            .unwrap_or(false);
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(12))
@@ -316,7 +330,11 @@ impl SearchProvider for SearxngProvider {
         }
 
         let max_results = query.max_results.unwrap_or(5).min(20);
-        let safe_search = if query.safe_search.unwrap_or(true) { "1" } else { "0" };
+        let safe_search = if query.safe_search.unwrap_or(true) {
+            "1"
+        } else {
+            "0"
+        };
 
         let response = self
             .client
@@ -391,7 +409,10 @@ pub struct BraveProvider {
 
 impl BraveProvider {
     pub fn new(api_key: Option<String>) -> Self {
-        let configured = api_key.as_ref().map(|k| !k.trim().is_empty()).unwrap_or(false);
+        let configured = api_key
+            .as_ref()
+            .map(|k| !k.trim().is_empty())
+            .unwrap_or(false);
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(18))
@@ -566,8 +587,8 @@ impl SearchCache {
 /// Check if a URL points to a private/internal IP address.
 /// Returns `Ok(())` if safe, or `Err(SearchError::SsrfBlocked)` if blocked.
 pub fn guard_ssrf(url_str: &str) -> Result<(), SearchError> {
-    let parsed =
-        url::Url::parse(url_str).map_err(|_| SearchError::SsrfBlocked("invalid URL".to_string()))?;
+    let parsed = url::Url::parse(url_str)
+        .map_err(|_| SearchError::SsrfBlocked("invalid URL".to_string()))?;
 
     // Only allow http/https
     let scheme = parsed.scheme();
@@ -640,9 +661,7 @@ fn is_private_ip(ip: &IpAddr) -> bool {
                 || v4.is_unspecified()
                 || v4.octets() == [169, 254, 169, 254] // AWS/cloud metadata
         }
-        IpAddr::V6(v6) => {
-            v6.is_loopback() || v6.is_unique_local() || v6.is_unspecified()
-        }
+        IpAddr::V6(v6) => v6.is_loopback() || v6.is_unique_local() || v6.is_unspecified(),
     }
 }
 
@@ -794,14 +813,30 @@ fn collect_text(element: scraper::ElementRef<'_>, unwanted: &Selector, output: &
                     continue;
                 }
                 // Add paragraph breaks for block elements
-                if matches!(el_name, "p" | "div" | "section" | "article" | "li" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "br" | "blockquote" | "pre")
-                {
+                if matches!(
+                    el_name,
+                    "p" | "div"
+                        | "section"
+                        | "article"
+                        | "li"
+                        | "h1"
+                        | "h2"
+                        | "h3"
+                        | "h4"
+                        | "h5"
+                        | "h6"
+                        | "br"
+                        | "blockquote"
+                        | "pre"
+                ) {
                     // Recurse into element
                     if let Some(el_ref) = scraper::ElementRef::wrap(child) {
                         collect_text(el_ref, unwanted, output);
                     }
                     // Add paragraph separator
-                    if !output.is_empty() && !output.last().map(|s| s.ends_with('\n')).unwrap_or(false) {
+                    if !output.is_empty()
+                        && !output.last().map(|s| s.ends_with('\n')).unwrap_or(false)
+                    {
                         output.push(String::new()); // blank line separator
                     }
                 } else {
@@ -878,10 +913,9 @@ impl SearchService {
             return Ok(cached);
         }
 
-        let provider = self
-            .providers
-            .get(provider_id)
-            .ok_or_else(|| SearchError::NotConfigured(format!("unknown provider: {provider_id}")))?;
+        let provider = self.providers.get(provider_id).ok_or_else(|| {
+            SearchError::NotConfigured(format!("unknown provider: {provider_id}"))
+        })?;
 
         if !provider.is_configured() {
             return Err(SearchError::NotConfigured(format!(
@@ -934,7 +968,8 @@ impl SearchService {
             })
             .collect();
 
-        let all_results: Vec<SearchResult> = join_all(futures).await.into_iter().flatten().collect();
+        let all_results: Vec<SearchResult> =
+            join_all(futures).await.into_iter().flatten().collect();
 
         // Deduplicate by URL
         let mut seen = std::collections::HashSet::new();
@@ -956,9 +991,11 @@ pub async fn api_search(
     Json(query): Json<SearchQuery>,
 ) -> Result<Json<Vec<SearchResult>>, crate::AppError> {
     if query.q.trim().is_empty() {
-        return Err(crate::AppError::Provider(mlx_ollama_core::ProviderError::InvalidRequest {
-            details: "query cannot be empty".to_string(),
-        }));
+        return Err(crate::AppError::Provider(
+            mlx_ollama_core::ProviderError::InvalidRequest {
+                details: "query cannot be empty".to_string(),
+            },
+        ));
     }
 
     let results = state
@@ -981,9 +1018,11 @@ pub async fn api_search_fetch(
     Json(req): Json<FetchRequest>,
 ) -> Result<Json<FetchResult>, crate::AppError> {
     if req.url.trim().is_empty() {
-        return Err(crate::AppError::Provider(mlx_ollama_core::ProviderError::InvalidRequest {
-            details: "url cannot be empty".to_string(),
-        }));
+        return Err(crate::AppError::Provider(
+            mlx_ollama_core::ProviderError::InvalidRequest {
+                details: "url cannot be empty".to_string(),
+            },
+        ));
     }
 
     let result = fetch_and_extract(
@@ -1005,8 +1044,6 @@ pub async fn api_search_providers(
 }
 
 /// GET /api/search/config
-pub async fn api_search_config(
-    State(state): State<crate::AppState>,
-) -> Json<SearchConfig> {
+pub async fn api_search_config(State(state): State<crate::AppState>) -> Json<SearchConfig> {
     Json(state.search_config.clone())
 }

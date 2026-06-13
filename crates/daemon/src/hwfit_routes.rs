@@ -9,7 +9,7 @@
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::Json;
-use mlx_hardware_fit::{self, HardwareProfile, GpuInfo, GpuGroup};
+use mlx_hardware_fit::{self, GpuGroup, GpuInfo, HardwareProfile};
 use mlx_model_fit::{self, FitAnalysis, ModelCard, ServeProfile};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -125,12 +125,10 @@ pub async fn hwfit_system(
 pub async fn hwfit_models(
     Query(query): Query<ModelsQuery>,
 ) -> Result<Json<ModelsResponse>, StatusCode> {
-    let profile = mlx_hardware_fit::detect_system(false)
-        .await
-        .map_err(|e| {
-            error!("Hardware detection failed: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let profile = mlx_hardware_fit::detect_system(false).await.map_err(|e| {
+        error!("Hardware detection failed: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     // Apply manual overrides
     let profile = if query.manual_mode.unwrap_or(false) {
@@ -192,20 +190,18 @@ pub async fn hwfit_models(
 pub async fn hwfit_profiles(
     Query(query): Query<ProfilesQuery>,
 ) -> Result<Json<Vec<ServeProfile>>, StatusCode> {
-    let profile = mlx_hardware_fit::detect_system(false)
-        .await
-        .map_err(|e| {
-            error!("Hardware detection failed: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let profile = mlx_hardware_fit::detect_system(false).await.map_err(|e| {
+        error!("Hardware detection failed: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     let model = ModelCard {
         id: query.model_id.clone(),
         name: query.model_id.clone(),
         provider: "huggingface".to_string(),
-        params_b: query.params_b.unwrap_or_else(|| {
-            mlx_model_fit::params_b_from_name(&query.model_id).unwrap_or(7.0)
-        }),
+        params_b: query
+            .params_b
+            .unwrap_or_else(|| mlx_model_fit::params_b_from_name(&query.model_id).unwrap_or(7.0)),
         architecture: query.architecture.unwrap_or_else(|| "llama".to_string()),
         is_moe: query.is_moe.unwrap_or(false),
         active_params_b: query.active_params_b,
@@ -232,12 +228,10 @@ pub async fn hwfit_profiles(
 pub async fn hwfit_simulate(
     Json(req): Json<SimulateRequest>,
 ) -> Result<Json<SystemResponse>, StatusCode> {
-    let profile = mlx_hardware_fit::detect_system(false)
-        .await
-        .map_err(|e| {
-            error!("Hardware detection failed: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let profile = mlx_hardware_fit::detect_system(false).await.map_err(|e| {
+        error!("Hardware detection failed: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     let simulated = mlx_hardware_fit::simulate_hardware(
         &profile,
@@ -281,7 +275,13 @@ fn get_default_model_catalog() -> Vec<ModelCard> {
             is_moe: false,
             active_params_b: None,
             context_length: 8192,
-            quantizations: vec!["Q8_0".into(), "Q6_K".into(), "Q5_K_M".into(), "Q4_K_M".into(), "Q3_K_M".into()],
+            quantizations: vec![
+                "Q8_0".into(),
+                "Q6_K".into(),
+                "Q5_K_M".into(),
+                "Q4_K_M".into(),
+                "Q3_K_M".into(),
+            ],
             default_quant: "Q4_K_M".into(),
             has_vision: false,
             source_url: Some("https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct".into()),
@@ -312,7 +312,13 @@ fn get_default_model_catalog() -> Vec<ModelCard> {
             is_moe: false,
             active_params_b: None,
             context_length: 32768,
-            quantizations: vec!["Q8_0".into(), "Q6_K".into(), "Q5_K_M".into(), "Q4_K_M".into(), "Q3_K_M".into()],
+            quantizations: vec![
+                "Q8_0".into(),
+                "Q6_K".into(),
+                "Q5_K_M".into(),
+                "Q4_K_M".into(),
+                "Q3_K_M".into(),
+            ],
             default_quant: "Q4_K_M".into(),
             has_vision: false,
             source_url: Some("https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3".into()),
@@ -343,7 +349,13 @@ fn get_default_model_catalog() -> Vec<ModelCard> {
             is_moe: false,
             active_params_b: None,
             context_length: 32768,
-            quantizations: vec!["Q8_0".into(), "Q6_K".into(), "Q5_K_M".into(), "Q4_K_M".into(), "Q3_K_M".into()],
+            quantizations: vec![
+                "Q8_0".into(),
+                "Q6_K".into(),
+                "Q5_K_M".into(),
+                "Q4_K_M".into(),
+                "Q3_K_M".into(),
+            ],
             default_quant: "Q4_K_M".into(),
             has_vision: false,
             source_url: Some("https://huggingface.co/Qwen/Qwen2.5-7B-Instruct".into()),
@@ -389,7 +401,12 @@ fn get_default_model_catalog() -> Vec<ModelCard> {
             is_moe: false,
             active_params_b: None,
             context_length: 4096,
-            quantizations: vec!["Q8_0".into(), "Q6_K".into(), "Q5_K_M".into(), "Q4_K_M".into()],
+            quantizations: vec![
+                "Q8_0".into(),
+                "Q6_K".into(),
+                "Q5_K_M".into(),
+                "Q4_K_M".into(),
+            ],
             default_quant: "Q4_K_M".into(),
             has_vision: false,
             source_url: Some("https://huggingface.co/microsoft/Phi-3-mini-4k-instruct".into()),
@@ -420,7 +437,13 @@ fn get_default_model_catalog() -> Vec<ModelCard> {
             is_moe: false,
             active_params_b: None,
             context_length: 8192,
-            quantizations: vec!["Q8_0".into(), "Q6_K".into(), "Q5_K_M".into(), "Q4_K_M".into(), "Q3_K_M".into()],
+            quantizations: vec![
+                "Q8_0".into(),
+                "Q6_K".into(),
+                "Q5_K_M".into(),
+                "Q4_K_M".into(),
+                "Q3_K_M".into(),
+            ],
             default_quant: "Q4_K_M".into(),
             has_vision: false,
             source_url: Some("https://huggingface.co/google/gemma-2-9b-it".into()),
@@ -451,10 +474,18 @@ fn get_default_model_catalog() -> Vec<ModelCard> {
             is_moe: false,
             active_params_b: None,
             context_length: 131072,
-            quantizations: vec!["Q8_0".into(), "Q6_K".into(), "Q5_K_M".into(), "Q4_K_M".into(), "Q3_K_M".into()],
+            quantizations: vec![
+                "Q8_0".into(),
+                "Q6_K".into(),
+                "Q5_K_M".into(),
+                "Q4_K_M".into(),
+                "Q3_K_M".into(),
+            ],
             default_quant: "Q4_K_M".into(),
             has_vision: false,
-            source_url: Some("https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-7B".into()),
+            source_url: Some(
+                "https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-7B".into(),
+            ),
             size_gb: Some(4.3),
         },
         ModelCard {
@@ -466,10 +497,18 @@ fn get_default_model_catalog() -> Vec<ModelCard> {
             is_moe: false,
             active_params_b: None,
             context_length: 131072,
-            quantizations: vec!["Q8_0".into(), "Q6_K".into(), "Q5_K_M".into(), "Q4_K_M".into(), "Q3_K_M".into()],
+            quantizations: vec![
+                "Q8_0".into(),
+                "Q6_K".into(),
+                "Q5_K_M".into(),
+                "Q4_K_M".into(),
+                "Q3_K_M".into(),
+            ],
             default_quant: "Q4_K_M".into(),
             has_vision: false,
-            source_url: Some("https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Llama-8B".into()),
+            source_url: Some(
+                "https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Llama-8B".into(),
+            ),
             size_gb: Some(4.5),
         },
         // Small models for CPU-only
@@ -482,7 +521,13 @@ fn get_default_model_catalog() -> Vec<ModelCard> {
             is_moe: false,
             active_params_b: None,
             context_length: 2048,
-            quantizations: vec!["Q8_0".into(), "Q6_K".into(), "Q5_K_M".into(), "Q4_K_M".into(), "Q3_K_M".into()],
+            quantizations: vec![
+                "Q8_0".into(),
+                "Q6_K".into(),
+                "Q5_K_M".into(),
+                "Q4_K_M".into(),
+                "Q3_K_M".into(),
+            ],
             default_quant: "Q4_K_M".into(),
             has_vision: false,
             source_url: Some("https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0".into()),

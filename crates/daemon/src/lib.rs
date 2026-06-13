@@ -435,12 +435,19 @@ pub async fn run() -> anyhow::Result<()> {
 
     let state_db_path = resolve_state_db_path();
 
-    let vault = SecretsVault::open(AppConfig::get_settings_path().parent().unwrap_or(std::path::Path::new(".")))
-        .ok()
-        .map(Arc::new);
+    let vault = SecretsVault::open(
+        AppConfig::get_settings_path()
+            .parent()
+            .unwrap_or(std::path::Path::new(".")),
+    )
+    .ok()
+    .map(Arc::new);
 
     let search_config = search::SearchConfig {
-        default_provider: cfg.search_provider.clone().unwrap_or_else(|| "duckduckgo".to_string()),
+        default_provider: cfg
+            .search_provider
+            .clone()
+            .unwrap_or_else(|| "duckduckgo".to_string()),
         searxng_instance: cfg.searxng_instance.clone(),
         brave_api_key: cfg.brave_api_key.clone(),
         safe_search: cfg.search_safe_search.unwrap_or(true),
@@ -590,15 +597,42 @@ pub async fn run() -> anyhow::Result<()> {
         .route("/api/search/config", get(search::api_search_config))
         // ── Research (Wave 5) ──
         .route("/api/research/start", post(research_routes::research_start))
-        .route("/api/research/stream/{job_id}", get(research_routes::research_stream))
-        .route("/api/research/cancel/{job_id}", post(research_routes::research_cancel))
-        .route("/api/research/result/{job_id}", get(research_routes::research_result))
-        .route("/api/research/report/{id}", get(research_routes::research_report))
-        .route("/api/research/library", get(research_routes::research_library))
-        .route("/api/research/spinoff/{id}", post(research_routes::research_spinoff))
-        .route("/api/research/{id}/hide-image", post(research_routes::research_hide_image))
-        .route("/api/research/{id}/unhide-images", post(research_routes::research_unhide_images))
-        .route("/api/research/{id}", delete(research_routes::research_delete))
+        .route(
+            "/api/research/stream/{job_id}",
+            get(research_routes::research_stream),
+        )
+        .route(
+            "/api/research/cancel/{job_id}",
+            post(research_routes::research_cancel),
+        )
+        .route(
+            "/api/research/result/{job_id}",
+            get(research_routes::research_result),
+        )
+        .route(
+            "/api/research/report/{id}",
+            get(research_routes::research_report),
+        )
+        .route(
+            "/api/research/library",
+            get(research_routes::research_library),
+        )
+        .route(
+            "/api/research/spinoff/{id}",
+            post(research_routes::research_spinoff),
+        )
+        .route(
+            "/api/research/{id}/hide-image",
+            post(research_routes::research_hide_image),
+        )
+        .route(
+            "/api/research/{id}/unhide-images",
+            post(research_routes::research_unhide_images),
+        )
+        .route(
+            "/api/research/{id}",
+            delete(research_routes::research_delete),
+        )
         // ── Hardware Fit (Wave 5) ──
         .route("/api/hwfit/system", get(hwfit_routes::hwfit_system))
         .route("/api/hwfit/models", get(hwfit_routes::hwfit_models))
@@ -729,15 +763,18 @@ pub async fn run() -> anyhow::Result<()> {
         )
         .route("/agent/memory/{id}/pin", post(wave1::pin_memory))
         .route("/agent/memory/reindex", post(wave1::reindex_memory))
-        .route(
-            "/agent/memory/semantic",
-            get(wave1::memory_semantic_status),
-        )
+        .route("/agent/memory/semantic", get(wave1::memory_semantic_status))
         // ── Wave 1: Session history organization + editing ──
-        .route("/agent/sessions/{id}/messages", get(wave1::session_messages))
+        .route(
+            "/agent/sessions/{id}/messages",
+            get(wave1::session_messages),
+        )
         .route("/agent/sessions/{id}/flags", post(wave1::session_set_flags))
         .route("/agent/sessions/{id}/fork", post(wave1::session_fork))
-        .route("/agent/sessions/{id}/truncate", post(wave1::session_truncate))
+        .route(
+            "/agent/sessions/{id}/truncate",
+            post(wave1::session_truncate),
+        )
         .route(
             "/agent/sessions/{id}/messages/{event_id}",
             patch(wave1::session_edit_message).delete(wave1::session_delete_message),
