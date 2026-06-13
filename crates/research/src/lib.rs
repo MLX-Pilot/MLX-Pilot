@@ -1280,7 +1280,7 @@ pub fn list_sessions(data_dir: &Path) -> Result<Vec<ResearchSession>, String> {
             }
         }
     }
-    sessions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    sessions.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(sessions)
 }
 
