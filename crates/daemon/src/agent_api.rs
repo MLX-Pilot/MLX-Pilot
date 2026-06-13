@@ -1704,7 +1704,7 @@ async fn load_skill_catalog(
         })
         .collect::<Vec<_>>();
 
-    items.sort_by(|a, b| a.name.cmp(&b.name));
+    items.sort_by_key(|a| a.name.clone());
 
     Ok(LoadedSkillCatalog { discovered, items })
 }
@@ -1940,7 +1940,7 @@ async fn build_capability_inventory_snapshot(
         })
         .map(|entry| (entry.name, entry.description))
         .collect::<Vec<_>>();
-    tools.sort_by(|left, right| left.0.cmp(&right.0));
+    tools.sort_by_key(|left| left.0.clone());
 
     let supports_exec = tools.iter().any(|(name, _)| name == "exec");
     let supports_web = tools.iter().any(|(name, description)| {
@@ -1969,7 +1969,7 @@ async fn build_capability_inventory_snapshot(
         })
         .map(|skill| (skill.name, skill.description))
         .collect::<Vec<_>>();
-    skills.sort_by(|left, right| left.0.cmp(&right.0));
+    skills.sort_by_key(|left| left.0.clone());
 
     let mut plugins = state
         .plugin_manager
@@ -1982,7 +1982,7 @@ async fn build_capability_inventory_snapshot(
             (plugin.id, status, capabilities)
         })
         .collect::<Vec<_>>();
-    plugins.sort_by(|left, right| left.0.cmp(&right.0));
+    plugins.sort_by_key(|left| left.0.clone());
 
     Ok(CapabilityInventorySnapshot {
         provider: provider.to_string(),
@@ -4093,7 +4093,7 @@ pub async fn agent_providers(
         },
     ];
 
-    providers.sort_by(|a, b| a.id.cmp(&b.id));
+    providers.sort_by_key(|a| a.id.clone());
     Ok(Json(providers))
 }
 
@@ -4930,7 +4930,7 @@ pub async fn agent_audit(
             )
         })?;
 
-    entries.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+    entries.sort_by_key(|a| a.timestamp);
     Ok(Json(AgentAuditResponse { entries }))
 }
 

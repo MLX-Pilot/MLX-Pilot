@@ -506,7 +506,7 @@ impl ModelProvider for LlamaCppProvider {
             })
             .collect::<Vec<_>>();
 
-        models.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+        models.sort_by_key(|left| left.name.to_lowercase());
         Ok(models)
     }
 

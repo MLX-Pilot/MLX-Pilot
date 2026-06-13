@@ -988,7 +988,7 @@ impl ChannelService {
                 },
             })
             .collect::<Vec<_>>();
-        accounts.sort_by(|a, b| a.account_id.cmp(&b.account_id));
+        accounts.sort_by_key(|a| a.account_id.clone());
 
         let ambiguity_warning = {
             let active_count = accounts.iter().filter(|account| account.enabled).count();
