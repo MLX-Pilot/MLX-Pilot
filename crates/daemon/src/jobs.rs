@@ -1139,3 +1139,767 @@ pub async fn list_task_runs(
     .await
     .map_err(|e| io::Error::other(e.to_string()))?
 }
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+    use std::sync::Mutex as StdMutex;
+
+    /// A clock whose time can be externally controlled.
+    pub struct FakeClock {
+        now: StdMutex<DateTime<Utc>>,
+    }
+
+    impl FakeClock {
+        pub fn new(start: DateTime<Utc>) -> Self {
+            Self {
+                now: StdMutex::new(start),
+            }
+        }
+
+        pub fn set(&self, t: DateTime<Utc>) {
+            *self.now.lock().unwrap() = t;
+        }
+
+        pub fn advance(&self, d: chrono::Duration) -> DateTime<Utc> {
+            let mut now = self.now.lock().unwrap();
+            *now = *now + d;
+            *now
+        }
+    }
+
+    impl Clock for FakeClock {
+        fn now(&self) -> DateTime<Utc> {
+            *self.now.lock().unwrap()
+        }
+    }
+
+    // ── Test helpers ──────────────────────────────────────────────────────
+
+    const MIGRATION_3_SQL: &str = r#"
+        CREATE TABLE IF NOT EXISTS scheduled_tasks (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            schedule_kind TEXT NOT NULL DEFAULT 'once',
+            cron_expr TEXT,
+            interval_secs INTEGER,
+            run_at TEXT,
+            job_kind TEXT NOT NULL DEFAULT 'generic',
+            payload_json TEXT,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            last_run_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS task_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL,
+            job_id TEXT,
+            status TEXT NOT NULL DEFAULT 'queued',
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            error TEXT,
+            FOREIGN KEY(task_id) REFERENCES scheduled_tasks(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_task_runs_task_id ON task_runs(task_id);
+    "#;
+
+    fn setup_db(dir: &tempfile::TempDir) -> PathBuf {
+        let db_path = dir.path().join("test_scheduler.sqlite");
+        let conn = Connection::open(&db_path).expect("open test db");
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .unwrap();
+        conn.execute_batch(MIGRATION_3_SQL).unwrap();
+        conn.close().ok();
+        db_path
+    }
+
+    fn insert_task(db_path: &Path, task: &ScheduledTask) {
+        let conn = open_sqlite(db_path).unwrap();
+        conn.execute(
+            "INSERT INTO scheduled_tasks
+             (id, name, schedule_kind, cron_expr, interval_secs, run_at,
+              job_kind, payload_json, enabled, created_at, last_run_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                task.id,
+                task.name,
+                task.schedule_kind,
+                task.cron_expr,
+                task.interval_secs,
+                task.run_at.map(|dt| dt.to_rfc3339()),
+                task.job_kind,
+                task.payload_json,
+                task.enabled as i32,
+                task.created_at.to_rfc3339(),
+                task.last_run_at.map(|dt| dt.to_rfc3339()),
+            ],
+        )
+        .unwrap();
+    }
+
+    async fn setup_harness(start_time: DateTime<Utc>) -> TestHarness {
+        let dir = tempfile::TempDir::new().unwrap();
+        let db_path = setup_db(&dir);
+
+        let clock = Arc::new(FakeClock::new(start_time));
+        let registry = Arc::new(JobRegistry::new(4));
+        let dispatcher = Arc::new(ActionDispatcher::new());
+
+        dispatcher
+            .register(
+                "generic",
+                Arc::new(|payload: Value, ctx: JobCtx| {
+                    Box::pin(async move {
+                        ctx.progress(50, "working", "test work");
+                        Ok(payload)
+                    })
+                }),
+            )
+            .await;
+
+        let scheduler = Scheduler::new(
+            db_path.clone(),
+            registry.clone(),
+            dispatcher.clone(),
+            clock.clone(),
+        );
+
+        TestHarness {
+            _dir: dir,
+            db_path,
+            clock,
+            registry,
+            dispatcher,
+            scheduler,
+        }
+    }
+
+    struct TestHarness {
+        _dir: tempfile::TempDir,
+        db_path: PathBuf,
+        clock: Arc<FakeClock>,
+        registry: Arc<JobRegistry>,
+        dispatcher: Arc<ActionDispatcher>,
+        scheduler: Scheduler,
+    }
+
+    fn default_task(id: &str, name: &str) -> ScheduledTask {
+        let now = Utc::now();
+        ScheduledTask {
+            id: id.to_string(),
+            name: name.to_string(),
+            schedule_kind: "generic".to_string(),
+            cron_expr: None,
+            interval_secs: None,
+            run_at: None,
+            job_kind: "generic".to_string(),
+            payload_json: Some(r#"{"test":true}"#.to_string()),
+            enabled: true,
+            created_at: now,
+            last_run_at: None,
+        }
+    }
+
+    fn task_runs_for(db_path: &Path, task_id: &str) -> Vec<TaskRun> {
+        let conn = open_sqlite(db_path).unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, task_id, job_id, status, started_at, finished_at, error
+                 FROM task_runs WHERE task_id = ?1 ORDER BY id",
+            )
+            .unwrap();
+        stmt.query_map(params![task_id], |row| {
+            Ok(TaskRun {
+                id: row.get(0)?,
+                task_id: row.get(1)?,
+                job_id: row.get(2)?,
+                status: row.get::<_, String>(3).unwrap_or_else(|_| "unknown".to_string()),
+                started_at: row
+                    .get::<_, String>(4)
+                    .ok()
+                    .and_then(|s| {
+                        DateTime::parse_from_rfc3339(&s)
+                            .ok()
+                            .map(|dt| dt.with_timezone(&Utc))
+                    })
+                    .unwrap_or_else(Utc::now),
+                finished_at: row.get::<_, Option<String>>(5)?.and_then(|s| {
+                    DateTime::parse_from_rfc3339(&s)
+                        .ok()
+                        .map(|dt| dt.with_timezone(&Utc))
+                }),
+                error: row.get(6)?,
+            })
+        })
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect()
+    }
+
+    fn get_task(db_path: &Path, id: &str) -> Option<ScheduledTask> {
+        let conn = open_sqlite(db_path).unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, schedule_kind, cron_expr, interval_secs, run_at,
+                        job_kind, payload_json, enabled, created_at, last_run_at
+                 FROM scheduled_tasks WHERE id = ?1",
+            )
+            .unwrap();
+        stmt.query_row(params![id], row_to_scheduled_task).ok()
+    }
+
+    /// Helper: run a scheduler tick and wait for spawned jobs to finish.
+    async fn tick_and_wait(h: &TestHarness) {
+        if let Err(e) = h.scheduler.tick().await {
+            if !e.contains("no handler registered") {
+                panic!("tick failed: {e}");
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+
+    // ── Unit tests: is_task_due ───────────────────────────────────────────
+
+    #[test]
+    fn due_once_past_run_at_not_yet_run() {
+        let t0 = Utc::now();
+        let task = ScheduledTask {
+            run_at: Some(t0 - chrono::Duration::minutes(10)),
+            last_run_at: None,
+            schedule_kind: "once".to_string(),
+            ..default_task("t1", "test")
+        };
+        assert!(is_task_due(&task, t0));
+    }
+
+    #[test]
+    fn due_once_not_due_before_run_at() {
+        let t0 = Utc::now();
+        let task = ScheduledTask {
+            run_at: Some(t0 + chrono::Duration::minutes(10)),
+            last_run_at: None,
+            schedule_kind: "once".to_string(),
+            ..default_task("t1", "test")
+        };
+        assert!(!is_task_due(&task, t0));
+    }
+
+    #[test]
+    fn due_once_not_due_if_already_run() {
+        let t0 = Utc::now();
+        let task = ScheduledTask {
+            run_at: Some(t0 - chrono::Duration::minutes(20)),
+            last_run_at: Some(t0 - chrono::Duration::minutes(10)),
+            schedule_kind: "once".to_string(),
+            ..default_task("t1", "test")
+        };
+        assert!(!is_task_due(&task, t0));
+    }
+
+    #[test]
+    fn due_interval_first_run_always_due() {
+        let task = ScheduledTask {
+            interval_secs: Some(60),
+            last_run_at: None,
+            schedule_kind: "interval".to_string(),
+            ..default_task("t1", "test")
+        };
+        assert!(is_task_due(&task, Utc::now()));
+    }
+
+    #[test]
+    fn due_interval_not_due_before_elapsed() {
+        let t0 = Utc::now();
+        let task = ScheduledTask {
+            interval_secs: Some(60),
+            last_run_at: Some(t0 - chrono::Duration::seconds(30)),
+            schedule_kind: "interval".to_string(),
+            ..default_task("t1", "test")
+        };
+        assert!(!is_task_due(&task, t0));
+    }
+
+    #[test]
+    fn due_interval_due_after_elapsed() {
+        let t0 = Utc::now();
+        let task = ScheduledTask {
+            interval_secs: Some(60),
+            last_run_at: Some(t0 - chrono::Duration::seconds(65)),
+            schedule_kind: "interval".to_string(),
+            ..default_task("t1", "test")
+        };
+        assert!(is_task_due(&task, t0));
+    }
+
+    #[test]
+    fn due_cron_fires_after_last_run() {
+        let t0 = Utc.with_ymd_and_hms(2025, 6, 14, 12, 0, 0).unwrap();
+        let created = t0 - chrono::Duration::hours(1);
+        let task = ScheduledTask {
+            cron_expr: Some("0 5 * * * *".to_string()),
+            last_run_at: None,
+            created_at: created,
+            schedule_kind: "cron".to_string(),
+            ..default_task("t1", "test")
+        };
+        // Next fire after created (11:00) is 11:05, which is ≤ 12:00 → due.
+        assert!(is_task_due(&task, t0));
+    }
+
+    #[test]
+    fn due_cron_not_due_before_first_fire() {
+        let t0 = Utc.with_ymd_and_hms(2025, 6, 14, 12, 0, 0).unwrap();
+        let created = t0 - chrono::Duration::minutes(2); // 11:58
+        let task = ScheduledTask {
+            cron_expr: Some("0 5 * * * *".to_string()),
+            last_run_at: None,
+            created_at: created,
+            schedule_kind: "cron".to_string(),
+            ..default_task("t1", "test")
+        };
+        // After 11:58, next fire is 12:05, > 12:00 → not due.
+        assert!(!is_task_due(&task, t0));
+    }
+
+    #[test]
+    fn due_cron_due_after_interval() {
+        let t0 = Utc.with_ymd_and_hms(2025, 6, 14, 12, 10, 0).unwrap();
+        let last_run = t0 - chrono::Duration::minutes(15); // 11:55
+        let task = ScheduledTask {
+            cron_expr: Some("0 5 * * * *".to_string()),
+            last_run_at: Some(last_run),
+            schedule_kind: "cron".to_string(),
+            ..default_task("t1", "test")
+        };
+        // After 11:55, next fire is 12:05, ≤ 12:10 → due.
+        assert!(is_task_due(&task, t0));
+    }
+
+    #[test]
+    fn due_cron_not_due_future_fire() {
+        let t0 = Utc.with_ymd_and_hms(2025, 6, 14, 12, 3, 0).unwrap();
+        let last_run = Utc.with_ymd_and_hms(2025, 6, 14, 12, 0, 0).unwrap();
+        let task = ScheduledTask {
+            cron_expr: Some("0 5 * * * *".to_string()),
+            last_run_at: Some(last_run),
+            schedule_kind: "cron".to_string(),
+            ..default_task("t1", "test")
+        };
+        // After 12:00, next fire is 12:05, > 12:03 → not due.
+        assert!(!is_task_due(&task, t0));
+    }
+
+    // ── Integration tests ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn once_task_fires_exactly_once() {
+        let t0 = Utc::now();
+        let h = setup_harness(t0).await;
+
+        insert_task(
+            &h.db_path,
+            &ScheduledTask {
+                id: "once-1".into(),
+                name: "test once".into(),
+                schedule_kind: "once".into(),
+                run_at: Some(t0 - chrono::Duration::seconds(1)),
+                job_kind: "generic".into(),
+                enabled: true,
+                last_run_at: None,
+                ..default_task("once-1", "test")
+            },
+        );
+
+        tick_and_wait(&h).await;
+        assert_eq!(task_runs_for(&h.db_path, "once-1").len(), 1);
+
+        // Second tick — must NOT fire again.
+        tick_and_wait(&h).await;
+        assert_eq!(
+            task_runs_for(&h.db_path, "once-1").len(),
+            1,
+            "once task must not fire twice"
+        );
+    }
+
+    #[tokio::test]
+    async fn once_task_disabled_after_run() {
+        let t0 = Utc::now();
+        let h = setup_harness(t0).await;
+
+        insert_task(
+            &h.db_path,
+            &ScheduledTask {
+                id: "once-dis".into(),
+                name: "test once disable".into(),
+                schedule_kind: "once".into(),
+                run_at: Some(t0 - chrono::Duration::seconds(1)),
+                job_kind: "generic".into(),
+                enabled: true,
+                last_run_at: None,
+                ..default_task("once-dis", "test")
+            },
+        );
+
+        tick_and_wait(&h).await;
+        let t = get_task(&h.db_path, "once-dis").expect("task should exist");
+        assert!(!t.enabled, "once task must be disabled after run");
+        assert!(t.last_run_at.is_some(), "last_run_at must be set");
+    }
+
+    #[tokio::test]
+    async fn interval_task_fires_repeatedly() {
+        let t0 = Utc::now();
+        let h = setup_harness(t0).await;
+
+        insert_task(
+            &h.db_path,
+            &ScheduledTask {
+                id: "int-1".into(),
+                name: "test interval".into(),
+                schedule_kind: "interval".into(),
+                interval_secs: Some(10),
+                job_kind: "generic".into(),
+                enabled: true,
+                last_run_at: None,
+                ..default_task("int-1", "test")
+            },
+        );
+
+        tick_and_wait(&h).await;
+        assert_eq!(task_runs_for(&h.db_path, "int-1").len(), 1);
+
+        // Advance 5 s — not due yet.
+        h.clock.advance(chrono::Duration::seconds(5));
+        tick_and_wait(&h).await;
+        assert_eq!(task_runs_for(&h.db_path, "int-1").len(), 1);
+
+        // Advance another 10 s — due (15 s total).
+        h.clock.advance(chrono::Duration::seconds(10));
+        tick_and_wait(&h).await;
+        assert_eq!(task_runs_for(&h.db_path, "int-1").len(), 2);
+    }
+
+    #[tokio::test]
+    async fn cron_task_fires_on_schedule() {
+        let t0 = Utc.with_ymd_and_hms(2025, 6, 14, 12, 0, 0).unwrap();
+        let h = setup_harness(t0).await;
+
+        insert_task(
+            &h.db_path,
+            &ScheduledTask {
+                id: "cron-1".into(),
+                name: "test cron".into(),
+                schedule_kind: "cron".into(),
+                cron_expr: Some("0 * * * * *".into()), // every minute
+                job_kind: "generic".into(),
+                enabled: true,
+                last_run_at: None,
+                created_at: t0 - chrono::Duration::minutes(5),
+                ..default_task("cron-1", "test")
+            },
+        );
+
+        tick_and_wait(&h).await;
+        assert_eq!(task_runs_for(&h.db_path, "cron-1").len(), 1);
+
+        // Advance 30 s — not due.
+        h.clock.advance(chrono::Duration::seconds(30));
+        tick_and_wait(&h).await;
+        assert_eq!(task_runs_for(&h.db_path, "cron-1").len(), 1);
+
+        // Advance to 12:01.
+        h.clock.set(Utc.with_ymd_and_hms(2025, 6, 14, 12, 1, 0).unwrap());
+        tick_and_wait(&h).await;
+        assert_eq!(task_runs_for(&h.db_path, "cron-1").len(), 2);
+    }
+
+    #[tokio::test]
+    async fn concurrent_ticks_do_not_duplicate() {
+        let t0 = Utc::now();
+        let h = setup_harness(t0).await;
+
+        insert_task(
+            &h.db_path,
+            &ScheduledTask {
+                id: "conc-1".into(),
+                name: "test concurrent".into(),
+                schedule_kind: "once".into(),
+                run_at: Some(t0 - chrono::Duration::seconds(1)),
+                job_kind: "generic".into(),
+                enabled: true,
+                last_run_at: None,
+                ..default_task("conc-1", "test")
+            },
+        );
+
+        let (r1, r2) = tokio::join!(h.scheduler.tick(), h.scheduler.tick());
+        assert!(r1.is_ok() || r2.is_ok());
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        assert_eq!(
+            task_runs_for(&h.db_path, "conc-1").len(),
+            1,
+            "concurrent ticks must produce exactly one task_run"
+        );
+    }
+
+    #[tokio::test]
+    async fn job_id_recorded_in_task_runs() {
+        let t0 = Utc::now();
+        let h = setup_harness(t0).await;
+
+        insert_task(
+            &h.db_path,
+            &ScheduledTask {
+                id: "jid-1".into(),
+                name: "test job_id".into(),
+                schedule_kind: "once".into(),
+                run_at: Some(t0 - chrono::Duration::seconds(1)),
+                job_kind: "generic".into(),
+                enabled: true,
+                last_run_at: None,
+                ..default_task("jid-1", "test")
+            },
+        );
+
+        tick_and_wait(&h).await;
+        let runs = task_runs_for(&h.db_path, "jid-1");
+        assert_eq!(runs.len(), 1);
+        let jid = runs[0].job_id.as_ref().expect("job_id must be set");
+        assert!(!jid.is_empty());
+        assert_eq!(jid.len(), 36, "job_id should be a UUID v4");
+    }
+
+    #[tokio::test]
+    async fn failure_records_error_in_task_runs() {
+        let t0 = Utc::now();
+        let h = setup_harness(t0).await;
+
+        // Register a handler that always fails.
+        h.dispatcher
+            .register(
+                "failing",
+                Arc::new(|_payload: Value, _ctx: JobCtx| {
+                    Box::pin(async move { Err("simulated failure".to_string()) })
+                }),
+            )
+            .await;
+
+        insert_task(
+            &h.db_path,
+            &ScheduledTask {
+                id: "fail-1".into(),
+                name: "test failure".into(),
+                schedule_kind: "once".into(),
+                run_at: Some(t0 - chrono::Duration::seconds(1)),
+                job_kind: "failing".into(),
+                enabled: true,
+                last_run_at: None,
+                ..default_task("fail-1", "test")
+            },
+        );
+
+        tick_and_wait(&h).await;
+        let runs = task_runs_for(&h.db_path, "fail-1");
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].status, "error");
+        assert_eq!(runs[0].error.as_deref(), Some("simulated failure"));
+    }
+
+    #[tokio::test]
+    async fn last_run_at_updated_after_completion() {
+        let t0 = Utc::now();
+        let h = setup_harness(t0).await;
+
+        insert_task(
+            &h.db_path,
+            &ScheduledTask {
+                id: "lru-1".into(),
+                name: "test last_run_at".into(),
+                schedule_kind: "interval".into(),
+                interval_secs: Some(30),
+                job_kind: "generic".into(),
+                enabled: true,
+                last_run_at: None,
+                ..default_task("lru-1", "test")
+            },
+        );
+
+        tick_and_wait(&h).await;
+        let t = get_task(&h.db_path, "lru-1").expect("task should exist");
+        assert!(t.last_run_at.is_some(), "last_run_at must be updated");
+        let diff = (t.last_run_at.unwrap() - t0).num_seconds().abs();
+        assert!(diff < 5, "last_run_at should be within 5s of start");
+    }
+
+    #[tokio::test]
+    async fn recovery_marks_stale_runs_as_error() {
+        let t0 = Utc::now();
+        let h = setup_harness(t0).await;
+
+        // Insert a parent task so the FK constraint is satisfied.
+        let dummy_task = ScheduledTask {
+            id: "dummy-task".into(),
+            name: "dummy".into(),
+            ..default_task("dummy-task", "dummy")
+        };
+        insert_task(&h.db_path, &dummy_task);
+
+        // Simulate a "running" task_run left over from a crash.
+        {
+            let conn = open_sqlite(&h.db_path).unwrap();
+            conn.execute(
+                "INSERT INTO task_runs (task_id, job_id, status, started_at)
+                 VALUES ('dummy-task', 'dummy-jid', 'running', ?1)",
+                params![t0.to_rfc3339()],
+            )
+            .unwrap();
+        }
+
+        h.scheduler.recover_stale_runs().await.unwrap();
+
+        let conn = open_sqlite(&h.db_path).unwrap();
+        let (status, error): (String, Option<String>) = conn
+            .query_row(
+                "SELECT status, error FROM task_runs WHERE task_id = 'dummy-task'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "error");
+        assert_eq!(error.as_deref(), Some("daemon restarted"));
+    }
+
+    #[tokio::test]
+    async fn cancel_active_jobs_on_shutdown() {
+        let t0 = Utc::now();
+        let h = setup_harness(t0).await;
+
+        h.dispatcher
+            .register(
+                "long_running",
+                Arc::new(|_payload: Value, ctx: JobCtx| {
+                    Box::pin(async move {
+                        ctx.progress(10, "start", "long job started");
+                        for _ in 0..50 {
+                            if ctx.is_cancelled() {
+                                return Err("cancelled".to_string());
+                            }
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        }
+                        Ok(Value::Null)
+                    })
+                }),
+            )
+            .await;
+
+        insert_task(
+            &h.db_path,
+            &ScheduledTask {
+                id: "long-1".into(),
+                name: "test cancel".into(),
+                schedule_kind: "once".into(),
+                run_at: Some(t0 - chrono::Duration::seconds(1)),
+                job_kind: "long_running".into(),
+                enabled: true,
+                last_run_at: None,
+                ..default_task("long-1", "test")
+            },
+        );
+
+        tick_and_wait(&h).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Cancel all active jobs (simulating shutdown).
+        h.scheduler.cancel_all_active().await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let jobs = h.registry.list().await;
+        let long_job = jobs.iter().find(|j| j.kind == "long_running");
+        if let Some(j) = long_job {
+            assert!(
+                matches!(j.status, JobStatus::Cancelled | JobStatus::Error),
+                "long job should be cancelled, got {:?}",
+                j.status
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn once_task_disabled_even_on_failure() {
+        let t0 = Utc::now();
+        let h = setup_harness(t0).await;
+
+        h.dispatcher
+            .register(
+                "fragile",
+                Arc::new(|_payload: Value, _ctx: JobCtx| {
+                    Box::pin(async move { Err("boom".to_string()) })
+                }),
+            )
+            .await;
+
+        insert_task(
+            &h.db_path,
+            &ScheduledTask {
+                id: "frag-1".into(),
+                name: "test fragile".into(),
+                schedule_kind: "once".into(),
+                run_at: Some(t0 - chrono::Duration::seconds(1)),
+                job_kind: "fragile".into(),
+                enabled: true,
+                last_run_at: None,
+                ..default_task("frag-1", "test")
+            },
+        );
+
+        tick_and_wait(&h).await;
+
+        let t = get_task(&h.db_path, "frag-1").expect("task should exist");
+        assert!(!t.enabled, "once task must be disabled even after failure");
+        assert!(t.last_run_at.is_some(), "last_run_at must be set");
+
+        let runs = task_runs_for(&h.db_path, "frag-1");
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].status, "error");
+    }
+
+    #[tokio::test]
+    async fn no_orphan_jobs_after_completion() {
+        let t0 = Utc::now();
+        let h = setup_harness(t0).await;
+
+        insert_task(
+            &h.db_path,
+            &ScheduledTask {
+                id: "orphan-1".into(),
+                name: "test orphan".into(),
+                schedule_kind: "once".into(),
+                run_at: Some(t0 - chrono::Duration::seconds(1)),
+                job_kind: "generic".into(),
+                enabled: true,
+                last_run_at: None,
+                ..default_task("orphan-1", "test")
+            },
+        );
+
+        tick_and_wait(&h).await;
+
+        let jobs = h.registry.list().await;
+        let done: Vec<_> = jobs
+            .iter()
+            .filter(|j| j.status == JobStatus::Done)
+            .collect();
+        assert!(!done.is_empty(), "completed jobs should be visible");
+
+        let record = h.registry.get(&done[0].id).await;
+        assert!(record.is_some());
+        assert_eq!(record.unwrap().status, JobStatus::Done);
+    }
+}
