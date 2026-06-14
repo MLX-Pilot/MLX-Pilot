@@ -79,6 +79,9 @@ struct AppState {
     pub compare: Arc<mlx_agent_core::CompareStore>,
     pub jobs: Arc<jobs::JobRegistry>,
     pub state_db_path: FsPathBuf,
+    /// Cancellation token for the background scheduler; fired on shutdown.
+    #[allow(dead_code)]
+    pub scheduler_shutdown: tokio_util::sync::CancellationToken,
     pub search_service: Arc<search::SearchService>,
     pub search_config: search::SearchConfig,
     #[allow(dead_code)]
@@ -554,6 +557,7 @@ pub async fn run() -> anyhow::Result<()> {
         ),
         jobs: Arc::new(jobs::JobRegistry::new(4)),
         state_db_path: state_db_path.clone(),
+        scheduler_shutdown: tokio_util::sync::CancellationToken::new(),
         search_service: search_service.clone(),
         search_config: search_config.clone(),
         embedder: embedder.clone(),
@@ -588,14 +592,16 @@ pub async fn run() -> anyhow::Result<()> {
         .await;
     }
 
-    // Start the background scheduler.
+    // Start the background scheduler with a real clock.
+    // Use a clone of the state's shutdown token so cancelling the state
+    // token cleanly shuts down the scheduler.
     let scheduler = jobs::Scheduler::new(
         state.state_db_path.clone(),
         state.jobs.clone(),
         dispatcher,
+        Arc::new(jobs::RealClock),
     );
-    let scheduler_shutdown = tokio_util::sync::CancellationToken::new();
-    scheduler.start(scheduler_shutdown);
+    scheduler.start(state.scheduler_shutdown.clone());
 
     let app = Router::new()
         .route("/config", get(get_config).post(update_config))

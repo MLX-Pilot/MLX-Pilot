@@ -322,6 +322,22 @@ impl JobCtx {
     }
 }
 
+// ── Clock abstraction for deterministic scheduling ─────────────────────────
+
+/// Injectable clock for deterministic tests.
+pub trait Clock: Send + Sync {
+    fn now(&self) -> DateTime<Utc>;
+}
+
+/// Production clock — delegates to [`Utc::now`].
+pub struct RealClock;
+
+impl Clock for RealClock {
+    fn now(&self) -> DateTime<Utc> {
+        Utc::now()
+    }
+}
+
 // ── Action dispatcher ──────────────────────────────────────────────────────
 
 /// Type-erased, boxed future returned by an [`ActionHandler`].
@@ -523,12 +539,14 @@ fn default_enabled() -> bool {
 
 // ── Scheduler ───────────────────────────────────────────────────────────────
 
-/// Background scheduler that polls SQLite for due tasks and spawns them via the
-/// JobRegistry, dispatching each `job_kind` to the appropriate [`ActionHandler`].
+/// Background scheduler that polls SQLite for due tasks, atomically claims
+/// them to prevent duplicates, and dispatches each `job_kind` to the
+/// appropriate [`ActionHandler`].
 pub struct Scheduler {
     db_path: PathBuf,
     registry: Arc<JobRegistry>,
     dispatcher: Arc<ActionDispatcher>,
+    clock: Arc<dyn Clock>,
 }
 
 impl Scheduler {
@@ -536,26 +554,37 @@ impl Scheduler {
         db_path: PathBuf,
         registry: Arc<JobRegistry>,
         dispatcher: Arc<ActionDispatcher>,
+        clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
             db_path,
             registry,
             dispatcher,
+            clock,
         }
     }
 
-    /// Start the scheduler loop. Runs until the CancellationToken is triggered.
+    /// Start the scheduler loop. Runs recovery first, then ticks on a periodic
+    /// interval until `shutdown` is triggered. When shutting down, cancels all
+    /// active jobs cooperatively.
     pub fn start(self, shutdown: CancellationToken) -> JoinHandle<()> {
         tokio::spawn(async move {
-            // Wait a bit before first tick to let the system stabilize.
-            tokio::time::sleep(Duration::from_secs(5)).await;
+            // Short initial delay so the system stabilises.
+            tokio::time::sleep(Duration::from_secs(2)).await;
+
+            // Recovery: mark any task_run rows still "running" as errored.
+            if let Err(e) = self.recover_stale_runs().await {
+                warn!("scheduler recovery error: {e}");
+            }
+
             let mut interval = tokio::time::interval(Duration::from_secs(30));
             info!("scheduler started (30s tick)");
 
             loop {
                 tokio::select! {
                     _ = shutdown.cancelled() => {
-                        info!("scheduler shutting down");
+                        info!("scheduler shutting down — cancelling active jobs");
+                        self.cancel_all_active().await;
                         break;
                     }
                     _ = interval.tick() => {
@@ -568,26 +597,67 @@ impl Scheduler {
         })
     }
 
+    /// Mark any `task_runs` still in `"running"` status as errored (daemon
+    /// restart).
+    async fn recover_stale_runs(&self) -> Result<(), String> {
+        let db_path = self.db_path.clone();
+        let now = self.clock.now();
+        let affected = tokio::task::spawn_blocking(move || -> Result<usize, io::Error> {
+            let conn = open_sqlite(&db_path)?;
+            let now_str = now.to_rfc3339();
+            let n = conn
+                .execute(
+                    "UPDATE task_runs SET status = 'error', error = 'daemon restarted',
+                     finished_at = ?1 WHERE status = 'running'",
+                    params![now_str],
+                )
+                .map_err(sql_error)?;
+            Ok(n)
+        })
+        .await
+        .map_err(|e| format!("recover_stale_runs join error: {e}"))?
+        .map_err(|e| format!("recover_stale_runs: {e}"))?;
+        if affected > 0 {
+            info!("scheduler marked {affected} stale task_run(s) as error");
+        }
+        Ok(())
+    }
+
+    /// Cancel every active (queued or running) job in the registry.
+    async fn cancel_all_active(&self) {
+        let records = self.registry.list().await;
+        for r in &records {
+            if matches!(r.status, JobStatus::Queued | JobStatus::Running) {
+                self.registry.cancel(&r.id).await;
+            }
+        }
+    }
+
+    /// Single scheduler tick: claim due tasks atomically, then spawn a job
+    /// for each.
     async fn tick(&self) -> Result<(), String> {
-        let tasks = load_due_tasks(&self.db_path)
+        let now = self.clock.now();
+
+        // Atomically claim due tasks in a transaction.
+        let claimed = claim_due_tasks(&self.db_path, now)
             .await
             .map_err(|e| e.to_string())?;
-        if tasks.is_empty() {
+
+        if claimed.is_empty() {
             return Ok(());
         }
 
-        debug!("scheduler found {} due task(s)", tasks.len());
-        for task in tasks {
-            if !task.enabled {
-                continue;
-            }
+        debug!("scheduler claimed {} due task(s)", claimed.len());
+        for task in claimed {
             let registry = self.registry.clone();
             let dispatcher = self.dispatcher.clone();
             let db_path = self.db_path.clone();
+            let clock = self.clock.clone();
             let task_id = task.id.clone();
             let job_kind = task.job_kind.clone();
+            let is_once = task.schedule_kind == "once";
 
-            // Parse payload from payload_json, defaulting to Null.
+            // Parse payload from payload_json; default to Null.
             let payload: Value = task
                 .payload_json
                 .as_deref()
@@ -603,8 +673,9 @@ impl Scheduler {
                     let dispatcher = dispatcher.clone();
                     let job_kind = job_kind.clone();
                     let payload = payload.clone();
+                    let clock = clock.clone();
                     async move {
-                        // Record the run start, including the actual job_id.
+                        // Record the run start with the actual job_id.
                         let run_id = record_run_start(&db_path, &task_id, &ctx.job_id).await;
 
                         ctx.progress(10, "running", &format!("Executing {job_kind}"));
@@ -612,13 +683,22 @@ impl Scheduler {
                         // Dispatch to the real action handler.
                         let result = dispatcher.dispatch(&job_kind, payload, ctx).await;
 
-                        // Record the run finish with status.
+                        // Persist completion: status, last_run_at, and maybe disable.
+                        let now = clock.now();
                         match &result {
                             Ok(_) => {
-                                record_run_finish(&db_path, run_id, "success", None).await;
+                                complete_scheduled_run(
+                                    &db_path, &task_id, run_id, "success",
+                                    None, now, is_once,
+                                )
+                                .await;
                             }
                             Err(e) => {
-                                record_run_finish(&db_path, run_id, "error", Some(e)).await;
+                                complete_scheduled_run(
+                                    &db_path, &task_id, run_id, "error",
+                                    Some(e), now, is_once,
+                                )
+                                .await;
                             }
                         }
 
@@ -747,10 +827,22 @@ pub async fn scheduler_task_runs(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
-async fn load_due_tasks(db_path: &Path) -> Result<Vec<ScheduledTask>, io::Error> {
+/// Atomically claim due tasks.
+///
+/// Within a single transaction, reads every enabled task, checks if it is due
+/// (using the given `now`), and attempts an optimistic-lock UPDATE of
+/// `last_run_at`. Only tasks whose UPDATE succeeds (1 row changed) are
+/// returned — preventing duplicate execution from overlapping ticks or
+/// restarts.
+async fn claim_due_tasks(
+    db_path: &Path,
+    now: DateTime<Utc>,
+) -> Result<Vec<ScheduledTask>, io::Error> {
     let db_path = db_path.to_path_buf();
     tokio::task::spawn_blocking(move || {
         let conn = open_sqlite(&db_path)?;
+
+        // Read all enabled tasks.
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, schedule_kind, cron_expr, interval_secs, run_at,
@@ -764,14 +856,39 @@ async fn load_due_tasks(db_path: &Path) -> Result<Vec<ScheduledTask>, io::Error>
             .query_map([], row_to_scheduled_task)
             .map_err(sql_error)?;
 
-        let mut tasks = Vec::new();
+        let mut candidates = Vec::new();
         for row in rows {
             let task = row.map_err(sql_error)?;
-            if is_task_due(&task) {
-                tasks.push(task);
+            if is_task_due(&task, now) {
+                candidates.push(task);
             }
         }
-        Ok(tasks)
+
+        // Atomically claim each candidate.
+        let now_str = now.to_rfc3339();
+        let mut claimed = Vec::new();
+        for task in &candidates {
+            let old_last: Option<String> = task.last_run_at.map(|dt| dt.to_rfc3339());
+            let changes = if let Some(ref old) = old_last {
+                conn.execute(
+                    "UPDATE scheduled_tasks SET last_run_at = ?1
+                     WHERE id = ?2 AND enabled = 1 AND last_run_at = ?3",
+                    params![now_str, task.id, old],
+                )
+            } else {
+                conn.execute(
+                    "UPDATE scheduled_tasks SET last_run_at = ?1
+                     WHERE id = ?2 AND enabled = 1 AND last_run_at IS NULL",
+                    params![now_str, task.id],
+                )
+            }
+            .map_err(sql_error)?;
+            if changes > 0 {
+                claimed.push(task.clone());
+            }
+        }
+
+        Ok(claimed)
     })
     .await
     .map_err(|e| io::Error::other(e.to_string()))?
@@ -798,60 +915,60 @@ async fn record_run_start(db_path: &Path, task_id: &str, job_id: &str) -> i64 {
     }
 }
 
-async fn record_run_finish(db_path: &Path, run_id: i64, status: &str, error: Option<&str>) {
+/// Atomically finalise a scheduled run: update the `task_runs` row AND refresh
+/// `scheduled_tasks.last_run_at`, and for `once` tasks disable further
+/// execution.
+async fn complete_scheduled_run(
+    db_path: &Path,
+    task_id: &str,
+    run_id: i64,
+    status: &str,
+    error: Option<&str>,
+    now: DateTime<Utc>,
+    is_once: bool,
+) {
     let db_path = db_path.to_path_buf();
+    let task_id = task_id.to_string();
     let status = status.to_string();
     let error = error.map(|s| s.to_string());
+    let now_str = now.to_rfc3339();
     let _ = tokio::task::spawn_blocking(move || {
         let conn = open_sqlite(&db_path)?;
-        let now = Utc::now().to_rfc3339();
+
+        // Update the task_runs row.
         conn.execute(
             "UPDATE task_runs SET status = ?1, finished_at = ?2, error = ?3 WHERE id = ?4",
-            params![status, now, error, run_id],
+            params![status, now_str, error, run_id],
         )
         .map_err(sql_error)?;
-        Ok::<_, io::Error>(())
-    })
-    .await;
-}
 
-#[allow(dead_code)]
-async fn disable_task(db_path: &Path, task_id: &str) {
-    let db_path = db_path.to_path_buf();
-    let task_id = task_id.to_string();
-    let _ = tokio::task::spawn_blocking(move || {
-        let conn = open_sqlite(&db_path)?;
-        conn.execute(
-            "UPDATE scheduled_tasks SET enabled = 0 WHERE id = ?1",
-            params![task_id],
-        )
-        .map_err(sql_error)?;
-        Ok::<_, io::Error>(())
-    })
-    .await;
-}
-
-#[allow(dead_code)]
-async fn touch_last_run(db_path: &Path, task_id: &str) {
-    let db_path = db_path.to_path_buf();
-    let task_id = task_id.to_string();
-    let _ = tokio::task::spawn_blocking(move || {
-        let conn = open_sqlite(&db_path)?;
-        let now = Utc::now().to_rfc3339();
+        // Refresh last_run_at on the parent task.
         conn.execute(
             "UPDATE scheduled_tasks SET last_run_at = ?1 WHERE id = ?2",
-            params![now, task_id],
+            params![now_str, task_id],
         )
         .map_err(sql_error)?;
+
+        // Once-tasks self-disable.
+        if is_once {
+            conn.execute(
+                "UPDATE scheduled_tasks SET enabled = 0 WHERE id = ?1",
+                params![task_id],
+            )
+            .map_err(sql_error)?;
+        }
+
         Ok::<_, io::Error>(())
     })
     .await;
 }
 
-fn is_task_due(task: &ScheduledTask) -> bool {
-    let now = Utc::now();
+fn is_task_due(task: &ScheduledTask, now: DateTime<Utc>) -> bool {
     match task.schedule_kind.as_str() {
         "once" => {
+            // A once task is due exactly when run_at has passed AND it has
+            // never been executed (last_run_at is still NULL).  The atomic
+            // claim will set last_run_at, so a second tick cannot re-fire it.
             if let Some(run_at) = task.run_at {
                 run_at <= now && task.last_run_at.is_none()
             } else {
@@ -859,6 +976,7 @@ fn is_task_due(task: &ScheduledTask) -> bool {
             }
         }
         "interval" => {
+            // First run: always due.  Later runs: due when `last + interval ≤ now`.
             if let Some(interval_secs) = task.interval_secs {
                 let interval = chrono::Duration::seconds(interval_secs);
                 match task.last_run_at {
@@ -872,21 +990,13 @@ fn is_task_due(task: &ScheduledTask) -> bool {
         "cron" => {
             if let Some(cron_expr) = &task.cron_expr {
                 if let Ok(schedule) = cron_expr.parse::<cron::Schedule>() {
-                    if let Some(last) = task.last_run_at {
-                        for fire_time in schedule.upcoming(Utc).take(5) {
-                            if fire_time > last && fire_time <= now {
-                                return true;
-                            }
-                        }
-                        false
+                    // Reference point: last run, or creation time if never run.
+                    let reference = task.last_run_at.unwrap_or(task.created_at);
+                    // The cron crate's `after()` returns an iterator of fire
+                    // times starting *after* the given DateTime.
+                    if let Some(next_fire) = schedule.after(&reference).next() {
+                        next_fire <= now
                     } else {
-                        // Never run — check if a fire time is within the last tick window.
-                        for fire_time in schedule.upcoming(Utc).take(3) {
-                            let diff = (fire_time - now).num_seconds().abs();
-                            if diff <= 60 {
-                                return true;
-                            }
-                        }
                         false
                     }
                 } else {
