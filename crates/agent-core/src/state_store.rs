@@ -1504,6 +1504,38 @@ const MIGRATIONS: &[Migration] = &[
             ON comparisons(created_at DESC);
         "#,
     },
+    Migration {
+        id: 3,
+        name: "wave2_scheduler",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS scheduled_tasks (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                schedule_kind TEXT NOT NULL DEFAULT 'once',
+                cron_expr TEXT,
+                interval_secs INTEGER,
+                run_at TEXT,
+                job_kind TEXT NOT NULL DEFAULT 'generic',
+                payload_json TEXT,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                last_run_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS task_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL,
+                job_id TEXT,
+                status TEXT NOT NULL DEFAULT 'queued',
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                error TEXT,
+                FOREIGN KEY(task_id) REFERENCES scheduled_tasks(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_task_runs_task_id ON task_runs(task_id);
+        "#,
+    },
 ];
 
 /// Apply any not-yet-recorded migrations from [`MIGRATIONS`] in order, tracking

@@ -568,47 +568,9 @@ fn sql_error(e: rusqlite::Error) -> io::Error {
     io::Error::other(format!("SQLite error: {e}"))
 }
 
-/// Ensure scheduler tables exist in the given database.
-pub async fn ensure_scheduler_tables(db_path: &Path) -> io::Result<()> {
-    let db_path = db_path.to_path_buf();
-    tokio::task::spawn_blocking(move || {
-        let conn = open_sqlite(&db_path)?;
-        conn.execute_batch(
-            r#"
-            CREATE TABLE IF NOT EXISTS scheduled_tasks (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                schedule_kind TEXT NOT NULL DEFAULT 'once',
-                cron_expr TEXT,
-                interval_secs INTEGER,
-                run_at TEXT,
-                job_kind TEXT NOT NULL DEFAULT 'generic',
-                payload_json TEXT,
-                enabled INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL,
-                last_run_at TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS task_runs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                task_id TEXT NOT NULL,
-                job_id TEXT,
-                status TEXT NOT NULL DEFAULT 'queued',
-                started_at TEXT NOT NULL,
-                finished_at TEXT,
-                error TEXT,
-                FOREIGN KEY(task_id) REFERENCES scheduled_tasks(id)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_task_runs_task_id ON task_runs(task_id);
-            "#,
-        )
-        .map_err(sql_error)?;
-        Ok(())
-    })
-    .await
-    .map_err(|e| io::Error::other(e.to_string()))?
-}
+// Tables are now created via the versioned MIGRATIONS mechanism in
+// crates/agent-core/src/state_store.rs (Migration id 3: "wave2_scheduler").
+// The ensure_scheduler_tables function has been removed.
 
 fn row_to_scheduled_task(row: &rusqlite::Row) -> rusqlite::Result<ScheduledTask> {
     Ok(ScheduledTask {

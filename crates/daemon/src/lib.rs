@@ -568,10 +568,9 @@ pub async fn run() -> anyhow::Result<()> {
         selected_startup_ollama_model(&cfg),
     );
 
-    // Initialize scheduler tables and start the background scheduler.
-    jobs::ensure_scheduler_tables(&state.state_db_path)
-        .await
-        .expect("Failed to create scheduler tables");
+    // Scheduler tables are created via the versioned MIGRATIONS mechanism
+    // (agent-core state_store, Migration id 3: "wave2_scheduler").
+    // Start the background scheduler.
     let scheduler = jobs::Scheduler::new(state.state_db_path.clone(), state.jobs.clone());
     let scheduler_shutdown = tokio_util::sync::CancellationToken::new();
     scheduler.start(scheduler_shutdown);
