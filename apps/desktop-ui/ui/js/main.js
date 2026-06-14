@@ -4,7 +4,7 @@
  * original monolith, so module-load side effects (console capture, splash,
  * startup, event-listener wiring) fire in the exact original sequence:
  *   console-capture (console hooks) -> feature modules (in file order) ->
- *   wave1.js -> wave5.js.
+ *   the former wave1 features (presets, memory, compare, history) -> wave5.js.
  * Core modules (js/core/*) are pulled in transitively by the feature modules
  * that import them. Behaviour is unchanged from the pre-modularization build.
  */
@@ -20,5 +20,7 @@ import './core/router.js';
 import './features/agent-shortcuts.js';
 import './features/ui-bindings.js';
 import './features/presets.js';
-import '../wave1.js';
+import './features/memory.js';
+import './features/compare.js';
+import './features/history.js';
 import '../wave5.js';
