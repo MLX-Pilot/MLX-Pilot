@@ -345,8 +345,7 @@ pub type ActionFuture = Pin<Box<dyn std::future::Future<Output = Result<Value, S
 
 /// A registered action handler: receives a JSON payload and a [`JobCtx`],
 /// returns a result.
-pub type ActionHandler =
-    Arc<dyn Fn(Value, JobCtx) -> ActionFuture + Send + Sync>;
+pub type ActionHandler = Arc<dyn Fn(Value, JobCtx) -> ActionFuture + Send + Sync>;
 
 /// Extensible registry of [`ActionHandler`]s keyed by `job_kind`.
 ///
@@ -374,12 +373,7 @@ impl ActionDispatcher {
     /// Execute the handler registered for `kind` with the given `payload` and `ctx`.
     ///
     /// Returns `Err` if no handler is registered for `kind`.
-    pub async fn dispatch(
-        &self,
-        kind: &str,
-        payload: Value,
-        ctx: JobCtx,
-    ) -> Result<Value, String> {
+    pub async fn dispatch(&self, kind: &str, payload: Value, ctx: JobCtx) -> Result<Value, String> {
         let handlers = self.handlers.read().await;
         if let Some(handler) = handlers.get(kind) {
             handler(payload, ctx).await
@@ -688,15 +682,19 @@ impl Scheduler {
                         match &result {
                             Ok(_) => {
                                 complete_scheduled_run(
-                                    &db_path, &task_id, run_id, "success",
-                                    None, now, is_once,
+                                    &db_path, &task_id, run_id, "success", None, now, is_once,
                                 )
                                 .await;
                             }
                             Err(e) => {
                                 complete_scheduled_run(
-                                    &db_path, &task_id, run_id, "error",
-                                    Some(e), now, is_once,
+                                    &db_path,
+                                    &task_id,
+                                    run_id,
+                                    "error",
+                                    Some(e),
+                                    now,
+                                    is_once,
                                 )
                                 .await;
                             }
@@ -1318,7 +1316,9 @@ mod tests {
                 id: row.get(0)?,
                 task_id: row.get(1)?,
                 job_id: row.get(2)?,
-                status: row.get::<_, String>(3).unwrap_or_else(|_| "unknown".to_string()),
+                status: row
+                    .get::<_, String>(3)
+                    .unwrap_or_else(|_| "unknown".to_string()),
                 started_at: row
                     .get::<_, String>(4)
                     .ok()
@@ -1614,7 +1614,8 @@ mod tests {
         assert_eq!(task_runs_for(&h.db_path, "cron-1").len(), 1);
 
         // Advance to 12:01.
-        h.clock.set(Utc.with_ymd_and_hms(2025, 6, 14, 12, 1, 0).unwrap());
+        h.clock
+            .set(Utc.with_ymd_and_hms(2025, 6, 14, 12, 1, 0).unwrap());
         tick_and_wait(&h).await;
         assert_eq!(task_runs_for(&h.db_path, "cron-1").len(), 2);
     }
