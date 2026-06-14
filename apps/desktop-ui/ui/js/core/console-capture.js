@@ -1,15 +1,14 @@
-/* ============================================================
-   MLX PILOT — Orbital Command
-   Fully functional frontend with backend API integration
-   ============================================================ */
+/* MLX Pilot — Console capture (core/bootstrap).
+ *
+ * Installs the global console.* overrides + window error/rejection hooks that
+ * mirror UI logs into the in-app console feed. Imported first by main.js so the
+ * capture is armed before the feature modules emit their startup logs. Exposes
+ * pushConsoleEntry, used by feature modules to record structured entries.
+ */
 
-'use strict';
-
-// === auto-imports (generated — do not edit) ===
-import { nativeInvoke } from './js/core/api.js';
-import { state } from './js/core/state.js';
-import { renderConsole } from './js/features/console.js';
-// === end auto-imports ===
+import { nativeInvoke } from './api.js';
+import { state } from './state.js';
+import { renderConsole } from '../features/console.js';
 
 
   const originalConsole = {

@@ -5,7 +5,7 @@
  */
 
 // === auto-imports (generated — do not edit) ===
-import { pushConsoleEntry } from '../../app.js';
+import { pushConsoleEntry } from '../core/console-capture.js';
 import { api, nativeInvoke } from '../core/api.js';
 import { esc } from '../core/dom.js';
 import { state } from '../core/state.js';

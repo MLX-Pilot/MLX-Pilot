@@ -6,7 +6,7 @@
  */
 
 // === auto-imports (generated — do not edit) ===
-import { pushConsoleEntry } from '../../app.js';
+import { pushConsoleEntry } from '../core/console-capture.js';
 import { api, createStreamDecoder } from '../core/api.js';
 import { esc, fmtNum } from '../core/dom.js';
 import { renderMarkdown } from '../core/markdown.js';

@@ -7,7 +7,7 @@
  */
 
 // === auto-imports (generated — do not edit) ===
-import { pushConsoleEntry } from '../../app.js';
+import { pushConsoleEntry } from '../core/console-capture.js';
 import { api } from '../core/api.js';
 import { esc, fmtBytes } from '../core/dom.js';
 import { CURRENT_MODEL_KEY, DAEMON_READY_EVENT, DEFAULT_DAEMON_URL, MIN_SPLASH_MS, MODEL_CACHE_KEY, readStorage, state } from '../core/state.js';

@@ -3,12 +3,12 @@
  * Imports the application's ES modules in the SAME order their code ran in the
  * original monolith, so module-load side effects (console capture, splash,
  * startup, event-listener wiring) fire in the exact original sequence:
- *   app.js (shell + console capture) -> feature modules (in file order) ->
+ *   console-capture (console hooks) -> feature modules (in file order) ->
  *   wave1.js -> wave5.js.
  * Core modules (js/core/*) are pulled in transitively by the feature modules
  * that import them. Behaviour is unchanged from the pre-modularization build.
  */
-import '../app.js';
+import './core/console-capture.js';
 import './features/providers.js';
 import './features/runtime.js';
 import './features/settings.js';

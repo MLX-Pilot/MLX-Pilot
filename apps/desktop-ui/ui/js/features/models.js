@@ -6,7 +6,7 @@
  */
 
 // === auto-imports (generated — do not edit) ===
-import { pushConsoleEntry } from '../../app.js';
+import { pushConsoleEntry } from '../core/console-capture.js';
 import { api } from '../core/api.js';
 import { esc, fmtBytes, fmtNum, modelIcon, runConfirmation, showToast } from '../core/dom.js';
 import { switchTab } from '../core/router.js';
