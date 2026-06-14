@@ -10,6 +10,7 @@
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -321,6 +322,57 @@ impl JobCtx {
     }
 }
 
+// ── Action dispatcher ──────────────────────────────────────────────────────
+
+/// Type-erased, boxed future returned by an [`ActionHandler`].
+pub type ActionFuture = Pin<Box<dyn std::future::Future<Output = Result<Value, String>> + Send>>;
+
+/// A registered action handler: receives a JSON payload and a [`JobCtx`],
+/// returns a result.
+pub type ActionHandler =
+    Arc<dyn Fn(Value, JobCtx) -> ActionFuture + Send + Sync>;
+
+/// Extensible registry of [`ActionHandler`]s keyed by `job_kind`.
+///
+/// Each `job_kind` string (e.g. `"deep_research"`, `"reindex"`) maps to
+/// a handler that receives the task's `payload_json` and a [`JobCtx`] for
+/// progress reporting and cancellation.
+pub struct ActionDispatcher {
+    handlers: RwLock<HashMap<String, ActionHandler>>,
+}
+
+impl ActionDispatcher {
+    /// Create an empty dispatcher.
+    pub fn new() -> Self {
+        Self {
+            handlers: RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// Register (or replace) a handler for `kind`.
+    pub async fn register(&self, kind: &str, handler: ActionHandler) {
+        let mut handlers = self.handlers.write().await;
+        handlers.insert(kind.to_string(), handler);
+    }
+
+    /// Execute the handler registered for `kind` with the given `payload` and `ctx`.
+    ///
+    /// Returns `Err` if no handler is registered for `kind`.
+    pub async fn dispatch(
+        &self,
+        kind: &str,
+        payload: Value,
+        ctx: JobCtx,
+    ) -> Result<Value, String> {
+        let handlers = self.handlers.read().await;
+        if let Some(handler) = handlers.get(kind) {
+            handler(payload, ctx).await
+        } else {
+            Err(format!("no handler registered for job_kind: {kind}"))
+        }
+    }
+}
+
 // ── SSE endpoint handlers ───────────────────────────────────────────────────
 
 /// Axum handler that streams job progress as Server-Sent Events.
@@ -472,15 +524,24 @@ fn default_enabled() -> bool {
 // ── Scheduler ───────────────────────────────────────────────────────────────
 
 /// Background scheduler that polls SQLite for due tasks and spawns them via the
-/// JobRegistry.
+/// JobRegistry, dispatching each `job_kind` to the appropriate [`ActionHandler`].
 pub struct Scheduler {
     db_path: PathBuf,
     registry: Arc<JobRegistry>,
+    dispatcher: Arc<ActionDispatcher>,
 }
 
 impl Scheduler {
-    pub fn new(db_path: PathBuf, registry: Arc<JobRegistry>) -> Self {
-        Self { db_path, registry }
+    pub fn new(
+        db_path: PathBuf,
+        registry: Arc<JobRegistry>,
+        dispatcher: Arc<ActionDispatcher>,
+    ) -> Self {
+        Self {
+            db_path,
+            registry,
+            dispatcher,
+        }
     }
 
     /// Start the scheduler loop. Runs until the CancellationToken is triggered.
@@ -521,29 +582,52 @@ impl Scheduler {
                 continue;
             }
             let registry = self.registry.clone();
+            let dispatcher = self.dispatcher.clone();
             let db_path = self.db_path.clone();
             let task_id = task.id.clone();
+            let job_kind = task.job_kind.clone();
 
+            // Parse payload from payload_json, defaulting to Null.
+            let payload: Value = task
+                .payload_json
+                .as_deref()
+                .and_then(|s| serde_json::from_str(s).ok())
+                .unwrap_or(Value::Null);
+
+            let job_kind_for_spawn = job_kind.clone();
+            let task_id_for_log = task_id.clone();
             let job_id = registry
-                .spawn(&task.job_kind, move |ctx| {
+                .spawn(&job_kind_for_spawn, move |ctx| {
                     let db_path = db_path.clone();
                     let task_id = task_id.clone();
+                    let dispatcher = dispatcher.clone();
+                    let job_kind = job_kind.clone();
+                    let payload = payload.clone();
                     async move {
-                        ctx.progress(10, "running", "Executing scheduled task");
-                        let run_id = record_run_start(&db_path, &task_id).await;
+                        // Record the run start, including the actual job_id.
+                        let run_id = record_run_start(&db_path, &task_id, &ctx.job_id).await;
 
-                        // The actual work is driven by the job_kind.
-                        // Here we just mark it as completed.
-                        let result = serde_json::json!({"scheduled": true, "task_id": task_id});
+                        ctx.progress(10, "running", &format!("Executing {job_kind}"));
 
-                        record_run_finish(&db_path, run_id, "success", None).await;
-                        ctx.progress(100, "done", "Scheduled task completed");
-                        Ok(result)
+                        // Dispatch to the real action handler.
+                        let result = dispatcher.dispatch(&job_kind, payload, ctx).await;
+
+                        // Record the run finish with status.
+                        match &result {
+                            Ok(_) => {
+                                record_run_finish(&db_path, run_id, "success", None).await;
+                            }
+                            Err(e) => {
+                                record_run_finish(&db_path, run_id, "error", Some(e)).await;
+                            }
+                        }
+
+                        result
                     }
                 })
                 .await;
 
-            info!("scheduler spawned job {job_id}");
+            info!("scheduler spawned job {job_id} for task {task_id_for_log}");
         }
 
         Ok(())
@@ -693,15 +777,16 @@ async fn load_due_tasks(db_path: &Path) -> Result<Vec<ScheduledTask>, io::Error>
     .map_err(|e| io::Error::other(e.to_string()))?
 }
 
-async fn record_run_start(db_path: &Path, task_id: &str) -> i64 {
+async fn record_run_start(db_path: &Path, task_id: &str, job_id: &str) -> i64 {
     let db_path = db_path.to_path_buf();
     let task_id = task_id.to_string();
+    let job_id = job_id.to_string();
     match tokio::task::spawn_blocking(move || {
         let conn = open_sqlite(&db_path)?;
         let now = Utc::now().to_rfc3339();
         conn.execute(
-            "INSERT INTO task_runs (task_id, status, started_at) VALUES (?1, 'running', ?2)",
-            params![task_id, now],
+            "INSERT INTO task_runs (task_id, job_id, status, started_at) VALUES (?1, ?2, 'running', ?3)",
+            params![task_id, job_id, now],
         )
         .map_err(sql_error)?;
         Ok::<i64, io::Error>(conn.last_insert_rowid())

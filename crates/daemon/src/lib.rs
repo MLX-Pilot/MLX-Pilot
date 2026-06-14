@@ -570,8 +570,30 @@ pub async fn run() -> anyhow::Result<()> {
 
     // Scheduler tables are created via the versioned MIGRATIONS mechanism
     // (agent-core state_store, Migration id 3: "wave2_scheduler").
+    // Build the action dispatcher and register built-in handlers.
+    let dispatcher = Arc::new(jobs::ActionDispatcher::new());
+
+    // Register a built-in "generic" handler that returns the payload as-is.
+    {
+        let d = dispatcher.clone();
+        d.register(
+            "generic",
+            Arc::new(|payload: Value, ctx: jobs::JobCtx| {
+                Box::pin(async move {
+                    ctx.progress(50, "working", "Executing generic task");
+                    Ok(payload)
+                })
+            }),
+        )
+        .await;
+    }
+
     // Start the background scheduler.
-    let scheduler = jobs::Scheduler::new(state.state_db_path.clone(), state.jobs.clone());
+    let scheduler = jobs::Scheduler::new(
+        state.state_db_path.clone(),
+        state.jobs.clone(),
+        dispatcher,
+    );
     let scheduler_shutdown = tokio_util::sync::CancellationToken::new();
     scheduler.start(scheduler_shutdown);
 
