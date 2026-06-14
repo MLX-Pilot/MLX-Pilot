@@ -19,5 +19,6 @@ import './features/console.js';
 import './core/router.js';
 import './features/agent-shortcuts.js';
 import './features/ui-bindings.js';
+import './features/presets.js';
 import '../wave1.js';
 import '../wave5.js';

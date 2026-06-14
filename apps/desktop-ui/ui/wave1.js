@@ -741,7 +741,7 @@
 
   function boot() {
     injectStyles();
-    initPresets();
+    // Presets migrated to js/features/presets.js (wired in main.js).
     bindTab('memoria', initMemoryPanel);
     bindTab('comparar', initComparePanel);
     bindTab('historico', initHistoryPanel);
