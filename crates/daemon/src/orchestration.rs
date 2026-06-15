@@ -214,6 +214,9 @@ struct RunState {
     answer: HashMap<String, String>,
     tx: broadcast::Sender<ReasoningEvent>,
     persisted: bool,
+    /// Token total captured in the last persisted snapshot — lets us re-persist
+    /// once `budget_tracker` is populated (it lands just after RunCompleted).
+    persisted_tokens: usize,
 }
 
 impl RunState {
@@ -237,6 +240,7 @@ impl RunState {
             answer: HashMap::new(),
             tx,
             persisted: false,
+            persisted_tokens: 0,
         }
     }
 
@@ -444,9 +448,10 @@ impl OrchestrationRegistry {
                     .unwrap_or_else(|| session_id.clone());
                 let created = !inner.runs.contains_key(&run_id);
                 if created {
-                    inner
-                        .runs
-                        .insert(run_id.clone(), RunState::new(run_id.clone(), model.clone(), now));
+                    inner.runs.insert(
+                        run_id.clone(),
+                        RunState::new(run_id.clone(), model.clone(), now),
+                    );
                     inner.session_index.insert(run_id.clone(), run_id.clone());
                     touch_order(&mut inner.order, &run_id);
                 }
@@ -504,23 +509,22 @@ impl OrchestrationRegistry {
                 self.flush_accumulators(&session_id, now).await;
                 let label = humanize_tool(&tool);
                 let mut inner = self.inner.write().await;
-                if let Some(run_id) = inner.session_index.get(&session_id).cloned() {
-                    let seq = self.next_seq();
-                    if let Some(run) = inner.runs.get_mut(&run_id) {
-                        if let Some(a) = run.activity_mut(&session_id) {
-                            a.tool_calls += 1;
-                        }
-                        run.push_event(ReasoningEvent {
-                            seq,
-                            ts: now,
-                            run_id,
-                            session_id: session_id.clone(),
-                            kind: "tool_call".to_string(),
-                            text: label,
-                            tool: Some(tool.clone()),
-                            meta: json!({ "tool": tool }),
-                        });
+                let run_id = resolve_or_create_run(&mut inner, &session_id, now);
+                let seq = self.next_seq();
+                if let Some(run) = inner.runs.get_mut(&run_id) {
+                    if let Some(a) = run.activity_mut(&session_id) {
+                        a.tool_calls += 1;
                     }
+                    run.push_event(ReasoningEvent {
+                        seq,
+                        ts: now,
+                        run_id,
+                        session_id: session_id.clone(),
+                        kind: "tool_call".to_string(),
+                        text: label,
+                        tool: Some(tool.clone()),
+                        meta: json!({ "tool": tool }),
+                    });
                 }
             }
             AgentEvent::ToolCallCompleted {
@@ -560,13 +564,8 @@ impl OrchestrationRegistry {
                 child_session_id,
                 handoff_summary,
             } => {
-                self.merge_delegation(
-                    &parent_session_id,
-                    &child_session_id,
-                    &handoff_summary,
-                    now,
-                )
-                .await;
+                self.merge_delegation(&parent_session_id, &child_session_id, &handoff_summary, now)
+                    .await;
             }
             AgentEvent::RunCompleted {
                 session_id,
@@ -623,9 +622,7 @@ impl OrchestrationRegistry {
 
     async fn accumulate(&self, session_id: &str, kind: &str, delta: &str, now: DateTime<Utc>) {
         let mut inner = self.inner.write().await;
-        let Some(run_id) = inner.session_index.get(session_id).cloned() else {
-            return;
-        };
+        let run_id = resolve_or_create_run(&mut inner, session_id, now);
         let flush = {
             let Some(run) = inner.runs.get_mut(&run_id) else {
                 return;
@@ -649,6 +646,7 @@ impl OrchestrationRegistry {
 
     async fn flush_accumulators(&self, session_id: &str, now: DateTime<Utc>) {
         let mut inner = self.inner.write().await;
+        // Only flush within an existing run — no need to create one just to flush.
         let Some(run_id) = inner.session_index.get(session_id).cloned() else {
             return;
         };
@@ -657,8 +655,15 @@ impl OrchestrationRegistry {
                 .runs
                 .get(&run_id)
                 .map(|r| {
-                    let bucket = if kind == "answer" { &r.answer } else { &r.thinking };
-                    bucket.get(session_id).map(|s| !s.is_empty()).unwrap_or(false)
+                    let bucket = if kind == "answer" {
+                        &r.answer
+                    } else {
+                        &r.thinking
+                    };
+                    bucket
+                        .get(session_id)
+                        .map(|s| !s.is_empty())
+                        .unwrap_or(false)
                 })
                 .unwrap_or(false);
             if has {
@@ -680,9 +685,7 @@ impl OrchestrationRegistry {
         meta: Value,
     ) {
         let mut inner = self.inner.write().await;
-        let Some(run_id) = inner.session_index.get(session_id).cloned() else {
-            return;
-        };
+        let run_id = resolve_or_create_run(&mut inner, session_id, now);
         let seq = self.next_seq();
         if let Some(run) = inner.runs.get_mut(&run_id) {
             run.push_event(ReasoningEvent {
@@ -800,10 +803,7 @@ impl OrchestrationRegistry {
                 run_id: parent_run_id.clone(),
                 session_id: parent_session_id.to_string(),
                 kind: "phase".to_string(),
-                text: format!(
-                    "Delegação concluída: {}",
-                    sanitize(&truncate(summary, 200))
-                ),
+                text: format!("Delegação concluída: {}", sanitize(&truncate(summary, 200))),
                 tool: Some("delegate_session".to_string()),
                 meta: json!({ "child_session_id": child_session_id }),
             });
@@ -823,9 +823,7 @@ impl OrchestrationRegistry {
         let mut to_persist: Option<OrchestrationRun> = None;
         {
             let mut inner = self.inner.write().await;
-            let Some(run_id) = inner.session_index.get(session_id).cloned() else {
-                return;
-            };
+            let run_id = resolve_or_create_run(&mut inner, session_id, now);
             let is_root = inner
                 .runs
                 .get(&run_id)
@@ -851,7 +849,9 @@ impl OrchestrationRegistry {
                     let (kind, text) = match status {
                         RunStatus::Failed => (
                             "error",
-                            error.clone().unwrap_or_else(|| "Falha no fluxo".to_string()),
+                            error
+                                .clone()
+                                .unwrap_or_else(|| "Falha no fluxo".to_string()),
                         ),
                         _ => ("phase", "Fluxo concluído".to_string()),
                     };
@@ -867,7 +867,9 @@ impl OrchestrationRegistry {
                     });
                     if !run.persisted {
                         run.persisted = true;
-                        to_persist = Some(run.snapshot());
+                        let snap = run.snapshot();
+                        run.persisted_tokens = snap.metrics.tokens_total;
+                        to_persist = Some(snap);
                     }
                 }
             }
@@ -880,25 +882,48 @@ impl OrchestrationRegistry {
     /// Read the latest token estimate for a session from the budget tracker.
     async fn tokens_for(&self, session_id: &str) -> Option<usize> {
         let tracker = self.budget_tracker.read().await;
-        tracker
-            .get(session_id)
-            .map(|t| t.prompt_tokens_estimate)
+        tracker.get(session_id).map(|t| t.prompt_tokens_estimate)
     }
 
     /// Refresh live activity token counts from the budget tracker.
+    ///
+    /// Also re-persists terminal runs once their tokens land in the tracker
+    /// (which happens just after `RunCompleted`), so SQLite history keeps the
+    /// real token totals rather than the zeros known at completion time.
     async fn refresh_tokens(&self) {
-        let tracker = self.budget_tracker.read().await;
-        if tracker.is_empty() {
-            return;
-        }
-        let mut inner = self.inner.write().await;
-        for run in inner.runs.values_mut() {
-            for a in &mut run.activities {
-                if let Some(t) = tracker.get(&a.id) {
-                    a.tokens_total = t.prompt_tokens_estimate;
+        // Snapshot the tracker, then drop its lock before taking the inner lock.
+        let tokens: HashMap<String, usize> = {
+            let tracker = self.budget_tracker.read().await;
+            if tracker.is_empty() {
+                return;
+            }
+            tracker
+                .iter()
+                .map(|(k, v)| (k.clone(), v.prompt_tokens_estimate))
+                .collect()
+        };
+        let now = Utc::now();
+        let mut to_persist: Vec<OrchestrationRun> = Vec::new();
+        {
+            let mut inner = self.inner.write().await;
+            for run in inner.runs.values_mut() {
+                for a in &mut run.activities {
+                    if let Some(t) = tokens.get(&a.id) {
+                        a.tokens_total = *t;
+                    }
+                }
+                run.recompute_elapsed(now);
+                if run.persisted && run.status.is_terminal() {
+                    let tok = run.metrics().tokens_total;
+                    if tok != run.persisted_tokens {
+                        run.persisted_tokens = tok;
+                        to_persist.push(run.snapshot());
+                    }
                 }
             }
-            run.recompute_elapsed(Utc::now());
+        }
+        for snapshot in to_persist {
+            self.persist(snapshot).await;
         }
     }
 
@@ -1003,7 +1028,11 @@ impl OrchestrationRegistry {
         &self,
         run_id: &str,
         after_seq: u64,
-    ) -> Option<(Vec<ReasoningEvent>, broadcast::Receiver<ReasoningEvent>, bool)> {
+    ) -> Option<(
+        Vec<ReasoningEvent>,
+        broadcast::Receiver<ReasoningEvent>,
+        bool,
+    )> {
         let inner = self.inner.read().await;
         let run = inner.runs.get(run_id)?;
         let rx = run.tx.subscribe();
@@ -1065,7 +1094,9 @@ impl OrchestrationRegistry {
                 });
                 if !run.persisted {
                     run.persisted = true;
-                    to_persist = Some(run.snapshot());
+                    let snap = run.snapshot();
+                    run.persisted_tokens = snap.metrics.tokens_total;
+                    to_persist = Some(snap);
                 }
             }
         }
@@ -1105,6 +1136,30 @@ impl OrchestrationRegistry {
 fn touch_order(order: &mut VecDeque<String>, run_id: &str) {
     order.retain(|id| id != run_id);
     order.push_back(run_id.to_string());
+}
+
+/// Resolve the run owning `session_id`, lazily creating a root run if unknown.
+///
+/// `RunStarted` can be dropped when the consumer lags (it is a lossy broadcast
+/// subscriber *by design* — the agent must never block on the monitor). Lazy
+/// creation keeps a run visible from its first surviving event instead of
+/// dropping it entirely; the model label fills in if a later `RunStarted` for
+/// the same session arrives.
+fn resolve_or_create_run(inner: &mut Inner, session_id: &str, now: DateTime<Utc>) -> String {
+    if let Some(run_id) = inner.session_index.get(session_id) {
+        return run_id.clone();
+    }
+    let run_id = session_id.to_string();
+    inner
+        .runs
+        .entry(run_id.clone())
+        .or_insert_with(|| RunState::new(run_id.clone(), String::new(), now));
+    inner.session_index.insert(run_id.clone(), run_id.clone());
+    touch_order(&mut inner.order, &run_id);
+    if let Some(run) = inner.runs.get_mut(&run_id) {
+        run.ensure_activity(session_id, "", now);
+    }
+    run_id
 }
 
 fn flush_bucket(run: &mut RunState, session_id: &str, kind: &str, seq: u64, now: DateTime<Utc>) {
@@ -1542,7 +1597,9 @@ mod tests {
         })
         .await;
         // The standalone child run is gone; parent now has a delegations phase.
-        assert!(reg.snapshot("child").await.is_none() || !reg.snapshot("child").await.unwrap().live);
+        assert!(
+            reg.snapshot("child").await.is_none() || !reg.snapshot("child").await.unwrap().live
+        );
         let parent = reg.snapshot("parent").await.unwrap();
         assert_eq!(parent.metrics.agents, 2);
         assert!(parent.phases.iter().any(|p| p.name == "Delegações"));
@@ -1570,6 +1627,34 @@ mod tests {
         assert!(replay.is_empty(), "no events after the latest cursor");
         let (replay_all, _rx2, _) = reg.subscribe("s1", 0).await.unwrap();
         assert_eq!(replay_all.len() as u64, last);
+    }
+
+    #[tokio::test]
+    async fn lazy_creates_run_when_run_started_dropped() {
+        // Simulate broadcast lag dropping RunStarted: the first event the
+        // consumer sees for this session is a tool call.
+        let reg = registry();
+        reg.handle_event(AgentEvent::ToolCallStarted {
+            session_id: "orphan".into(),
+            tool: "read_file".into(),
+            call_id: "c1".into(),
+            params: json!({}),
+        })
+        .await;
+        let snap = reg.snapshot("orphan").await.expect("run lazily created");
+        assert_eq!(snap.status, RunStatus::Running);
+        assert_eq!(snap.metrics.tool_calls, 1);
+        assert_eq!(snap.phases[0].agents.len(), 1);
+        // A later RunCompleted still finalizes the lazily-created run.
+        reg.handle_event(AgentEvent::RunCompleted {
+            session_id: "orphan".into(),
+            latency_ms: 1,
+        })
+        .await;
+        assert_eq!(
+            reg.snapshot("orphan").await.unwrap().status,
+            RunStatus::Completed
+        );
     }
 
     #[test]

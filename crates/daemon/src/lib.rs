@@ -526,7 +526,10 @@ pub async fn run() -> anyhow::Result<()> {
         agent_state: agent_api::AgentState {
             default_workspace: resolve_default_agent_workspace(),
             approval: Arc::new(mlx_agent_core::approval::DefaultApprovalService::new()),
-            event_bus: Arc::new(mlx_agent_core::EventBus::default()),
+            // Larger capacity than the default (256) so the orchestration
+            // monitor's broadcast subscriber is far less likely to lag and drop
+            // lifecycle events during bursty token streaming.
+            event_bus: Arc::new(mlx_agent_core::EventBus::new(2048)),
             audit: Arc::new(mlx_agent_core::AuditLog::new(
                 std::env::temp_dir().join("mlx-pilot-audit"),
             )),
