@@ -186,6 +186,31 @@ impl StateStore {
                 "#,
             );
             run_migrations(&conn)?;
+            // ── Wave 6 (notes_tasks) additive columns on existing tables ──
+            ensure_column(
+                &conn,
+                "scheduled_tasks",
+                "action_type",
+                "TEXT NOT NULL DEFAULT 'builtin'",
+            )?;
+            ensure_column(
+                &conn,
+                "scheduled_tasks",
+                "action_config",
+                "TEXT",
+            )?;
+            ensure_column(
+                &conn,
+                "scheduled_tasks",
+                "paused",
+                "INTEGER NOT NULL DEFAULT 0",
+            )?;
+            ensure_column(
+                &conn,
+                "task_runs",
+                "output",
+                "TEXT",
+            )?;
             Ok(())
         })
         .await
@@ -1556,6 +1581,27 @@ const MIGRATIONS: &[Migration] = &[
 
             CREATE INDEX IF NOT EXISTS idx_orchestration_runs_started
             ON orchestration_runs(started_at DESC);
+        "#,
+    },
+    Migration {
+        id: 5,
+        name: "wave6_notes_tasks",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS notes (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL DEFAULT '',
+                color TEXT,
+                pinned INTEGER NOT NULL DEFAULT 0,
+                due_date TEXT,
+                checklist_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_notes_pinned ON notes(pinned DESC);
+            CREATE INDEX IF NOT EXISTS idx_notes_due_date ON notes(due_date);
+            CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(updated_at DESC);
         "#,
     },
 ];
