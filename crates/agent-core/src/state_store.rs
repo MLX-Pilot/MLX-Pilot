@@ -1536,6 +1536,28 @@ const MIGRATIONS: &[Migration] = &[
             CREATE INDEX IF NOT EXISTS idx_task_runs_task_id ON task_runs(task_id);
         "#,
     },
+    Migration {
+        id: 4,
+        name: "monitor_orchestration_runs",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS orchestration_runs (
+                run_id TEXT PRIMARY KEY,
+                root_session_id TEXT NOT NULL,
+                label TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'completed',
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                total_tokens INTEGER NOT NULL DEFAULT 0,
+                tool_calls INTEGER NOT NULL DEFAULT 0,
+                agents INTEGER NOT NULL DEFAULT 0,
+                snapshot_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_orchestration_runs_started
+            ON orchestration_runs(started_at DESC);
+        "#,
+    },
 ];
 
 /// Apply any not-yet-recorded migrations from [`MIGRATIONS`] in order, tracking

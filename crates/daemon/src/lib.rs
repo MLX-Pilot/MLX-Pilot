@@ -7,6 +7,7 @@ mod config;
 mod hwfit_routes;
 mod jobs;
 mod model_catalog;
+mod orchestration;
 mod plugins;
 mod provider_embedder;
 mod research_routes;
@@ -78,6 +79,7 @@ struct AppState {
     pub presets: Arc<mlx_agent_core::PresetStore>,
     pub compare: Arc<mlx_agent_core::CompareStore>,
     pub jobs: Arc<jobs::JobRegistry>,
+    pub orchestration: Arc<orchestration::OrchestrationRegistry>,
     pub state_db_path: FsPathBuf,
     /// Cancellation token for the background scheduler; fired on shutdown.
     #[allow(dead_code)]
@@ -440,6 +442,14 @@ pub async fn run() -> anyhow::Result<()> {
 
     let state_db_path = resolve_state_db_path();
 
+    // Shared budget tracker — read by both the agent runtime and the
+    // orchestration monitor (tokens come from the same source).
+    let budget_tracker: Arc<
+        tokio::sync::RwLock<BTreeMap<String, mlx_agent_core::ContextBudgetTelemetry>>,
+    > = Arc::new(tokio::sync::RwLock::new(BTreeMap::new()));
+    let orchestration =
+        orchestration::OrchestrationRegistry::new(budget_tracker.clone(), state_db_path.clone());
+
     let vault = SecretsVault::open(
         AppConfig::get_settings_path()
             .parent()
@@ -521,7 +531,7 @@ pub async fn run() -> anyhow::Result<()> {
                 std::env::temp_dir().join("mlx-pilot-audit"),
             )),
             memory: memory.clone(),
-            budget_tracker: Arc::new(tokio::sync::RwLock::new(BTreeMap::new())),
+            budget_tracker: budget_tracker.clone(),
         },
         session_store: Arc::new(
             mlx_agent_core::SessionStore::new(
@@ -556,6 +566,7 @@ pub async fn run() -> anyhow::Result<()> {
             .expect("Failed to initialize compare store"),
         ),
         jobs: Arc::new(jobs::JobRegistry::new(4)),
+        orchestration: orchestration.clone(),
         state_db_path: state_db_path.clone(),
         scheduler_shutdown: tokio_util::sync::CancellationToken::new(),
         search_service: search_service.clone(),
@@ -571,6 +582,13 @@ pub async fn run() -> anyhow::Result<()> {
         state.ollama_provider.clone(),
         selected_startup_ollama_model(&cfg),
     );
+
+    // Start the orchestration monitor's event consumer. It subscribes to the
+    // EventBus off the agent's critical path (a lossy broadcast receiver), so the
+    // agent keeps working whether or not the Monitor tab is open.
+    state
+        .orchestration
+        .start_consumer(&state.agent_state.event_bus);
 
     // Scheduler tables are created via the versioned MIGRATIONS mechanism
     // (agent-core state_store, Migration id 3: "wave2_scheduler").
@@ -818,6 +836,27 @@ pub async fn run() -> anyhow::Result<()> {
         )
         .route("/compare/{id}/vote", post(wave1::compare_vote))
         .route("/compare/{id}/synthesize", post(wave1::compare_synthesize))
+        // ── Orchestration Monitor ──
+        .route(
+            "/agent/orchestration",
+            get(orchestration::orchestration_list),
+        )
+        .route(
+            "/agent/orchestration/metrics",
+            get(orchestration::orchestration_metrics),
+        )
+        .route(
+            "/agent/orchestration/{run_id}",
+            get(orchestration::orchestration_snapshot),
+        )
+        .route(
+            "/agent/orchestration/{run_id}/stream",
+            get(orchestration::orchestration_stream),
+        )
+        .route(
+            "/agent/orchestration/{run_id}/cancel",
+            post(orchestration::orchestration_cancel),
+        )
         // ── Jobs / Scheduler ──
         .route("/jobs", get(jobs::job_list))
         .route("/jobs/test", post(jobs::job_test))
