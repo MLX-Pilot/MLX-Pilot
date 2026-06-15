@@ -489,6 +489,9 @@ pub struct TaskRun {
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
     pub error: Option<String>,
+    /// Structured output / stdout from the run (JSON or plain text).
+    #[serde(default)]
+    pub output: Option<String>,
 }
 
 // ── Smoke test job ──────────────────────────────────────────────────────────
@@ -1140,7 +1143,7 @@ pub async fn list_task_runs(
         let conn = open_sqlite(&db_path)?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, task_id, job_id, status, started_at, finished_at, error
+                "SELECT id, task_id, job_id, status, started_at, finished_at, error, output
                  FROM task_runs
                  WHERE task_id = ?1
                  ORDER BY id DESC
@@ -1172,6 +1175,7 @@ pub async fn list_task_runs(
                             .map(|dt| dt.with_timezone(&Utc))
                     }),
                     error: row.get(6)?,
+                    output: row.get(7)?,
                 })
             })
             .map_err(sql_error)?;
@@ -1366,7 +1370,7 @@ mod tests {
         let conn = open_sqlite(db_path).unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, task_id, job_id, status, started_at, finished_at, error
+                "SELECT id, task_id, job_id, status, started_at, finished_at, error, output
                  FROM task_runs WHERE task_id = ?1 ORDER BY id",
             )
             .unwrap();
@@ -1393,6 +1397,7 @@ mod tests {
                         .map(|dt| dt.with_timezone(&Utc))
                 }),
                 error: row.get(6)?,
+                output: row.get(7)?,
             })
         })
         .unwrap()
