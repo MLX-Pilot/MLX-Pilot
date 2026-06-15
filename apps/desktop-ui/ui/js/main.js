@@ -27,3 +27,4 @@ import './features/compare.js';
 import './features/history.js';
 import './features/research.js';
 import './features/hardware.js';
+import './features/notes-tasks.js';
