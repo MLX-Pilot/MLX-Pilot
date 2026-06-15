@@ -10,6 +10,7 @@ import { state } from './state.js';
 import { loadAudit } from '../features/agent.js';
 import { loadConsoleSnapshot } from '../features/console.js';
 import { invalidateModels, loadDownloads, refreshModelsInBackground, renderModelPicker, searchCatalog, showInstalledModels } from '../features/models.js';
+import { startMonitor, stopMonitor } from '../features/monitor.js';
 import { ensureAgentCompatibleModel } from '../features/providers.js';
 import { syncShellLayout, updateAgentWorkspaceSummary } from '../features/runtime.js';
 import { initAICanvas } from '../features/ui-bindings.js';
@@ -18,6 +19,8 @@ import { initAICanvas } from '../features/ui-bindings.js';
   // -- Tab Navigation -----------------------------------------
   export function switchTab(target) {
 
+    const previous = state.activePanel;
+    if (previous === 'monitor' && target !== 'monitor') stopMonitor();
     state.activePanel = target;
     document.querySelectorAll('.tab').forEach(t => { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
@@ -39,6 +42,7 @@ import { initAICanvas } from '../features/ui-bindings.js';
     }
     if (target === 'ai-interaction') initAICanvas();
     if (target === 'console') void loadConsoleSnapshot();
+    if (target === 'monitor') startMonitor();
   }
 
   document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => switchTab(tab.dataset.panel)));

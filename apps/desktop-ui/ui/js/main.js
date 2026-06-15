@@ -17,6 +17,7 @@ import './features/models.js';
 import './features/chat.js';
 import './features/agent.js';
 import './features/console.js';
+import './features/monitor.js';
 import './core/router.js';
 import './features/agent-shortcuts.js';
 import './features/ui-bindings.js';

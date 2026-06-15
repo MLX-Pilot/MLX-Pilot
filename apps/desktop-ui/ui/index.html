@@ -139,6 +139,14 @@
               </span>
               Console
             </button>
+            <button class="tab" data-panel="monitor" role="tab">
+              <span class="tab-icon">
+                <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M3 14l4-5 3 3 4-6 3 4" /><path d="M3 17h14" />
+                </svg>
+              </span>
+              Monitor
+            </button>
             <button class="tab" data-panel="historico" role="tab">
               <span class="tab-icon">
                 <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -640,6 +648,68 @@
               </div>
               <pre class="console-feed" id="console-feed">Aguardando eventos...</pre>
             </div>
+          </div>
+        </section>
+
+        <!-- MONITOR PANEL (Orchestration Monitor) -->
+        <section class="panel" id="panel-monitor">
+          <div class="mon-root">
+            <header class="mon-head">
+              <div class="mon-head-left">
+                <h2 class="section-title">Monitor de Orquestração</h2>
+                <p class="section-subtitle">Raciocínio, fases, agentes e métricas dos runs do agente em tempo real</p>
+              </div>
+              <div class="mon-head-right">
+                <span class="mon-conn" id="mon-conn" data-state="idle">Aguardando</span>
+                <button class="action-btn" id="mon-refresh" type="button">Atualizar</button>
+              </div>
+            </header>
+
+            <div class="mon-grid">
+              <!-- Runs (active + historical) -->
+              <aside class="mon-runs">
+                <div class="mon-runs-tabs" role="tablist">
+                  <button class="mon-runs-tab active" data-runs="active" type="button">Ativos</button>
+                  <button class="mon-runs-tab" data-runs="history" type="button">Histórico</button>
+                </div>
+                <div class="mon-runs-list" id="mon-runs-list"></div>
+              </aside>
+
+              <!-- Central reasoning console -->
+              <section class="mon-console">
+                <div class="mon-console-head">
+                  <div class="mon-run-title" id="mon-run-title">Nenhum run selecionado</div>
+                  <div class="mon-run-badges" id="mon-run-badges"></div>
+                </div>
+                <div class="mon-feed" id="mon-feed" aria-live="polite"></div>
+              </section>
+
+              <!-- Phases & agents sidebar -->
+              <aside class="mon-phases">
+                <div class="mon-phases-title">Fases &amp; Agentes</div>
+                <div class="mon-phases-list" id="mon-phases-list"></div>
+              </aside>
+            </div>
+
+            <!-- Persistent global status bar -->
+            <footer class="mon-statusbar" id="mon-statusbar">
+              <div class="mon-stat">
+                <span class="mon-stat-label">Tempo total</span>
+                <strong class="mon-stat-value" id="mon-stat-time">0s</strong>
+              </div>
+              <div class="mon-stat">
+                <span class="mon-stat-label">Tokens</span>
+                <strong class="mon-stat-value" id="mon-stat-tokens">0</strong>
+              </div>
+              <div class="mon-stat">
+                <span class="mon-stat-label">Tarefas ativas</span>
+                <strong class="mon-stat-value" id="mon-stat-active">0 tarefas</strong>
+              </div>
+              <div class="mon-stat mon-stat-grow">
+                <span class="mon-stat-label">Ferramentas</span>
+                <strong class="mon-stat-value" id="mon-stat-tools">0</strong>
+              </div>
+            </footer>
           </div>
         </section>
 
