@@ -7,6 +7,7 @@ mod config;
 mod hwfit_routes;
 mod jobs;
 mod model_catalog;
+mod notes_tasks;
 mod orchestration;
 mod plugins;
 mod provider_embedder;
@@ -80,6 +81,7 @@ struct AppState {
     pub compare: Arc<mlx_agent_core::CompareStore>,
     pub jobs: Arc<jobs::JobRegistry>,
     pub orchestration: Arc<orchestration::OrchestrationRegistry>,
+    pub task_dispatcher: Arc<jobs::ActionDispatcher>,
     pub state_db_path: FsPathBuf,
     /// Cancellation token for the background scheduler; fired on shutdown.
     #[allow(dead_code)]
@@ -503,6 +505,9 @@ pub async fn run() -> anyhow::Result<()> {
         }
     };
 
+    // Build the action dispatcher BEFORE AppState so we can pass it in.
+    let dispatcher = Arc::new(jobs::ActionDispatcher::new());
+
     let state = AppState {
         provider_mode,
         mlx_provider: mlx_provider.clone(),
@@ -570,6 +575,7 @@ pub async fn run() -> anyhow::Result<()> {
         ),
         jobs: Arc::new(jobs::JobRegistry::new(4)),
         orchestration: orchestration.clone(),
+        task_dispatcher: dispatcher.clone(),
         state_db_path: state_db_path.clone(),
         scheduler_shutdown: tokio_util::sync::CancellationToken::new(),
         search_service: search_service.clone(),
@@ -595,12 +601,9 @@ pub async fn run() -> anyhow::Result<()> {
 
     // Scheduler tables are created via the versioned MIGRATIONS mechanism
     // (agent-core state_store, Migration id 3: "wave2_scheduler").
-    // Build the action dispatcher and register built-in handlers.
-    let dispatcher = Arc::new(jobs::ActionDispatcher::new());
-
-    // Register a built-in "generic" handler that returns the payload as-is.
+    // Register built-in action handlers on the dispatcher (created above).
     {
-        let d = dispatcher.clone();
+        let d = state.task_dispatcher.clone();
         d.register(
             "generic",
             Arc::new(|payload: Value, ctx: jobs::JobCtx| {
@@ -619,7 +622,7 @@ pub async fn run() -> anyhow::Result<()> {
     let scheduler = jobs::Scheduler::new(
         state.state_db_path.clone(),
         state.jobs.clone(),
-        dispatcher,
+        state.task_dispatcher.clone(),
         Arc::new(jobs::RealClock),
     );
     scheduler.start(state.scheduler_shutdown.clone());
@@ -877,6 +880,39 @@ pub async fn run() -> anyhow::Result<()> {
         .route(
             "/scheduler/tasks/{task_id}/runs",
             get(jobs::scheduler_task_runs),
+        )
+        // ── Notes & Tasks (Wave 6) ──
+        .route(
+            "/api/notes",
+            get(notes_tasks::notes_list).post(notes_tasks::notes_create),
+        )
+        .route(
+            "/api/notes/{note_id}",
+            axum::routing::put(notes_tasks::notes_update).delete(notes_tasks::notes_delete),
+        )
+        .route(
+            "/api/tasks/{task_id}/pause",
+            post(notes_tasks::task_pause),
+        )
+        .route(
+            "/api/tasks/{task_id}/resume",
+            post(notes_tasks::task_resume),
+        )
+        .route(
+            "/api/tasks/{task_id}/run-now",
+            post(notes_tasks::task_run_now),
+        )
+        .route(
+            "/api/tasks/{task_id}/history",
+            get(notes_tasks::task_history),
+        )
+        .route(
+            "/api/toast/stream",
+            get(notes_tasks::toast_stream),
+        )
+        .route(
+            "/api/webhook/send",
+            post(notes_tasks::webhook_send),
         )
         .with_state(state)
         .layer(CorsLayer::permissive())

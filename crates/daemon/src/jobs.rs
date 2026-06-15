@@ -464,6 +464,19 @@ pub struct ScheduledTask {
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
     pub last_run_at: Option<DateTime<Utc>>,
+    /// Action type: `builtin`, `llm_prompt`, `agent_run`.
+    #[serde(default = "default_action_type")]
+    pub action_type: String,
+    /// JSON config for the action (prompt text, skill name, etc.).
+    #[serde(default)]
+    pub action_config: Option<String>,
+    /// Whether the task is paused (skipped by scheduler).
+    #[serde(default)]
+    pub paused: bool,
+}
+
+fn default_action_type() -> String {
+    "builtin".to_string()
 }
 
 /// A record marking that a scheduled task ran.
@@ -525,6 +538,12 @@ pub struct ScheduledTaskRequest {
     pub payload_json: Option<String>,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    #[serde(default = "default_action_type")]
+    pub action_type: String,
+    #[serde(default)]
+    pub action_config: Option<String>,
+    #[serde(default)]
+    pub paused: bool,
 }
 
 fn default_enabled() -> bool {
@@ -734,7 +753,7 @@ fn sql_error(e: rusqlite::Error) -> io::Error {
 // crates/agent-core/src/state_store.rs (Migration id 3: "wave2_scheduler").
 // The ensure_scheduler_tables function has been removed.
 
-fn row_to_scheduled_task(row: &rusqlite::Row) -> rusqlite::Result<ScheduledTask> {
+pub fn row_to_scheduled_task(row: &rusqlite::Row) -> rusqlite::Result<ScheduledTask> {
     Ok(ScheduledTask {
         id: row.get(0)?,
         name: row.get(1)?,
@@ -762,6 +781,9 @@ fn row_to_scheduled_task(row: &rusqlite::Row) -> rusqlite::Result<ScheduledTask>
                 .ok()
                 .map(|dt| dt.with_timezone(&Utc))
         }),
+        action_type: row.get::<_, Option<String>>(11)?.unwrap_or_else(default_action_type),
+        action_config: row.get(12)?,
+        paused: row.get::<_, bool>(13).unwrap_or(false),
     })
 }
 
@@ -797,6 +819,9 @@ pub async fn scheduler_create_task(
         enabled: req.enabled,
         created_at: now,
         last_run_at: None,
+        action_type: req.action_type,
+        action_config: req.action_config,
+        paused: req.paused,
     };
 
     upsert_scheduled_task(&state.state_db_path, &task)
@@ -844,9 +869,10 @@ async fn claim_due_tasks(
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, schedule_kind, cron_expr, interval_secs, run_at,
-                        job_kind, payload_json, enabled, created_at, last_run_at
+                        job_kind, payload_json, enabled, created_at, last_run_at,
+                        COALESCE(action_type,'builtin'), action_config, COALESCE(paused,0)
                  FROM scheduled_tasks
-                 WHERE enabled = 1",
+                 WHERE enabled = 1 AND COALESCE(paused,0) = 0",
             )
             .map_err(sql_error)?;
 
@@ -892,7 +918,7 @@ async fn claim_due_tasks(
     .map_err(|e| io::Error::other(e.to_string()))?
 }
 
-async fn record_run_start(db_path: &Path, task_id: &str, job_id: &str) -> i64 {
+pub async fn record_run_start(db_path: &Path, task_id: &str, job_id: &str) -> i64 {
     let db_path = db_path.to_path_buf();
     let task_id = task_id.to_string();
     let job_id = job_id.to_string();
@@ -925,18 +951,35 @@ async fn complete_scheduled_run(
     now: DateTime<Utc>,
     is_once: bool,
 ) {
+    complete_scheduled_run_with_output(db_path, task_id, run_id, status, error, now, is_once, None)
+        .await;
+}
+
+/// Like [`complete_scheduled_run`] but also writes the `output` column on
+/// `task_runs` for task types that produce stdout/structured results.
+pub async fn complete_scheduled_run_with_output(
+    db_path: &Path,
+    task_id: &str,
+    run_id: i64,
+    status: &str,
+    error: Option<&str>,
+    now: DateTime<Utc>,
+    is_once: bool,
+    output: Option<&str>,
+) {
     let db_path = db_path.to_path_buf();
     let task_id = task_id.to_string();
     let status = status.to_string();
     let error = error.map(|s| s.to_string());
+    let output = output.map(|s| s.to_string());
     let now_str = now.to_rfc3339();
     let _ = tokio::task::spawn_blocking(move || {
         let conn = open_sqlite(&db_path)?;
 
         // Update the task_runs row.
         conn.execute(
-            "UPDATE task_runs SET status = ?1, finished_at = ?2, error = ?3 WHERE id = ?4",
-            params![status, now_str, error, run_id],
+            "UPDATE task_runs SET status = ?1, finished_at = ?2, error = ?3, output = ?4 WHERE id = ?5",
+            params![status, now_str, error, output, run_id],
         )
         .map_err(sql_error)?;
 
@@ -1017,7 +1060,8 @@ pub async fn list_scheduled_tasks(db_path: &Path) -> io::Result<Vec<ScheduledTas
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, schedule_kind, cron_expr, interval_secs, run_at,
-                        job_kind, payload_json, enabled, created_at, last_run_at
+                        job_kind, payload_json, enabled, created_at, last_run_at,
+                        COALESCE(action_type,'builtin'), action_config, COALESCE(paused,0)
                  FROM scheduled_tasks
                  ORDER BY created_at DESC",
             )
@@ -1045,8 +1089,9 @@ pub async fn upsert_scheduled_task(db_path: &Path, task: &ScheduledTask) -> io::
         conn.execute(
             "INSERT OR REPLACE INTO scheduled_tasks
              (id, name, schedule_kind, cron_expr, interval_secs, run_at,
-              job_kind, payload_json, enabled, created_at, last_run_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+              job_kind, payload_json, enabled, created_at, last_run_at,
+              action_type, action_config, paused)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 task.id,
                 task.name,
@@ -1059,6 +1104,9 @@ pub async fn upsert_scheduled_task(db_path: &Path, task: &ScheduledTask) -> io::
                 task.enabled as i32,
                 task.created_at.to_rfc3339(),
                 task.last_run_at.map(|dt| dt.to_rfc3339()),
+                task.action_type,
+                task.action_config,
+                task.paused as i32,
             ],
         )
         .map_err(sql_error)?;
@@ -1189,7 +1237,10 @@ mod tests {
             payload_json TEXT,
             enabled INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL,
-            last_run_at TEXT
+            last_run_at TEXT,
+            action_type TEXT NOT NULL DEFAULT 'builtin',
+            action_config TEXT,
+            paused INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS task_runs (
@@ -1200,6 +1251,7 @@ mod tests {
             started_at TEXT NOT NULL,
             finished_at TEXT,
             error TEXT,
+            output TEXT,
             FOREIGN KEY(task_id) REFERENCES scheduled_tasks(id)
         );
 
@@ -1221,8 +1273,9 @@ mod tests {
         conn.execute(
             "INSERT INTO scheduled_tasks
              (id, name, schedule_kind, cron_expr, interval_secs, run_at,
-              job_kind, payload_json, enabled, created_at, last_run_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+              job_kind, payload_json, enabled, created_at, last_run_at,
+              action_type, action_config, paused)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 task.id,
                 task.name,
@@ -1235,6 +1288,9 @@ mod tests {
                 task.enabled as i32,
                 task.created_at.to_rfc3339(),
                 task.last_run_at.map(|dt| dt.to_rfc3339()),
+                task.action_type,
+                task.action_config,
+                task.paused as i32,
             ],
         )
         .unwrap();
@@ -1300,6 +1356,9 @@ mod tests {
             enabled: true,
             created_at: now,
             last_run_at: None,
+            action_type: "builtin".to_string(),
+            action_config: None,
+            paused: false,
         }
     }
 
@@ -1346,7 +1405,8 @@ mod tests {
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, schedule_kind, cron_expr, interval_secs, run_at,
-                        job_kind, payload_json, enabled, created_at, last_run_at
+                        job_kind, payload_json, enabled, created_at, last_run_at,
+                        COALESCE(action_type,'builtin'), action_config, COALESCE(paused,0)
                  FROM scheduled_tasks WHERE id = ?1",
             )
             .unwrap();
