@@ -149,6 +149,16 @@ impl ContextBudgetManager {
 
         force_fit_candidate(&mut final_candidate, max_tokens);
 
+        // Trimming above (compression, dropping the oldest message, force-fitting)
+        // can leave a `tool` message without the assistant `tool_calls` it answers,
+        // or an assistant `tool_calls` without its reply. OpenAI-compatible remote
+        // providers (e.g. DeepSeek) reject such requests with HTTP 400
+        // ("Messages with role 'tool' must be a response to a preceding message with
+        // 'tool_calls'"). Repair the sequence before it leaves the budget.
+        sanitize_tool_call_pairs(&mut final_candidate.messages);
+        final_candidate.estimated_prompt_tokens =
+            estimate_prompt_tokens(&final_candidate.messages, &final_candidate.tools);
+
         let critical = final_candidate.estimated_prompt_tokens
             >= max_tokens.saturating_sub(critical_headroom(input.profile.kind));
 
@@ -260,6 +270,69 @@ fn force_fit_candidate(candidate: &mut PromptCandidate, max_tokens: usize) {
     }
     candidate.estimated_prompt_tokens =
         estimate_prompt_tokens(&candidate.messages, &candidate.tools);
+}
+
+/// Repair the message sequence so it satisfies OpenAI-compatible tool-call
+/// pairing rules after budget trimming may have dropped or reordered messages:
+/// every `tool` message must follow the assistant message that requested it,
+/// and every assistant `tool_calls` entry must have a matching `tool` reply.
+fn sanitize_tool_call_pairs(messages: &mut Vec<ChatMessage>) {
+    use std::collections::HashSet;
+
+    // Pass 1: drop orphaned tool replies whose requesting assistant message was
+    // trimmed away. `valid_ids` holds the tool-call ids requested by the most
+    // recent assistant message (reset whenever a non-tool message intervenes).
+    let mut valid_ids: HashSet<String> = HashSet::new();
+    let mut kept: Vec<ChatMessage> = Vec::with_capacity(messages.len());
+    for message in messages.drain(..) {
+        match message.role {
+            MessageRole::Assistant => {
+                valid_ids = message.tool_calls.iter().map(|c| c.id.clone()).collect();
+                kept.push(message);
+            }
+            MessageRole::Tool => {
+                let matched = message
+                    .tool_call_id
+                    .as_ref()
+                    .is_some_and(|id| valid_ids.contains(id));
+                if matched {
+                    kept.push(message);
+                }
+                // Otherwise the orphaned tool reply is dropped.
+            }
+            _ => {
+                valid_ids.clear();
+                kept.push(message);
+            }
+        }
+    }
+    *messages = kept;
+
+    // Pass 2: drop assistant tool-call requests that never received a reply (their
+    // `tool` message was trimmed), since those also trigger a 400 on strict APIs.
+    let len = messages.len();
+    for idx in 0..len {
+        if messages[idx].role != MessageRole::Assistant || messages[idx].tool_calls.is_empty() {
+            continue;
+        }
+        let mut answered: HashSet<String> = HashSet::new();
+        let mut next = idx + 1;
+        while next < len && messages[next].role == MessageRole::Tool {
+            if let Some(id) = &messages[next].tool_call_id {
+                answered.insert(id.clone());
+            }
+            next += 1;
+        }
+        messages[idx].tool_calls.retain(|c| answered.contains(&c.id));
+    }
+
+    // Pass 3: drop assistant messages left with neither content nor tool calls,
+    // which are themselves invalid for OpenAI-compatible providers.
+    messages.retain(|m| {
+        m.role != MessageRole::Assistant
+            || !m.tool_calls.is_empty()
+            || !m.content.trim().is_empty()
+    });
 }
 
 fn compress_oldest_history_chunk(
@@ -446,6 +519,64 @@ mod tests {
 
     fn mk_message(role: MessageRole, content: &str) -> ChatMessage {
         ChatMessage::text(role, content.to_string())
+    }
+
+    fn mk_tool_call(id: &str, name: &str) -> mlx_ollama_core::ToolCallRequest {
+        mlx_ollama_core::ToolCallRequest {
+            id: id.to_string(),
+            name: name.to_string(),
+            arguments: "{}".to_string(),
+        }
+    }
+
+    #[test]
+    fn sanitize_drops_orphaned_tool_reply() {
+        // Simulates force-fit having removed the assistant message that requested
+        // the first tool call, leaving an orphaned tool reply at the front.
+        let mut messages = vec![
+            mk_message(MessageRole::System, "sys"),
+            ChatMessage::tool_result("call-1", "stale tool output"),
+            ChatMessage {
+                role: MessageRole::Assistant,
+                content: String::new(),
+                tool_calls: vec![mk_tool_call("call-2", "list_dir")],
+                tool_call_id: None,
+            },
+            ChatMessage::tool_result("call-2", "fresh tool output"),
+        ];
+
+        sanitize_tool_call_pairs(&mut messages);
+
+        // The orphan is gone; the valid pair survives in order.
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].role, MessageRole::System);
+        assert_eq!(messages[1].role, MessageRole::Assistant);
+        assert_eq!(messages[1].tool_calls.len(), 1);
+        assert_eq!(messages[2].role, MessageRole::Tool);
+        assert_eq!(messages[2].tool_call_id.as_deref(), Some("call-2"));
+    }
+
+    #[test]
+    fn sanitize_drops_unanswered_tool_call() {
+        // Assistant requested a tool whose reply was trimmed away.
+        let mut messages = vec![
+            mk_message(MessageRole::System, "sys"),
+            mk_message(MessageRole::User, "hi"),
+            ChatMessage {
+                role: MessageRole::Assistant,
+                content: "working on it".to_string(),
+                tool_calls: vec![mk_tool_call("call-9", "read_file")],
+                tool_call_id: None,
+            },
+        ];
+
+        sanitize_tool_call_pairs(&mut messages);
+
+        // The dangling tool_call is stripped; the assistant text is preserved.
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[2].role, MessageRole::Assistant);
+        assert!(messages[2].tool_calls.is_empty());
+        assert_eq!(messages[2].content, "working on it");
     }
 
     fn mk_tool(name: &str) -> FunctionDef {
