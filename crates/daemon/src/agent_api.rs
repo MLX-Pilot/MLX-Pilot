@@ -5021,11 +5021,21 @@ pub async fn agent_audit_export(
 #[derive(Debug, Deserialize)]
 pub struct CreateSessionRequest {
     pub name: Option<String>,
+    /// Surface that created the session: "chat" for the Chat tab, "agent" for the
+    /// Agent workspace. Drives sidebar filtering so the two lists stay separate.
+    #[serde(default)]
+    pub origin_kind: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct RenameSessionRequest {
     pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AppendMessageRequest {
+    pub role: String,
+    pub content: String,
 }
 
 pub async fn agent_list_sessions(
@@ -5046,9 +5056,18 @@ pub async fn agent_create_session(
     Json(req): Json<CreateSessionRequest>,
 ) -> Result<Json<mlx_agent_core::session::SessionMeta>, AgentApiError> {
     let session_id = mlx_agent_core::SessionStore::new_session_id();
+    let mut meta = mlx_agent_core::session::SessionMeta::basic(
+        session_id.clone(),
+        req.name
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| "Nova conversa".to_string()),
+    );
+    if let Some(origin) = req.origin_kind.filter(|value| !value.trim().is_empty()) {
+        meta.origin_kind = origin.trim().to_ascii_lowercase();
+    }
     state
         .session_store
-        .ensure_session(&session_id, req.name)
+        .ensure_session_with_meta(meta)
         .await
         .map_err(|e| {
             AgentApiError::new(
@@ -5137,6 +5156,39 @@ pub async fn agent_delete_session(
             Some(format!("Failed to delete session: {e}")),
         )
     })?;
+    Ok(Json(serde_json::json!({ "success": true })))
+}
+
+/// Append a single chat turn (user or assistant) to a session. Used by the Chat
+/// tab to persist its conversation, which is otherwise stateless on the server.
+pub async fn agent_append_session_message(
+    State(state): State<super::AppState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(req): Json<AppendMessageRequest>,
+) -> Result<Json<serde_json::Value>, AgentApiError> {
+    if req.content.trim().is_empty() {
+        return Err(AgentApiError::bad_request("content cannot be empty"));
+    }
+    let message = match req.role.trim().to_ascii_lowercase().as_str() {
+        "user" => mlx_agent_core::session::SessionMessage::user(req.content),
+        "assistant" => mlx_agent_core::session::SessionMessage::assistant(req.content),
+        other => {
+            return Err(AgentApiError::bad_request(format!(
+                "unsupported message role: {other}"
+            )));
+        }
+    };
+    state
+        .session_store
+        .append(&id, &message)
+        .await
+        .map_err(|e| {
+            AgentApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "session_error",
+                Some(format!("Failed to append message: {e}")),
+            )
+        })?;
     Ok(Json(serde_json::json!({ "success": true })))
 }
 

@@ -769,7 +769,7 @@ pub async fn run() -> anyhow::Result<()> {
         // ── Wave 1: Session history organization + editing ──
         .route(
             "/agent/sessions/{id}/messages",
-            get(wave1::session_messages),
+            get(wave1::session_messages).post(agent_api::agent_append_session_message),
         )
         .route("/agent/sessions/{id}/flags", post(wave1::session_set_flags))
         .route("/agent/sessions/{id}/fork", post(wave1::session_fork))
