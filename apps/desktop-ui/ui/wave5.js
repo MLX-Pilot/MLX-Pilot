@@ -121,7 +121,7 @@
     };
 
     try {
-      const res = await api('/research/start', { method: 'POST', body: JSON.stringify(payload) });
+      const res = await api('/api/research/start', { method: 'POST', body: JSON.stringify(payload) });
 
       // Check for fail-fast error response
       if (res.error) {
@@ -172,7 +172,7 @@
   // ── Cancel ─────────────────────────────────────────────────────────────
   async function cancelResearch(jobId) {
     try {
-      await api('/research/cancel/' + jobId, { method: 'POST' });
+      await api('/api/research/cancel/' + jobId, { method: 'POST' });
       if (researchJobs[jobId]) {
         researchJobs[jobId].es.close();
         delete researchJobs[jobId];
@@ -212,7 +212,7 @@
     var container = $('research-library-list');
     if (!container) return;
     try {
-      var sessions = await api('/research/library');
+      var sessions = await api('/api/research/library');
       if (!Array.isArray(sessions) || !sessions.length) {
         container.innerHTML = '<div class="wave1-empty">Nenhuma pesquisa concluída</div>';
         return;
@@ -259,7 +259,7 @@
     var sessionId = $('research-report-viewer').dataset.sessionId;
     if (!sessionId) return;
     try {
-      var res = await api('/research/spinoff/' + sessionId, { method: 'POST' });
+      var res = await api('/api/research/spinoff/' + sessionId, { method: 'POST' });
       if (res && res.session_id) {
         // Try switching to chat tab
         var chatTab = document.querySelector('.tab[data-panel="chat"]');
@@ -272,7 +272,7 @@
     var sessionId = $('research-report-viewer').dataset.sessionId;
     if (!sessionId || !confirm('Excluir esta pesquisa?')) return;
     try {
-      await api('/research/' + sessionId, { method: 'DELETE' });
+      await api('/api/research/' + sessionId, { method: 'DELETE' });
       backToLibrary();
     } catch (e) { console.error(e); }
   }
