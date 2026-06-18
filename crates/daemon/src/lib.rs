@@ -1593,6 +1593,11 @@ async fn chat_stream(
         }));
     }
 
+    if split_cloud_model_id(&request.model_id).is_some() {
+        let receiver = spawn_cloud_compat_stream(state, request);
+        return chat_stream_response(receiver);
+    }
+
     let routed = route_model_request(&state, &request.model_id).await?;
     let normalized_request = ChatRequest {
         model_id: routed.normalized_model_id.clone(),
@@ -1610,6 +1615,10 @@ async fn chat_stream(
         }
     };
 
+    chat_stream_response(receiver)
+}
+
+fn chat_stream_response(receiver: mpsc::Receiver<ChatStreamEvent>) -> Result<Response, AppError> {
     let stream = ReceiverStream::new(receiver).map(|event| {
         let mut payload = serde_json::to_vec(&event).unwrap_or_else(|_| {
             b"{\"event\":\"error\",\"message\":\"serialization failed\"}".to_vec()
@@ -1633,7 +1642,7 @@ async fn chat_stream(
 mod tests {
     use super::{
         annotate_agent_model_compatibility, find_workspace_root_from, has_workspace_marker,
-        infer_model_provider, strip_model_provider_prefix,
+        infer_model_provider, split_cloud_model_id, strip_model_provider_prefix,
     };
     use mlx_ollama_core::ModelDescriptor;
     use std::fs;
@@ -1664,6 +1673,20 @@ mod tests {
 
         let resolved = find_workspace_root_from(&nested).unwrap();
         assert_eq!(resolved, root);
+    }
+
+    #[test]
+    fn split_cloud_model_id_detects_known_cloud_prefixes() {
+        assert_eq!(
+            split_cloud_model_id(" deepseek:deepseek-v4-flash "),
+            Some(("deepseek", "deepseek-v4-flash"))
+        );
+        assert_eq!(
+            split_cloud_model_id("openai:gpt-4.1-mini"),
+            Some(("openai", "gpt-4.1-mini"))
+        );
+        assert_eq!(split_cloud_model_id("ollama::qwen3:8b"), None);
+        assert_eq!(split_cloud_model_id("deepseek:"), None);
     }
 
     #[test]
@@ -2161,6 +2184,77 @@ async fn brave_web_search(
     }))
 }
 
+fn spawn_cloud_compat_stream(
+    state: AppState,
+    request: ChatRequest,
+) -> mpsc::Receiver<ChatStreamEvent> {
+    let (tx, rx) = mpsc::channel(16);
+
+    tokio::spawn(async move {
+        let started = Instant::now();
+        if tx.send(ChatStreamEvent::status("waiting")).await.is_err() {
+            return;
+        }
+
+        match try_cloud_chat(&state, &request).await {
+            Some(Ok(response)) => {
+                emit_chat_response_events(&tx, response, started).await;
+            }
+            Some(Err(error)) => {
+                let _ = tx.send(ChatStreamEvent::error(error.to_string())).await;
+            }
+            None => {
+                let _ = tx
+                    .send(ChatStreamEvent::error(format!(
+                        "provedor cloud nao encontrado para modelo '{}'",
+                        request.model_id
+                    )))
+                    .await;
+            }
+        }
+    });
+
+    rx
+}
+
+async fn emit_chat_response_events(
+    tx: &mpsc::Sender<ChatStreamEvent>,
+    response: ChatResponse,
+    started: Instant,
+) {
+    let answer = response.message.content.trim().to_string();
+    if !answer.is_empty()
+        && tx
+            .send(ChatStreamEvent::answer_delta(answer))
+            .await
+            .is_err()
+    {
+        return;
+    }
+
+    let latency_ms = response
+        .latency_ms
+        .max(started.elapsed().as_millis() as u64);
+
+    let done_event = ChatStreamEvent {
+        event: "done".to_string(),
+        status: Some("completed".to_string()),
+        delta: None,
+        message: None,
+        prompt_tokens: Some(response.usage.prompt_tokens),
+        completion_tokens: Some(response.usage.completion_tokens),
+        total_tokens: Some(response.usage.total_tokens),
+        prompt_tps: None,
+        generation_tps: None,
+        peak_memory_gb: None,
+        latency_ms: Some(latency_ms),
+        raw_metrics: None,
+        airllm_required: None,
+        airllm_used: None,
+    };
+    let _ = tx.send(done_event).await;
+}
+
 fn spawn_provider_compat_stream(
     provider: Arc<dyn ModelProvider>,
     request: ChatRequest,
@@ -2175,32 +2269,7 @@ fn spawn_provider_compat_stream(
 
         match provider.chat(request).await {
             Ok(response) => {
-                let answer = response.message.content.trim().to_string();
-                if !answer.is_empty() {
-                    let _ = tx.send(ChatStreamEvent::answer_delta(answer)).await;
-                }
-
-                let latency_ms = response
-                    .latency_ms
-                    .max(started.elapsed().as_millis() as u64);
-
-                let done_event = ChatStreamEvent {
-                    event: "done".to_string(),
-                    status: Some("completed".to_string()),
-                    delta: None,
-                    message: None,
-                    prompt_tokens: Some(response.usage.prompt_tokens),
-                    completion_tokens: Some(response.usage.completion_tokens),
-                    total_tokens: Some(response.usage.total_tokens),
-                    prompt_tps: None,
-                    generation_tps: None,
-                    peak_memory_gb: None,
-                    latency_ms: Some(latency_ms),
-                    raw_metrics: None,
-                    airllm_required: None,
-                    airllm_used: None,
-                };
-                let _ = tx.send(done_event).await;
+                emit_chat_response_events(&tx, response, started).await;
             }
             Err(error) => {
                 let _ = tx.send(ChatStreamEvent::error(error.to_string())).await;
@@ -2410,28 +2479,28 @@ fn is_known_tool_ready_ollama_family(model: &str) -> bool {
     .any(|needle| model.contains(needle))
 }
 
+const KNOWN_CLOUD_PROVIDERS: &[&str] = &["deepseek", "openai", "anthropic", "groq", "openrouter"];
+
+fn split_cloud_model_id(model_id: &str) -> Option<(&'static str, &str)> {
+    let trimmed = model_id.trim();
+    for &prefix in KNOWN_CLOUD_PROVIDERS {
+        if let Some(rest) = trimmed.strip_prefix(&format!("{prefix}:")) {
+            let model = rest.trim();
+            if !model.is_empty() {
+                return Some((prefix, model));
+            }
+        }
+    }
+    None
+}
+
 /// Try to route a chat request to a cloud provider (e.g. "deepseek:model-name").
 /// Returns `None` if the model_id doesn't match any cloud provider.
 async fn try_cloud_chat(
     state: &AppState,
     request: &ChatRequest,
 ) -> Option<Result<ChatResponse, ProviderError>> {
-    let model_id = request.model_id.trim();
-    // Check known cloud provider prefixes.
-    let known_cloud_providers = ["deepseek", "openai", "anthropic", "groq", "openrouter"];
-    let mut cloud_provider: Option<&str> = None;
-    let mut cloud_model: Option<&str> = None;
-
-    for prefix in &known_cloud_providers {
-        if let Some(rest) = model_id.strip_prefix(&format!("{prefix}:")) {
-            cloud_provider = Some(prefix);
-            cloud_model = Some(rest.trim());
-            break;
-        }
-    }
-
-    let provider_key = cloud_provider?;
-    let model = cloud_model?;
+    let (provider_key, model) = split_cloud_model_id(&request.model_id)?;
 
     let config = model_catalog::find_cloud_config(provider_key)?;
     let cfg = AppConfig::load_settings().apply_env();

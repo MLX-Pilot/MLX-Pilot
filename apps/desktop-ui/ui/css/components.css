@@ -2400,6 +2400,12 @@
   .app.chat-sidebar-visible {
     grid-template-columns: 1fr;
   }
+  .app.chat-sidebar-visible .sidebar {
+    display: none;
+  }
+  .app.chat-sidebar-visible .panels {
+    grid-column: 1;
+  }
   .tab {
     padding: 6px 10px;
     font-size: 12px;

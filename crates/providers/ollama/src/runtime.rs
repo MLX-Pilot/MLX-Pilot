@@ -230,7 +230,7 @@ pub struct OllamaRuntime {
 impl OllamaRuntime {
     pub fn new(cfg: OllamaRuntimeConfig) -> Self {
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(15))
+            .timeout(runtime_http_timeout(cfg.startup_timeout))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
         Self {
@@ -1171,6 +1171,10 @@ impl OllamaRuntime {
     }
 }
 
+fn runtime_http_timeout(startup_timeout: Duration) -> Duration {
+    startup_timeout.max(Duration::from_secs(180))
+}
+
 impl Drop for OllamaRuntime {
     fn drop(&mut self) {
         self.cancel.store(true, Ordering::SeqCst);
@@ -2011,6 +2015,18 @@ mod tests {
             .flatten()
             .all(|entry| !entry.file_name().to_string_lossy().contains(".tmp-")));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn runtime_http_timeout_allows_slow_initial_model_loads() {
+        assert_eq!(
+            runtime_http_timeout(Duration::from_secs(15)),
+            Duration::from_secs(180)
+        );
+        assert_eq!(
+            runtime_http_timeout(Duration::from_secs(240)),
+            Duration::from_secs(240)
+        );
     }
 
     #[test]
