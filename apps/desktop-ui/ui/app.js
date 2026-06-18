@@ -116,6 +116,7 @@
     agentConfig: null,
     agentSessions: [],
     currentSessionId: null,
+    currentChatSessionId: null,
     auditEntries: [],
     auditFilter: 'all',
     plugins: [],
@@ -1300,7 +1301,7 @@
     const modelLabel = currentAgentModelLabel();
     const providerLabel = currentProviderLabel();
 
-    setText('agent-session-count', String(state.agentSessions.length));
+    setText('agent-session-count', String(agentSessions().length));
     setText('agent-provider-pill', `Provider ${providerLabel}`);
     setText('agent-model-pill', `Model ${modelLabel}`);
     setText('agent-exec-pill', `Exec ${execMode}`);
@@ -2079,6 +2080,8 @@
     state.messages.push({ role: 'user', content: text });
     const assistantEl = addMessage('assistant', '');
     state.isStreaming = true;
+    try { await ensureChatSession(); } catch (e) { console.error('ensureChatSession failed:', e); }
+    void persistChatTurn('user', text);
     const outboundMessages = await buildWebAugmentedMessages(text);
 
     state.streamController = new AbortController();
@@ -2134,6 +2137,7 @@
             const rendered = renderAssistantOutput(assistantEl, { rawAnswer, streamedThinking, finalize: true });
             if (rendered.answer) {
               state.messages.push({ role: 'assistant', content: rendered.answer });
+              void persistChatTurn('assistant', rendered.answer);
             }
           } else if (evt.event === 'error') {
             throw new Error(evt.message || 'Erro desconhecido');
@@ -2146,6 +2150,7 @@
     } finally {
       state.isStreaming = false;
       state.streamController = null;
+      if (state.currentChatSessionId) void loadSessions();
     }
   }
 
@@ -2157,12 +2162,14 @@
       const rendered = renderAssistantOutput(el, { rawAnswer: content, finalize: true });
       if (rendered.answer) {
         state.messages.push({ role: 'assistant', content: rendered.answer });
+        void persistChatTurn('assistant', rendered.answer);
       }
       if (res?.usage) addMetrics(el, { prompt_tokens: res.usage.prompt_tokens, completion_tokens: res.usage.completion_tokens, total_tokens: res.usage.total_tokens, latency_ms: res.latency_ms });
     } catch (e) {
       updateAnswer(el, `Erro: ${e.message}`);
     }
     state.isStreaming = false;
+    if (state.currentChatSessionId) void loadSessions();
   }
 
   // -- Message DOM helpers ------------------------------------
@@ -2411,16 +2418,32 @@
   }
 
   // -- Sessions (sidebar history) -----------------------------
+  // Chat-tab conversations are tagged origin_kind="chat"; everything else
+  // (agent runs, forks, delegated, channel sessions, legacy "local") belongs to
+  // the Agent workspace. This keeps the two sidebars from mixing.
+  function isChatSession(session) {
+    return String(session?.origin_kind || '').toLowerCase() === 'chat';
+  }
+  function chatSessions() {
+    return state.agentSessions.filter(isChatSession);
+  }
+  function agentSessions() {
+    return state.agentSessions.filter(session => !isChatSession(session));
+  }
+
   async function loadSessions() {
     try {
       const sessions = await api('/agent/sessions');
       state.agentSessions = Array.isArray(sessions) ? sessions : [];
-      if (state.currentSessionId && !state.agentSessions.some(session => session.id === state.currentSessionId)) state.currentSessionId = null;
-      if (!state.currentSessionId && state.agentSessions[0]?.id) state.currentSessionId = state.agentSessions[0].id;
+      const agentList = agentSessions();
+      if (state.currentSessionId && !agentList.some(session => session.id === state.currentSessionId)) state.currentSessionId = null;
+      if (!state.currentSessionId && agentList[0]?.id) state.currentSessionId = agentList[0].id;
+      if (state.currentChatSessionId && !chatSessions().some(session => session.id === state.currentChatSessionId)) state.currentChatSessionId = null;
       renderSidebarHistory();
     } catch {
       state.agentSessions = [];
       state.currentSessionId = null;
+      state.currentChatSessionId = null;
       renderSidebarHistory();
     }
   }
@@ -2434,17 +2457,19 @@
   function renderSessionCollection(container, variant) {
     if (!container) return;
     container.innerHTML = '';
-    if (state.agentSessions.length === 0) {
+    const sessions = variant === 'agent' ? agentSessions() : chatSessions();
+    const activeId = variant === 'agent' ? state.currentSessionId : state.currentChatSessionId;
+    if (sessions.length === 0) {
       container.innerHTML = variant === 'agent'
         ? '<div class="agent-empty-copy">Nenhuma sessao ainda</div>'
-        : '<div style="padding:8px 12px;font-size:12px;color:var(--text-tertiary)">Nenhuma sessao ainda</div>';
+        : '<div style="padding:8px 12px;font-size:12px;color:var(--text-tertiary)">Nenhuma conversa ainda</div>';
       return;
     }
-    state.agentSessions.forEach(s => {
+    sessions.forEach(s => {
       const item = document.createElement('div');
       const name = s.name || `Sessao ${s.id?.substring(0, 6) || '?'}`;
       const count = s.message_count || 0;
-      const active = s.id === state.currentSessionId;
+      const active = s.id === activeId;
       if (variant === 'agent') {
         item.className = 'agent-session-item' + (active ? ' active' : '');
         item.innerHTML = `
@@ -2458,21 +2483,76 @@
         item.innerHTML = `<span class="history-icon">&#9679;</span><span class="history-label" title="${esc(name)}">${esc(name)} <span style="opacity:0.5;font-size:11px">(${count})</span></span>`;
       }
       item.addEventListener('click', () => {
-        state.currentSessionId = s.id;
         if (variant === 'agent') {
+          state.currentSessionId = s.id;
           renderAgentChatEmptyState();
         } else {
+          state.currentChatSessionId = s.id;
           void loadChatSessionIntoView(s.id);
         }
         renderSidebarHistory();
       });
+
+      const actions = document.createElement('div');
+      actions.className = 'session-actions';
+      const renameBtn = document.createElement('button');
+      renameBtn.type = 'button';
+      renameBtn.className = 'session-action-btn';
+      renameBtn.title = 'Renomear conversa';
+      renameBtn.setAttribute('aria-label', 'Renomear conversa');
+      renameBtn.textContent = '✎'; // ✎
+      renameBtn.addEventListener('click', (e) => { e.stopPropagation(); void renameSession(s.id, name); });
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'session-action-btn danger';
+      deleteBtn.title = 'Apagar conversa';
+      deleteBtn.setAttribute('aria-label', 'Apagar conversa');
+      deleteBtn.textContent = '✕'; // ✕
+      deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); void deleteSession(s.id, name); });
+      actions.appendChild(renameBtn);
+      actions.appendChild(deleteBtn);
+      item.appendChild(actions);
+
       container.appendChild(item);
     });
   }
 
+  async function renameSession(id, currentName) {
+    const next = window.prompt('Novo nome da conversa:', currentName || '');
+    if (next == null) return;
+    const trimmed = next.trim();
+    if (!trimmed || trimmed === currentName) return;
+    try {
+      await api(`/agent/sessions/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ name: trimmed }) });
+      await loadSessions();
+    } catch (e) {
+      console.error('Rename session failed:', e);
+      addSystemMsg(`Erro ao renomear conversa: ${e.message}`);
+    }
+  }
+
+  async function deleteSession(id, name) {
+    if (!window.confirm(`Apagar a conversa "${name}"? Esta acao nao pode ser desfeita.`)) return;
+    try {
+      await api(`/agent/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (state.currentSessionId === id) state.currentSessionId = null;
+      if (state.currentChatSessionId === id) {
+        state.currentChatSessionId = null;
+        state.messages = [];
+        const msgs = document.getElementById('chat-messages');
+        if (msgs) msgs.innerHTML = '';
+      }
+      await loadSessions();
+      renderAgentChatEmptyState();
+    } catch (e) {
+      console.error('Delete session failed:', e);
+      addSystemMsg(`Erro ao apagar conversa: ${e.message}`);
+    }
+  }
+
   async function createNewSession() {
     try {
-      const session = await api('/agent/sessions', { method: 'POST', body: JSON.stringify({}) });
+      const session = await api('/agent/sessions', { method: 'POST', body: JSON.stringify({ origin_kind: 'agent' }) });
       if (session?.id) {
         state.currentSessionId = session.id;
         state.messages = [];
@@ -2482,6 +2562,27 @@
         renderAgentChatEmptyState();
       }
     } catch (e) { console.error('New session failed:', e); }
+  }
+
+  // Lazily create (once) the persisted Chat-tab session tagged origin "chat".
+  async function ensureChatSession() {
+    if (state.currentChatSessionId) return state.currentChatSessionId;
+    const session = await api('/agent/sessions', { method: 'POST', body: JSON.stringify({ origin_kind: 'chat' }) });
+    if (session?.id) state.currentChatSessionId = session.id;
+    return state.currentChatSessionId;
+  }
+
+  async function persistChatTurn(role, content) {
+    const sessionId = state.currentChatSessionId;
+    if (!sessionId || !String(content || '').trim()) return;
+    try {
+      await api(`/agent/sessions/${encodeURIComponent(sessionId)}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ role, content }),
+      });
+    } catch (e) {
+      console.error('Persist chat turn failed:', e);
+    }
   }
   // -- Plugins ------------------------------------------------
   async function loadPlugins() {
@@ -3383,11 +3484,13 @@
 
   // -- Sidebar: New Chat --------------------------------------
   document.getElementById('btn-new-chat')?.addEventListener('click', () => {
+    // Start a fresh Chat-tab conversation. The persisted session is created
+    // lazily on the first message (origin "chat") to avoid empty sessions.
     state.messages = [];
-    state.currentSessionId = null;
+    state.currentChatSessionId = null;
     const msgs = document.getElementById('chat-messages');
     if (msgs) msgs.innerHTML = '<div class="welcome-message" style="text-align:center;padding:60px 20px;max-width:500px;margin:0 auto"><h3 style="font-family:var(--font-heading);font-size:20px;margin-bottom:8px">MLX Pilot Chat</h3><p style="font-size:14px;color:var(--text-tertiary)">Selecione um modelo e envie sua mensagem.</p></div>';
-    createNewSession();
+    renderSidebarHistory();
     switchTab('chat');
   });
 
