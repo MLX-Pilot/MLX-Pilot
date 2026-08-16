@@ -715,30 +715,94 @@
                 <h2>Hardware &amp; Model Fit</h2>
                 <p class="sub">Detecte seu hardware e descubra quais modelos rodam bem</p>
               </div>
-              <button class="wave1-btn" id="btn-hw-scan">
-                <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7"/><path d="M10 6v8M6 10h8"/></svg>
-                Escanear Hardware
-              </button>
+              <div style="display:flex;gap:10px;align-items:center">
+                <span id="hw-mode-badge" class="wave5-badge" style="font-size:11px;padding:3px 8px;font-weight:600;letter-spacing:0.04em">Modo: Detectado</span>
+                <button class="wave1-btn" id="btn-hw-scan">
+                  <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7"/><path d="M10 6v8M6 10h8"/></svg>
+                  Escanear Hardware
+                </button>
+              </div>
             </div>
             <!-- Hardware cards -->
             <div class="wave1-grid" id="hw-cards">
               <div class="wave1-empty">Clique em "Escanear Hardware" para detectar seu sistema</div>
             </div>
             <!-- Manual simulator -->
-            <details style="margin-top:14px;font-size:12px;color:var(--text-secondary)">
-              <summary style="cursor:pointer">Simulador de Hardware Manual</summary>
-              <div class="wave1-toolbar" style="margin-top:8px">
-                <input type="number" id="hw-sim-gpu-count" class="wave1-input" placeholder="GPUs" min="0" style="width:80px" />
-                <input type="number" id="hw-sim-vram" class="wave1-input" placeholder="VRAM (GB)" min="0" step="0.5" style="width:100px" />
-                <input type="number" id="hw-sim-ram" class="wave1-input" placeholder="RAM (GB)" min="0" step="1" style="width:100px" />
-                <select id="hw-sim-backend" class="wave1-select">
-                  <option value="">Backend: Auto</option>
-                  <option value="cuda">CUDA</option>
-                  <option value="rocm">ROCm</option>
-                  <option value="metal">Metal</option>
-                  <option value="cpu">CPU-only</option>
-                </select>
-                <button class="wave1-btn ghost sm" id="btn-hw-sim-apply">Aplicar</button>
+            <details id="hw-sim-details" style="margin-top:14px;font-size:12px;color:var(--text-secondary);background:var(--bg-elevated,#16162a);border:1px solid var(--border,#2a2a44);border-radius:8px;padding:12px 14px">
+              <summary style="cursor:pointer;font-weight:600;color:var(--text-primary,#fff);user-select:none">
+                Simulador de Hardware Manual
+              </summary>
+              <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px">
+                <!-- GPU Row -->
+                <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+                  <div style="flex:2;min-width:200px">
+                    <label class="wave5-label" for="hw-sim-gpu-preset">GPU</label>
+                    <select id="hw-sim-gpu-preset" class="wave1-select" style="width:100%">
+                      <option value="current">Hardware detectado / usar atual</option>
+                      <option value="rtx-5090">NVIDIA GeForce RTX 5090 (32 GB)</option>
+                      <option value="rtx-5080">NVIDIA GeForce RTX 5080 (16 GB)</option>
+                      <option value="rtx-5070">NVIDIA GeForce RTX 5070 (12 GB)</option>
+                      <option value="rtx-4090">NVIDIA GeForce RTX 4090 (24 GB)</option>
+                      <option value="rtx-4080">NVIDIA GeForce RTX 4080 (16 GB)</option>
+                      <option value="rtx-4070">NVIDIA GeForce RTX 4070 (12 GB)</option>
+                      <option value="rtx-3090">NVIDIA GeForce RTX 3090 (24 GB)</option>
+                      <option value="rtx-3080">NVIDIA GeForce RTX 3080 (10 GB)</option>
+                      <option value="rtx-3060">NVIDIA GeForce RTX 3060 (12 GB)</option>
+                      <option value="rx-9070-xt">AMD Radeon RX 9070 XT (16 GB)</option>
+                      <option value="rx-7900-xtx">AMD Radeon RX 7900 XTX (24 GB)</option>
+                      <option value="rx-7900-xt">AMD Radeon RX 7900 XT (20 GB)</option>
+                      <option value="rx-7800-xt">AMD Radeon RX 7800 XT (16 GB)</option>
+                      <option value="rx-7700-xt">AMD Radeon RX 7700 XT (12 GB)</option>
+                      <option value="custom">Personalizada</option>
+                    </select>
+                  </div>
+                  <div id="hw-sim-gpu-custom-box" style="flex:2;min-width:180px;display:none">
+                    <label class="wave5-label" for="hw-sim-gpu-custom-name">Nome da GPU</label>
+                    <input type="text" id="hw-sim-gpu-custom-name" class="wave1-input" placeholder="Ex: RTX 4070 Ti Super" style="width:100%" />
+                  </div>
+                  <div style="flex:1;min-width:90px">
+                    <label class="wave5-label" for="hw-sim-gpu-count">Quantidade</label>
+                    <input type="number" id="hw-sim-gpu-count" class="wave1-input" placeholder="Qtd" min="0" max="8" value="1" style="width:100%" />
+                  </div>
+                  <div style="flex:1.2;min-width:130px">
+                    <label class="wave5-label" for="hw-sim-vram">VRAM por GPU (GB)</label>
+                    <input type="number" id="hw-sim-vram" class="wave1-input" placeholder="VRAM (GB)" min="0" step="0.5" style="width:100%" />
+                  </div>
+                </div>
+
+                <!-- RAM & Backend Row -->
+                <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+                  <div style="flex:1.5;min-width:160px">
+                    <label class="wave5-label" for="hw-sim-ram-preset">RAM do Sistema</label>
+                    <select id="hw-sim-ram-preset" class="wave1-select" style="width:100%">
+                      <option value="current">Manter detectada</option>
+                      <option value="8">8 GB</option>
+                      <option value="16">16 GB</option>
+                      <option value="32">32 GB</option>
+                      <option value="64">64 GB</option>
+                      <option value="128">128 GB</option>
+                      <option value="custom">Personalizada</option>
+                    </select>
+                  </div>
+                  <div id="hw-sim-ram-custom-box" style="flex:1;min-width:110px;display:none">
+                    <label class="wave5-label" for="hw-sim-ram-custom">RAM (GB)</label>
+                    <input type="number" id="hw-sim-ram-custom" class="wave1-input" placeholder="RAM (GB)" min="4" step="1" style="width:100%" />
+                  </div>
+                  <div style="flex:1.5;min-width:150px">
+                    <label class="wave5-label" for="hw-sim-backend">Backend (Override)</label>
+                    <select id="hw-sim-backend" class="wave1-select" style="width:100%">
+                      <option value="">Auto (pelo preset/sistema)</option>
+                      <option value="cuda">CUDA (NVIDIA)</option>
+                      <option value="rocm">ROCm (AMD)</option>
+                      <option value="metal">Metal (Apple)</option>
+                      <option value="cpu">CPU-only</option>
+                    </select>
+                  </div>
+                  <div style="display:flex;gap:8px;margin-left:auto;align-items:flex-end">
+                    <button class="wave1-btn ghost sm" id="btn-hw-sim-reset" type="button" title="Restaurar valores para o hardware real detectado">Restaurar hardware real</button>
+                    <button class="wave1-btn sm" id="btn-hw-sim-apply" type="button">Aplicar simula&ccedil;&atilde;o</button>
+                  </div>
+                </div>
               </div>
             </details>
             <!-- Model table -->

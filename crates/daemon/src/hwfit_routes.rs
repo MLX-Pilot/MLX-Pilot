@@ -33,6 +33,7 @@ pub struct ModelsQuery {
     pub fit_only: Option<bool>,
     // Manual hardware overrides
     pub manual_mode: Option<bool>,
+    pub manual_gpu_name: Option<String>,
     pub manual_gpu_count: Option<usize>,
     pub manual_vram_gb: Option<f64>,
     pub manual_ram_gb: Option<f64>,
@@ -52,10 +53,20 @@ pub struct ProfilesQuery {
     pub default_quant: Option<String>,
     pub serve_weights_gb: Option<f64>,
     pub serve_quant: Option<String>,
+    // Manual hardware overrides (same contract as ModelsQuery)
+    pub manual_mode: Option<bool>,
+    pub manual_gpu_name: Option<String>,
+    pub manual_gpu_count: Option<usize>,
+    pub manual_vram_gb: Option<f64>,
+    pub manual_ram_gb: Option<f64>,
+    pub manual_backend: Option<String>,
+    pub ignore_detected_gpu: Option<bool>,
+    pub ignore_detected_ram: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct SimulateRequest {
+    pub manual_gpu_name: Option<String>,
     pub manual_gpu_count: Option<usize>,
     pub manual_vram_gb: Option<f64>,
     pub manual_ram_gb: Option<f64>,
@@ -87,6 +98,88 @@ pub struct ModelsResponse {
     pub hardware: SystemResponse,
     pub models: Vec<FitAnalysis>,
     pub total: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct HardwareOverrides<'a> {
+    manual_mode: bool,
+    manual_gpu_name: Option<&'a str>,
+    manual_gpu_count: Option<usize>,
+    manual_vram_gb: Option<f64>,
+    manual_ram_gb: Option<f64>,
+    manual_backend: Option<&'a str>,
+    ignore_detected_gpu: bool,
+    ignore_detected_ram: bool,
+}
+
+impl<'a> HardwareOverrides<'a> {
+    fn from_models_query(query: &'a ModelsQuery) -> Self {
+        Self {
+            manual_mode: query.manual_mode.unwrap_or(false),
+            manual_gpu_name: query.manual_gpu_name.as_deref(),
+            manual_gpu_count: query.manual_gpu_count,
+            manual_vram_gb: query.manual_vram_gb,
+            manual_ram_gb: query.manual_ram_gb,
+            manual_backend: query.manual_backend.as_deref(),
+            ignore_detected_gpu: query.ignore_detected_gpu.unwrap_or(false),
+            ignore_detected_ram: query.ignore_detected_ram.unwrap_or(false),
+        }
+    }
+
+    fn from_profiles_query(query: &'a ProfilesQuery) -> Self {
+        Self {
+            manual_mode: query.manual_mode.unwrap_or(false),
+            manual_gpu_name: query.manual_gpu_name.as_deref(),
+            manual_gpu_count: query.manual_gpu_count,
+            manual_vram_gb: query.manual_vram_gb,
+            manual_ram_gb: query.manual_ram_gb,
+            manual_backend: query.manual_backend.as_deref(),
+            ignore_detected_gpu: query.ignore_detected_gpu.unwrap_or(false),
+            ignore_detected_ram: query.ignore_detected_ram.unwrap_or(false),
+        }
+    }
+}
+
+async fn resolve_hardware_profile(
+    overrides: HardwareOverrides<'_>,
+) -> Result<mlx_hardware_fit::HardwareProfile, StatusCode> {
+    let profile = mlx_hardware_fit::detect_system(false).await.map_err(|e| {
+        error!("Hardware detection failed: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    if overrides.manual_mode {
+        Ok(mlx_hardware_fit::simulate_hardware(
+            &profile,
+            overrides.manual_gpu_count,
+            overrides.manual_vram_gb,
+            overrides.manual_ram_gb,
+            overrides.manual_backend.map(str::to_string),
+            overrides.manual_gpu_name.map(str::to_string),
+            overrides.ignore_detected_gpu,
+            overrides.ignore_detected_ram,
+        ))
+    } else {
+        Ok(profile)
+    }
+}
+
+fn profile_to_system_response(profile: &mlx_hardware_fit::HardwareProfile) -> SystemResponse {
+    let gpu_groups = mlx_hardware_fit::group_gpus(&profile.gpus);
+    SystemResponse {
+        platform: profile.platform.clone(),
+        cpu_name: profile.cpu_name.clone(),
+        cpu_cores: profile.cpu_cores,
+        ram_gb: profile.ram_gb,
+        available_ram_gb: profile.available_ram_gb,
+        gpus: profile.gpus.clone(),
+        gpu_count: profile.gpu_count,
+        total_vram_gb: profile.total_vram_gb,
+        primary_backend: profile.primary_backend.clone(),
+        is_cpu_only: profile.is_cpu_only,
+        gpu_groups,
+        detected_at: profile.detected_at.clone(),
+    }
 }
 
 // ── GET /api/hwfit/system ──────────────────────────────────────────────────
@@ -124,42 +217,9 @@ pub async fn hwfit_system(
 pub async fn hwfit_models(
     Query(query): Query<ModelsQuery>,
 ) -> Result<Json<ModelsResponse>, StatusCode> {
-    let profile = mlx_hardware_fit::detect_system(false).await.map_err(|e| {
-        error!("Hardware detection failed: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    // Apply manual overrides
-    let profile = if query.manual_mode.unwrap_or(false) {
-        mlx_hardware_fit::simulate_hardware(
-            &profile,
-            query.manual_gpu_count,
-            query.manual_vram_gb,
-            query.manual_ram_gb,
-            query.manual_backend,
-            query.ignore_detected_gpu.unwrap_or(false),
-            query.ignore_detected_ram.unwrap_or(false),
-        )
-    } else {
-        profile
-    };
-
-    let gpu_groups = mlx_hardware_fit::group_gpus(&profile.gpus);
-
-    let hardware = SystemResponse {
-        platform: profile.platform.clone(),
-        cpu_name: profile.cpu_name.clone(),
-        cpu_cores: profile.cpu_cores,
-        ram_gb: profile.ram_gb,
-        available_ram_gb: profile.available_ram_gb,
-        gpus: profile.gpus.clone(),
-        gpu_count: profile.gpu_count,
-        total_vram_gb: profile.total_vram_gb,
-        primary_backend: profile.primary_backend.clone(),
-        is_cpu_only: profile.is_cpu_only,
-        gpu_groups,
-        detected_at: profile.detected_at.clone(),
-    };
+    let overrides = HardwareOverrides::from_models_query(&query);
+    let profile = resolve_hardware_profile(overrides).await?;
+    let hardware = profile_to_system_response(&profile);
 
     // Build model catalog from common GGUF models
     let models = get_default_model_catalog();
@@ -189,10 +249,8 @@ pub async fn hwfit_models(
 pub async fn hwfit_profiles(
     Query(query): Query<ProfilesQuery>,
 ) -> Result<Json<Vec<ServeProfile>>, StatusCode> {
-    let profile = mlx_hardware_fit::detect_system(false).await.map_err(|e| {
-        error!("Hardware detection failed: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let overrides = HardwareOverrides::from_profiles_query(&query);
+    let profile = resolve_hardware_profile(overrides).await?;
 
     let model = ModelCard {
         id: query.model_id.clone(),
@@ -227,37 +285,19 @@ pub async fn hwfit_profiles(
 pub async fn hwfit_simulate(
     Json(req): Json<SimulateRequest>,
 ) -> Result<Json<SystemResponse>, StatusCode> {
-    let profile = mlx_hardware_fit::detect_system(false).await.map_err(|e| {
-        error!("Hardware detection failed: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let overrides = HardwareOverrides {
+        manual_mode: true,
+        manual_gpu_name: req.manual_gpu_name.as_deref(),
+        manual_gpu_count: req.manual_gpu_count,
+        manual_vram_gb: req.manual_vram_gb,
+        manual_ram_gb: req.manual_ram_gb,
+        manual_backend: req.manual_backend.as_deref(),
+        ignore_detected_gpu: req.ignore_detected_gpu.unwrap_or(false),
+        ignore_detected_ram: req.ignore_detected_ram.unwrap_or(false),
+    };
+    let simulated = resolve_hardware_profile(overrides).await?;
 
-    let simulated = mlx_hardware_fit::simulate_hardware(
-        &profile,
-        req.manual_gpu_count,
-        req.manual_vram_gb,
-        req.manual_ram_gb,
-        req.manual_backend,
-        req.ignore_detected_gpu.unwrap_or(false),
-        req.ignore_detected_ram.unwrap_or(false),
-    );
-
-    let gpu_groups = mlx_hardware_fit::group_gpus(&simulated.gpus);
-
-    Ok(Json(SystemResponse {
-        platform: simulated.platform,
-        cpu_name: simulated.cpu_name,
-        cpu_cores: simulated.cpu_cores,
-        ram_gb: simulated.ram_gb,
-        available_ram_gb: simulated.available_ram_gb,
-        gpus: simulated.gpus,
-        gpu_count: simulated.gpu_count,
-        total_vram_gb: simulated.total_vram_gb,
-        primary_backend: simulated.primary_backend,
-        is_cpu_only: simulated.is_cpu_only,
-        gpu_groups,
-        detected_at: simulated.detected_at,
-    }))
+    Ok(Json(profile_to_system_response(&simulated)))
 }
 
 // ── Default model catalog ──────────────────────────────────────────────────
