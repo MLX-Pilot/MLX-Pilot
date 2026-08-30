@@ -13,6 +13,7 @@
   const MIN_SPLASH_MS = 480;
   const MODEL_CACHE_KEY = 'mlxPilotModelCache';
   const CURRENT_MODEL_KEY = 'mlxPilotCurrentModel';
+  const N8N_BASE_URL_KEY = 'mlxPilotN8nBaseUrl';
   const AGENT_LOCAL_PROVIDER_CHOICE = 'mlx-pilot-local';
   const CLOUD_PROVIDER_DEFAULTS = {
     anthropic: {
@@ -123,6 +124,11 @@
     tools: [],
     channels: [],
     environmentVars: [],
+    n8nBaseUrl: readStorage(N8N_BASE_URL_KEY) || 'http://127.0.0.1:5678',
+    n8nApiKey: '',
+    n8nStatus: null,
+    n8nWorkflows: [],
+    n8nEditorLoaded: false,
     agentProviderOptions: [],
     consoleEntries: [],
     desktopLogEntries: [],
@@ -792,10 +798,15 @@
   // -- API ----------------------------------------------------
   async function api(path, opts = {}) {
     const url = (state.daemonUrl || DEFAULT_DAEMON_URL) + path;
-    const inferredTimeoutMs =
+    const workflowGenerationRequest = path.startsWith('/integrations/n8n/workflows/generate');
+    const longRequest =
       path.startsWith('/chat')
       || path.startsWith('/agent/run')
-      || path.startsWith('/catalog/downloads')
+      || path.startsWith('/integrations/n8n')
+      || path.startsWith('/catalog/downloads');
+    const inferredTimeoutMs = workflowGenerationRequest
+      ? 600000
+      : longRequest
         ? 120000
         : API_DEFAULT_TIMEOUT_MS;
     const { timeoutMs = inferredTimeoutMs, headers: requestHeaders = {}, ...fetchOpts } = opts;
@@ -829,7 +840,18 @@
       let msg = `HTTP ${res.status}`;
       try {
         const body = await res.json();
-        if (body.error) msg = body.error_code ? `${body.error_code}: ${body.error}` : body.error;
+        if (body.error || body.message) {
+          const code = body.error_code ? `${body.error_code}: ` : '';
+          const main = body.error || body.message;
+          const details = typeof body.details === 'string'
+            ? body.details
+            : body.details
+              ? JSON.stringify(body.details)
+              : '';
+          msg = details && details !== main
+            ? `${code}${main}: ${details}`
+            : `${code}${main}`;
+        }
       } catch { /* ok */ }
       throw new Error(msg);
     }
@@ -3002,6 +3024,300 @@
     } catch (e) { alert('Erro: ' + e.message); }
   }
 
+  // -- n8n Direct Integration --------------------------------
+  function n8nInputValue(id, fallback = '') {
+    return String(document.getElementById(id)?.value || fallback).trim();
+  }
+
+  function persistN8nSettings() {
+    state.n8nBaseUrl = n8nInputValue('n8n-base-url', state.n8nBaseUrl || 'http://127.0.0.1:5678');
+    state.n8nApiKey = n8nInputValue('n8n-api-key', state.n8nApiKey || '');
+    try {
+      localStorage.setItem(N8N_BASE_URL_KEY, state.n8nBaseUrl);
+    } catch {
+      /* storage unavailable */
+    }
+  }
+
+  function n8nEditorUrl() {
+    return (state.n8nBaseUrl || 'http://127.0.0.1:5678').replace(/\/+$/, '') + '/';
+  }
+
+  function initN8nPanel() {
+    const base = document.getElementById('n8n-base-url');
+    const key = document.getElementById('n8n-api-key');
+    const name = document.getElementById('n8n-workflow-name');
+    const model = document.getElementById('n8n-workflow-model');
+    const prompt = document.getElementById('n8n-workflow-prompt');
+    const mlxUrl = document.getElementById('n8n-mlx-url');
+    const ollamaUrl = document.getElementById('n8n-ollama-url');
+
+    if (base && !base.value) base.value = state.n8nBaseUrl || 'http://127.0.0.1:5678';
+    if (key && !key.value) key.value = state.n8nApiKey || '';
+    if (name && !name.value) name.value = 'Workflow gerado pelo MLX Pilot';
+    if (model && !model.value) {
+      const activeWorkflowModel = activeAgentModelId();
+      const activeWorkflowProvider = inferModelProvider(activeWorkflowModel, state.agentConfig?.provider);
+      model.value = activeWorkflowProvider === 'ollama'
+        ? humanizeModelLabel(activeWorkflowModel)
+        : 'qwen3.5:9b';
+    }
+    if (prompt && !prompt.value) prompt.value = 'Crie um workflow manual que mande um texto para o MLX Pilot, resuma em uma frase e deixe a resposta disponivel no output.';
+    if (mlxUrl && !mlxUrl.value) mlxUrl.value = state.daemonUrl || DEFAULT_DAEMON_URL;
+    if (ollamaUrl && !ollamaUrl.value) ollamaUrl.value = 'http://127.0.0.1:11434';
+    renderN8nStatus();
+    renderN8nWorkflows();
+    renderN8nEditor();
+    if (!state.n8nEditorLoaded) loadN8nEditor();
+  }
+
+  function renderN8nEditor() {
+    const editorUrl = n8nEditorUrl();
+    const label = document.getElementById('n8n-editor-url');
+    const placeholder = document.getElementById('n8n-editor-placeholder');
+
+    if (label) label.textContent = editorUrl;
+    if (placeholder && !state.n8nEditorLoaded) {
+      placeholder.hidden = false;
+      placeholder.innerHTML = `
+        <strong>Editor aguardando</strong>
+        <span>${esc(editorUrl)}</span>
+      `;
+    }
+  }
+
+  function loadN8nEditor({ force = false, url = null } = {}) {
+    persistN8nSettings();
+    const editorUrl = url || n8nEditorUrl();
+    const frame = document.getElementById('n8n-editor-frame');
+    const placeholder = document.getElementById('n8n-editor-placeholder');
+    const label = document.getElementById('n8n-editor-url');
+
+    if (label) label.textContent = editorUrl;
+    if (!frame) return;
+
+    const nextUrl = force ? `${editorUrl}?mlx_embed_reload=${Date.now()}` : editorUrl;
+    if (!force && frame.src === editorUrl) return;
+
+    state.n8nEditorLoaded = true;
+    frame.src = nextUrl;
+    if (placeholder) placeholder.hidden = true;
+    pushConsoleEntry('info', 'n8n', `Editor embed carregado: ${editorUrl}`);
+  }
+
+  function renderN8nStatus() {
+    const box = document.getElementById('n8n-status');
+    if (!box) {
+      renderN8nSourceStatus();
+      return;
+    }
+    const status = state.n8nStatus;
+    if (!status) {
+      box.className = 'n8n-status';
+      box.innerHTML = '<span class="status-dot offline"></span><span>Aguardando verificacao</span>';
+      renderN8nSourceStatus();
+      return;
+    }
+    box.className = `n8n-status ${status.healthy ? 'connected' : 'failed'}`;
+    box.innerHTML = `
+      <span class="status-dot ${status.healthy ? 'online' : 'offline'}"></span>
+      <span>${esc(status.message || (status.healthy ? 'n8n online' : 'n8n offline'))}</span>
+    `;
+    renderN8nSourceStatus();
+  }
+
+  function renderN8nSourceStatus() {
+    const box = document.getElementById('n8n-source-status');
+    if (!box) return;
+    const source = state.n8nStatus?.source_tree;
+    if (!source) {
+      box.className = 'n8n-source';
+      box.innerHTML = `
+        <span>Fonte local</span>
+        <strong>Aguardando status</strong>
+        <code>vendor/n8n</code>
+      `;
+      return;
+    }
+
+    const details = [
+      source.version ? `n8n ${source.version}` : '',
+      source.node_engine ? `Node ${source.node_engine}` : '',
+      source.pnpm_engine ? `pnpm ${source.pnpm_engine}` : '',
+    ].filter(Boolean).join(' | ');
+    const sourcePath = source.path || 'vendor/n8n';
+
+    box.className = `n8n-source ${source.present ? 'present' : 'missing'}`;
+    box.innerHTML = `
+      <span>Fonte local</span>
+      <strong>${esc(source.message || (source.present ? 'vendor/n8n encontrado' : 'vendor/n8n ausente'))}</strong>
+      <code>${esc(details || sourcePath)}</code>
+    `;
+  }
+
+  function n8nApiBody(extra = {}) {
+    persistN8nSettings();
+    return {
+      base_url: state.n8nBaseUrl || 'http://127.0.0.1:5678',
+      api_key: state.n8nApiKey || '',
+      ...extra,
+    };
+  }
+
+  function n8nAgentGenerationOverrides() {
+    const selected = selectedAgentProviderOption();
+    const activeProvider = normalizeProviderId(state.agentConfig?.provider || 'ollama') || 'ollama';
+    const activeModel = state.agentConfig?.model_id || activeAgentModelId();
+    const externalOllamaUrl = n8nInputValue('n8n-ollama-url', 'http://127.0.0.1:11434');
+    const base = {
+      agent_provider: activeProvider,
+      agent_model_id: agentConfigModelId(activeModel, activeProvider),
+      agent_base_url: activeProvider === 'ollama'
+        ? (state.agentConfig?.base_url || externalOllamaUrl)
+        : (state.agentConfig?.base_url || ''),
+      agent_provider_profile_id: state.agentConfig?.provider_profile_id || '',
+    };
+
+    if (!selected) return base;
+    if (selected.kind === 'cloud') {
+      return {
+        ...base,
+        agent_provider: selected.provider || base.agent_provider,
+        agent_model_id: agentConfigModelId(selected.modelId || base.agent_model_id, selected.provider || base.agent_provider),
+        agent_provider_profile_id: selected.profileId || base.agent_provider_profile_id,
+      };
+    }
+
+    const localModel = activeAgentModelId() || selected.modelId || base.agent_model_id;
+    const localProvider = inferModelProvider(localModel, state.agentConfig?.provider || 'ollama');
+    return {
+      ...base,
+      agent_provider: localProvider,
+      agent_model_id: agentConfigModelId(localModel, localProvider),
+      agent_base_url: localProvider === 'ollama'
+        ? (state.agentConfig?.base_url || externalOllamaUrl)
+        : base.agent_base_url,
+      agent_provider_profile_id: selected.profileId || base.agent_provider_profile_id,
+    };
+  }
+
+  async function checkN8nStatus() {
+    persistN8nSettings();
+    const query = encodeURIComponent(state.n8nBaseUrl || 'http://127.0.0.1:5678');
+    const btn = document.getElementById('n8n-status-btn');
+    if (btn) btn.disabled = true;
+    try {
+      state.n8nStatus = await api(`/integrations/n8n/status?base_url=${query}`);
+      pushConsoleEntry(state.n8nStatus?.healthy ? 'info' : 'warn', 'n8n', state.n8nStatus?.message || 'status recebido');
+    } catch (error) {
+      state.n8nStatus = { healthy: false, message: error.message };
+      pushConsoleEntry('error', 'n8n', error.message);
+    } finally {
+      if (btn) btn.disabled = false;
+      renderN8nStatus();
+    }
+  }
+
+  function workflowItemsFromResponse(payload) {
+    const raw = payload?.workflows;
+    if (Array.isArray(raw)) return raw;
+    if (Array.isArray(raw?.data)) return raw.data;
+    if (Array.isArray(raw?.workflows)) return raw.workflows;
+    return [];
+  }
+
+  function renderN8nWorkflows() {
+    const list = document.getElementById('n8n-workflow-list');
+    if (!list) return;
+    if (!state.n8nWorkflows.length) {
+      list.innerHTML = '<div class="n8n-empty">Nenhum workflow carregado</div>';
+      return;
+    }
+    list.innerHTML = state.n8nWorkflows.map((workflow) => `
+      <div class="n8n-workflow-row">
+        <div>
+          <strong>${esc(workflow.name || workflow.id || 'Workflow')}</strong>
+          <span>${esc(workflow.id || '-')}</span>
+        </div>
+        <span class="n8n-workflow-state ${workflow.active ? 'active' : ''}">${workflow.active ? 'Ativo' : 'Inativo'}</span>
+      </div>
+    `).join('');
+  }
+
+  async function listN8nWorkflows() {
+    const btn = document.getElementById('n8n-list-btn');
+    if (btn) btn.disabled = true;
+    try {
+      const payload = await api('/integrations/n8n/workflows/list', {
+        method: 'POST',
+        body: JSON.stringify(n8nApiBody()),
+      });
+      state.n8nWorkflows = workflowItemsFromResponse(payload);
+      renderN8nWorkflows();
+      pushConsoleEntry('info', 'n8n', `Workflows carregados: ${state.n8nWorkflows.length}`);
+    } catch (error) {
+      pushConsoleEntry('error', 'n8n', error.message);
+      alert('Erro n8n: ' + error.message);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function createN8nGeneratedWorkflow() {
+    const btn = document.getElementById('n8n-generate-workflow-btn');
+    const originalText = btn?.textContent || 'Gerar workflow';
+    if (btn) btn.disabled = true;
+    if (btn) btn.textContent = 'Gerando...';
+    try {
+      const prompt = n8nInputValue('n8n-workflow-prompt', '');
+      if (!prompt) {
+        alert('Descreva o workflow antes de gerar.');
+        return;
+      }
+
+      const payload = await api('/integrations/n8n/workflows/generate', {
+        method: 'POST',
+        body: JSON.stringify(n8nApiBody({
+          name: n8nInputValue('n8n-workflow-name', 'Workflow gerado pelo MLX Pilot'),
+          mlx_base_url: n8nInputValue('n8n-mlx-url', state.daemonUrl || DEFAULT_DAEMON_URL),
+          ollama_base_url: n8nInputValue('n8n-ollama-url', 'http://127.0.0.1:11434'),
+          workflow_model_id: n8nInputValue('n8n-workflow-model', 'qwen3.5:9b'),
+          prompt,
+          ...n8nAgentGenerationOverrides(),
+        })),
+      });
+      const link = document.getElementById('n8n-created-link');
+      if (link) {
+        if (payload?.editor_url) {
+          link.hidden = false;
+          link.href = payload.editor_url;
+          link.textContent = 'Abrir workflow criado';
+        } else {
+          link.hidden = true;
+        }
+      }
+      const generatedJson = document.getElementById('n8n-generated-json');
+      const generatedJsonBody = document.getElementById('n8n-generated-json-body');
+      if (generatedJson && generatedJsonBody) {
+        generatedJson.hidden = false;
+        generatedJsonBody.textContent = JSON.stringify(payload?.generated_workflow || payload?.workflow || {}, null, 2);
+      }
+      if (payload?.editor_url) {
+        loadN8nEditor({ force: true, url: payload.editor_url });
+      }
+      pushConsoleEntry('info', 'n8n', `Workflow gerado: ${payload?.workflow_id || '-'}`);
+      await listN8nWorkflows();
+    } catch (error) {
+      pushConsoleEntry('error', 'n8n', error.message);
+      alert('Erro ao gerar workflow: ' + error.message);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    }
+  }
+
   // -- Tab Navigation -----------------------------------------
   function switchTab(target) {
 
@@ -3024,6 +3340,7 @@
       void ensureAgentCompatibleModel({ persist: true });
       updateAgentWorkspaceSummary();
     }
+    if (target === 'workflows') initN8nPanel();
     if (target === 'ai-interaction') initAICanvas();
     if (target === 'console') void loadConsoleSnapshot();
   }
@@ -3374,6 +3691,23 @@
   });
 
   document.getElementById('save-env-btn')?.addEventListener('click', saveEnvironment);
+  document.getElementById('n8n-base-url')?.addEventListener('change', () => {
+    persistN8nSettings();
+    state.n8nEditorLoaded = false;
+    renderN8nEditor();
+  });
+  document.getElementById('n8n-status-btn')?.addEventListener('click', checkN8nStatus);
+  document.getElementById('n8n-list-btn')?.addEventListener('click', listN8nWorkflows);
+  document.getElementById('n8n-generate-workflow-btn')?.addEventListener('click', createN8nGeneratedWorkflow);
+  document.getElementById('n8n-reload-editor-btn')?.addEventListener('click', () => loadN8nEditor({ force: true }));
+  document.getElementById('n8n-open-editor-btn')?.addEventListener('click', () => {
+    persistN8nSettings();
+    window.open(n8nEditorUrl(), '_blank');
+  });
+  document.getElementById('n8n-open-editor-embed-btn')?.addEventListener('click', () => {
+    persistN8nSettings();
+    window.open(n8nEditorUrl(), '_blank');
+  });
 
   // Range input live value
   document.getElementById('set-airllm-threshold')?.addEventListener('input', (e) => {
@@ -3593,7 +3927,7 @@
     if (e.key === 'Escape') document.getElementById('model-menu')?.classList.add('hidden');
     if (!e.ctrlKey && !e.metaKey && !e.altKey && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
       const n = parseInt(e.key);
-      var tabs = ['chat', 'discover', 'agent', 'ai-interaction', 'console', 'historico', 'memoria', 'comparar', 'research', 'hardware', 'settings'];
+      var tabs = ['chat', 'discover', 'agent', 'workflows', 'ai-interaction', 'console', 'historico', 'memoria', 'comparar', 'research', 'hardware', 'settings'];
       if (n >= 1 && n <= 9) switchTab(tabs[n - 1]);
       else if (n === 0) switchTab('settings');
     }

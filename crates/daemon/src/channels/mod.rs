@@ -2226,7 +2226,7 @@ fn redact_url(url: &str) -> String {
 
 fn webhook_payload(kind: WebhookKind, target: String, message: String) -> Value {
     let text = if target.trim().is_empty() {
-        message
+        message.clone()
     } else {
         format!("[{target}] {message}")
     };
