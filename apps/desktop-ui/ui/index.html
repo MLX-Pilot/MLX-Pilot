@@ -118,6 +118,15 @@
               </span>
               Agent
             </button>
+            <button class="tab" data-panel="workflows" role="tab">
+              <span class="tab-icon">
+                <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M4 5h4v4H4zM12 3h4v4h-4zM12 13h4v4h-4z" />
+                  <path d="M8 7h2a2 2 0 0 0 2-2M8 7h2a2 2 0 0 1 2 2v4" />
+                </svg>
+              </span>
+              Workflows
+            </button>
             <button class="tab" data-panel="ai-interaction" role="tab">
               <span class="tab-icon">
                 <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -570,6 +579,120 @@
             <span id="agent-skill-count" class="hidden-metric">0</span>
             <span id="agent-tool-count" class="hidden-metric">0</span>
             <span id="agent-audit-count" class="hidden-metric">0</span>
+          </div>
+        </section>
+
+        <!-- WORKFLOWS PANEL -->
+        <section class="panel" id="panel-workflows">
+          <div class="panel-scroll">
+            <div class="section-header">
+              <h2 class="section-title">Workflows</h2>
+              <p class="section-subtitle">n8n local controlado diretamente pelo MLX Pilot.</p>
+            </div>
+
+            <section class="n8n-editor-shell n8n-editor-primary">
+              <div class="workflow-card-head">
+                <div>
+                  <h3>Editor n8n</h3>
+                  <span class="n8n-editor-url" id="n8n-editor-url">http://127.0.0.1:5678</span>
+                </div>
+                <div class="workflow-actions compact">
+                  <button class="action-btn" id="n8n-reload-editor-btn" type="button">Recarregar embed</button>
+                  <button class="action-btn" id="n8n-open-editor-embed-btn" type="button">Abrir fora</button>
+                </div>
+              </div>
+              <div class="n8n-editor-frame-wrap">
+                <iframe
+                  id="n8n-editor-frame"
+                  class="n8n-editor-frame"
+                  title="Editor n8n"
+                  src="about:blank"
+                  loading="lazy"
+                  referrerpolicy="no-referrer"
+                  allow="clipboard-read; clipboard-write"
+                ></iframe>
+                <div class="n8n-editor-placeholder" id="n8n-editor-placeholder">
+                  <strong>Editor aguardando</strong>
+                  <span>http://127.0.0.1:5678</span>
+                </div>
+              </div>
+            </section>
+
+            <div class="settings-grid workflow-grid">
+              <div class="settings-card">
+                <h3>n8n</h3>
+                <div class="settings-field">
+                  <label for="n8n-base-url">Base URL</label>
+                  <input type="text" id="n8n-base-url" class="input" placeholder="http://127.0.0.1:5678" />
+                </div>
+                <div class="settings-field">
+                  <label for="n8n-api-key">API Key</label>
+                  <input type="password" id="n8n-api-key" class="input" placeholder="Cole a chave do n8n" />
+                </div>
+                <div class="workflow-actions">
+                  <button class="primary-btn" id="n8n-status-btn" type="button">Status</button>
+                  <button class="action-btn" id="n8n-open-editor-btn" type="button">Abrir editor</button>
+                </div>
+                <div class="n8n-status" id="n8n-status">
+                  <span class="status-dot offline"></span>
+                  <span>Aguardando verificacao</span>
+                </div>
+                <div class="n8n-source" id="n8n-source-status">
+                  <span>Fonte local</span>
+                  <strong>Aguardando status</strong>
+                  <code>vendor/n8n</code>
+                </div>
+              </div>
+
+              <div class="settings-card">
+                <h3>Gerador de workflow</h3>
+                <div class="settings-field">
+                  <label for="n8n-workflow-name">Nome</label>
+                  <input type="text" id="n8n-workflow-name" class="input" placeholder="Workflow gerado pelo MLX Pilot" />
+                </div>
+                <div class="settings-field">
+                  <label for="n8n-workflow-model">Modelo no workflow</label>
+                  <input type="text" id="n8n-workflow-model" class="input" placeholder="qwen3.5:9b" />
+                </div>
+                <div class="settings-field">
+                  <label for="n8n-workflow-prompt">Prompt</label>
+                  <textarea id="n8n-workflow-prompt" class="input workflow-textarea workflow-generator-prompt" rows="5" placeholder="Crie um workflow manual que mande um texto para o MLX Pilot, resuma em uma frase e deixe a resposta disponivel no output."></textarea>
+                </div>
+                <div class="workflow-actions">
+                  <button class="primary-btn" id="n8n-generate-workflow-btn" type="button">Gerar workflow</button>
+                  <a class="action-btn workflow-link" id="n8n-created-link" href="#" target="_blank" rel="noreferrer" hidden>Abrir workflow criado</a>
+                </div>
+                <details class="n8n-generated-json" id="n8n-generated-json" hidden>
+                  <summary>JSON gerado</summary>
+                  <pre id="n8n-generated-json-body">{}</pre>
+                </details>
+              </div>
+
+              <div class="settings-card full-width">
+                <h3>Conexoes locais</h3>
+                <div class="workflow-inline-fields">
+                  <div class="settings-field">
+                    <label for="n8n-mlx-url">MLX Pilot URL</label>
+                    <input type="text" id="n8n-mlx-url" class="input" placeholder="http://127.0.0.1:11435" />
+                  </div>
+                  <div class="settings-field">
+                    <label for="n8n-ollama-url">Ollama URL</label>
+                    <input type="text" id="n8n-ollama-url" class="input" placeholder="http://127.0.0.1:11434" />
+                  </div>
+                </div>
+              </div>
+
+              <div class="settings-card full-width">
+                <div class="workflow-card-head">
+                  <h3>Workflows no n8n</h3>
+                  <button class="action-btn" id="n8n-list-btn" type="button">Atualizar</button>
+                </div>
+                <div class="n8n-workflow-list" id="n8n-workflow-list">
+                  <div class="n8n-empty">Nenhum workflow carregado</div>
+                </div>
+              </div>
+
+            </div>
           </div>
         </section>
 

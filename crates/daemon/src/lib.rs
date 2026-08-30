@@ -7,6 +7,7 @@ mod config;
 mod hwfit_routes;
 mod jobs;
 mod model_catalog;
+mod n8n_integration;
 mod plugins;
 mod provider_embedder;
 mod research_routes;
@@ -653,6 +654,19 @@ pub async fn run() -> anyhow::Result<()> {
             post(catalog_cancel_download),
         )
         // ── Agent API ──
+        .route("/integrations/n8n/status", get(n8n_integration::status))
+        .route(
+            "/integrations/n8n/workflows/list",
+            post(n8n_integration::list_workflows),
+        )
+        .route(
+            "/integrations/n8n/workflows/generate",
+            post(n8n_integration::generate_workflow),
+        )
+        .route(
+            "/agent/gateway/events",
+            post(agent_api::agent_gateway_event),
+        )
         .route("/agent/run", post(agent_api::agent_run))
         .route("/agent/providers", get(agent_api::agent_providers))
         .route(

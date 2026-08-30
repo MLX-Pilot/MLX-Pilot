@@ -67,7 +67,11 @@ O repositorio e um workspace Rust com multiplas crates (core, providers e daemon
 - Compatibility Matrix automatizada para o agente Hermes.
 - API dedicada do agente:
 - `POST /agent/run`
+- `POST /agent/gateway/events`
 - `POST /agent/stream` (stub para streaming de eventos)
+- `GET /integrations/n8n/status`
+- `POST /integrations/n8n/workflows/list`
+- `POST /integrations/n8n/workflows/generate`
 - `GET /agent/providers`
 - `GET/POST /agent/config`
 - `GET /agent/skills`
@@ -101,6 +105,7 @@ O repositorio e um workspace Rust com multiplas crates (core, providers e daemon
 - Controle de skills/tools ativos direto na UI.
 - Control Plane completo para channels, plugins, skills, tools/policies, context/memory e runtime/health.
 - Chat do agente integrado ao fluxo principal do MLX-Pilot.
+- Integracao direta com n8n local via API publica, editor n8n embutido na aba Workflows e fonte vendorizado em `vendor/n8n`, documentada em `docs/n8n-integration.md`.
 
 ### Validacao do Agente
 
