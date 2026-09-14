@@ -129,6 +129,19 @@ struct N8nErrorResponse {
     details: Option<String>,
 }
 
+#[derive(Debug)]
+struct N8nRequestError {
+    status: StatusCode,
+    error: &'static str,
+    details: Option<String>,
+}
+
+impl IntoResponse for N8nRequestError {
+    fn into_response(self) -> Response {
+        n8n_error(self.status, self.error, self.details)
+    }
+}
+
 pub async fn status(Query(query): Query<N8nStatusQuery>) -> Json<N8nStatusResponse> {
     let base_url = normalize_base_url(query.base_url.as_deref());
     let health_url = format!("{base_url}/healthz");
@@ -174,7 +187,7 @@ pub async fn list_workflows(Json(request): Json<N8nApiRequest>) -> Response {
     let base_url = normalize_base_url(request.base_url.as_deref());
     let api_key = match required_api_key(request.api_key.as_deref()) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(error) => return error.into_response(),
     };
     let api_url = api_url(&base_url);
     let endpoint = format!("{api_url}/workflows");
@@ -208,11 +221,11 @@ pub async fn get_workflow(Json(request): Json<N8nWorkflowRequest>) -> Response {
     let base_url = normalize_base_url(request.base_url.as_deref());
     let api_key = match required_api_key(request.api_key.as_deref()) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(error) => return error.into_response(),
     };
     let workflow_id = match required_workflow_id(request.workflow_id.as_deref()) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(error) => return error.into_response(),
     };
     let api_url = api_url(&base_url);
     let endpoint = format!("{api_url}/workflows/{workflow_id}");
@@ -249,12 +262,12 @@ pub async fn save_workflow(Json(request): Json<N8nWorkflowRequest>) -> Response 
     let base_url = normalize_base_url(request.base_url.as_deref());
     let api_key = match required_api_key(request.api_key.as_deref()) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(error) => return error.into_response(),
     };
     let workflow = match request.workflow {
         Some(value) => match normalize_workflow_for_api(value, "MLX Pilot Workflow") {
             Ok(workflow) => workflow,
-            Err(response) => return response,
+            Err(error) => return error.into_response(),
         },
         None => {
             return n8n_error(
@@ -326,11 +339,11 @@ pub async fn generate_workflow(
     let base_url = normalize_base_url(request.base_url.as_deref());
     let api_key = match required_api_key(request.api_key.as_deref()) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(error) => return error.into_response(),
     };
     let prompt = match required_prompt(request.prompt.as_deref()) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(error) => return error.into_response(),
     };
     let api_url = api_url(&base_url);
     let endpoint = format!("{api_url}/workflows");
@@ -342,7 +355,7 @@ pub async fn generate_workflow(
         };
     let workflow = match normalize_generated_workflow(generated_workflow, &request) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(error) => return error.into_response(),
     };
 
     match http_client()
@@ -529,17 +542,20 @@ Return only the workflow JSON object."#
 fn normalize_generated_workflow(
     workflow: Value,
     request: &N8nGenerateWorkflowRequest,
-) -> Result<Value, Response> {
+) -> Result<Value, N8nRequestError> {
     let name = trimmed_or(request.name.as_deref(), "MLX Pilot Generated Workflow");
     normalize_workflow_for_api(workflow, &name)
 }
 
-fn normalize_workflow_for_api(mut workflow: Value, fallback_name: &str) -> Result<Value, Response> {
+fn normalize_workflow_for_api(
+    mut workflow: Value,
+    fallback_name: &str,
+) -> Result<Value, N8nRequestError> {
     let object = workflow.as_object_mut().ok_or_else(|| {
-        n8n_error(
+        n8n_request_error(
             StatusCode::BAD_GATEWAY,
             "workflow_generation_invalid",
-            Some("generated JSON must be an object".to_string()),
+            "generated JSON must be an object",
         )
     })?;
 
@@ -574,26 +590,26 @@ fn normalize_workflow_for_api(mut workflow: Value, fallback_name: &str) -> Resul
         .get_mut("nodes")
         .and_then(Value::as_array_mut)
         .ok_or_else(|| {
-            n8n_error(
+            n8n_request_error(
                 StatusCode::BAD_GATEWAY,
                 "workflow_generation_invalid",
-                Some("generated workflow must include a nodes array".to_string()),
+                "generated workflow must include a nodes array",
             )
         })?;
     if nodes.is_empty() {
-        return Err(n8n_error(
+        return Err(n8n_request_error(
             StatusCode::BAD_GATEWAY,
             "workflow_generation_invalid",
-            Some("generated workflow must include at least one node".to_string()),
+            "generated workflow must include at least one node",
         ));
     }
 
     for (index, node) in nodes.iter_mut().enumerate() {
         let node_object = node.as_object_mut().ok_or_else(|| {
-            n8n_error(
+            n8n_request_error(
                 StatusCode::BAD_GATEWAY,
                 "workflow_generation_invalid",
-                Some("every node must be a JSON object".to_string()),
+                "every node must be a JSON object",
             )
         })?;
         if !node_object.contains_key("id") {
@@ -833,45 +849,57 @@ async fn json_response_from_n8n(
     )
 }
 
-fn required_api_key(value: Option<&str>) -> Result<&str, Response> {
+fn required_api_key(value: Option<&str>) -> Result<&str, N8nRequestError> {
     value
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| {
-            n8n_error(
+            n8n_request_error(
                 StatusCode::BAD_REQUEST,
                 "n8n_api_key_required",
-                Some("Create an API key in n8n Settings > n8n API.".to_string()),
+                "Create an API key in n8n Settings > n8n API.",
             )
         })
 }
 
-fn required_prompt(value: Option<&str>) -> Result<String, Response> {
+fn required_prompt(value: Option<&str>) -> Result<String, N8nRequestError> {
     value
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
         .ok_or_else(|| {
-            n8n_error(
+            n8n_request_error(
                 StatusCode::BAD_REQUEST,
                 "workflow_prompt_required",
-                Some("Prompt cannot be empty.".to_string()),
+                "Prompt cannot be empty.",
             )
         })
 }
 
-fn required_workflow_id(value: Option<&str>) -> Result<String, Response> {
+fn required_workflow_id(value: Option<&str>) -> Result<String, N8nRequestError> {
     value
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
         .ok_or_else(|| {
-            n8n_error(
+            n8n_request_error(
                 StatusCode::BAD_REQUEST,
                 "workflow_id_required",
-                Some("A workflow id is required.".to_string()),
+                "A workflow id is required.",
             )
         })
+}
+
+fn n8n_request_error(
+    status: StatusCode,
+    error: &'static str,
+    details: impl Into<String>,
+) -> N8nRequestError {
+    N8nRequestError {
+        status,
+        error,
+        details: Some(details.into()),
+    }
 }
 
 fn http_client() -> Client {
