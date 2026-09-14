@@ -423,6 +423,67 @@ function createFixture({
             defaults: { condition: "{{ $json.ok }}" },
             fields: [{ key: "condition", label: "Condicao", kind: "expression", required: true }],
           },
+          {
+            kind: "debug.log",
+            label: "Log",
+            group: "Dados",
+            description: "Registra uma mensagem e repassa os itens.",
+            color: "#8d99ae",
+            glyph: "LOG",
+            inputs: ["main"],
+            outputs: ["main"],
+            defaults: { message: "{{ $json }}" },
+            fields: [{ key: "message", label: "Mensagem", kind: "expression" }],
+          },
+          {
+            kind: "agent.run",
+            label: "Agente MLX Pilot",
+            group: "MLX Pilot",
+            description: "Envia um prompt ao agente local.",
+            color: "#00d4ff",
+            glyph: "AI",
+            inputs: ["main"],
+            outputs: ["main"],
+            defaults: {
+              message: "Resuma: {{ $json.texto }}",
+              system_prompt: "",
+              provider: "",
+              model_id: "",
+              provider_profile_id: "",
+              base_url: "",
+              temperature: null,
+              max_iterations: 1,
+              tools: [],
+              output_key: "response",
+              parse_json: false,
+              keep_input: true,
+            },
+            fields: [
+              { key: "provider", label: "Provedor", kind: "select", options_source: "agent_providers" },
+              { key: "model_id", label: "Modelo", kind: "select", options_source: "agent_models" },
+              { key: "message", label: "Mensagem", kind: "textarea", required: true },
+              { key: "tools", label: "Ferramentas liberadas", kind: "json" },
+              { key: "max_iterations", label: "Iteracoes maximas", kind: "number" },
+              { key: "output_key", label: "Campo de saida", kind: "text", advanced: true },
+              { key: "base_url", label: "Base URL", kind: "text", advanced: true },
+            ],
+          },
+          {
+            kind: "tool.call",
+            label: "Ferramenta MLX Pilot",
+            group: "MLX Pilot",
+            description: "Roda uma ferramenta do agente.",
+            color: "#7bdff2",
+            glyph: "TL",
+            inputs: ["main"],
+            outputs: ["main"],
+            defaults: { tool: "read_file", params: {}, read_only: true, workspace_root: "" },
+            fields: [
+              { key: "tool", label: "Ferramenta", kind: "select", options_source: "flow_tools", required: true },
+              { key: "params", label: "Parametros", kind: "json" },
+              { key: "workspace_root", label: "Raiz do workspace", kind: "text", advanced: true },
+            ],
+          },
         ],
       });
     }
@@ -1094,6 +1155,135 @@ test("editor de fluxos monta o grafo e salva no formato nativo", async () => {
     assert.equal(fixture.document.getElementById("flow-save-state")?.textContent, "Salvo");
     // Executar so libera com o fluxo gravado.
     assert.equal(fixture.document.getElementById("flow-run-btn")?.disabled, false);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("no de agente nasce com o provedor e o modelo ativos do MLX Pilot", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(8);
+
+    fixture.document.querySelector('[data-flow-node-kind="agent.run"]')?.click();
+    await flush(3);
+
+    const provider = fixture.document.querySelector('[data-field-key="provider"]');
+    const model = fixture.document.querySelector('[data-field-key="model_id"]');
+    assert.ok(provider, "campo provedor deveria ser um select");
+    assert.equal(provider.tagName, "SELECT");
+    assert.equal(model.tagName, "SELECT");
+
+    // Herda o que esta ativo no resto do app (agent config: ollama / qwen3.5:9b).
+    assert.equal(provider.value, "ollama");
+    assert.match(model.value, /qwen3\.5:9b/);
+
+    // Agrupado em Local / Cloud.
+    const groups = [...provider.querySelectorAll("optgroup")].map((group) => group.label);
+    assert.ok(groups.includes("Local (MLX Pilot)"), `grupos: ${groups.join(",")}`);
+
+    // Base URL e herdada: nao aparece entre os campos principais.
+    const mainFields = [...fixture.document.querySelectorAll("#flow-inspector .settings-field [data-field-key]")]
+      .filter((field) => !field.closest(".workflow-inspector-advanced"))
+      .map((field) => field.dataset.fieldKey);
+    assert.ok(!mainFields.includes("base_url"), `campos visiveis: ${mainFields.join(",")}`);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("escolher outro modelo sincroniza o provedor do no de agente", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(8);
+    fixture.document.querySelector('[data-flow-node-kind="agent.run"]')?.click();
+    await flush(3);
+
+    const model = fixture.document.querySelector('[data-field-key="model_id"]');
+    // Todos os modelos locais instalados aparecem no grupo local.
+    const localGroup = [...model.querySelectorAll("optgroup")].find((g) => g.label === "Local (MLX Pilot)");
+    const values = [...localGroup.querySelectorAll("option")].map((option) => option.value);
+    assert.equal(values.length, 3, `modelos locais: ${values.join(",")}`);
+
+    // Trocar para um modelo MLX deve mudar o provedor junto.
+    model.value = "mlx-community/Qwen3-4B-4bit";
+    model.dispatchEvent(new fixture.window.Event("change", { bubbles: true }));
+    await flush(3);
+
+    const provider = fixture.document.querySelector('[data-field-key="provider"]');
+    assert.equal(provider.value, "mlx");
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("arrastar da porta de saida ate outro no cria a conexao", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(8);
+
+    // Dois nos desconectados: adiciona o segundo numa posicao explicita para
+    // evitar a conexao automatica.
+    fixture.document.querySelector('[data-flow-node-kind="debug.log"]')?.click();
+    await flush(2);
+    const nodes = [...fixture.document.querySelectorAll("#flow-nodes .workflow-node")];
+    assert.equal(nodes.length, 2);
+
+    const before = fixture.document.querySelectorAll("#flow-connections .workflow-connection-group").length;
+
+    const source = nodes[0];
+    const outputPort = source.querySelector('[data-port="output"]');
+    const targetPort = nodes[1].querySelector('[data-port="input"]');
+    const pointer = (type, target, x) => target.dispatchEvent(
+      new fixture.window.MouseEvent(type, { bubbles: true, button: 0, clientX: x, clientY: 0 }),
+    );
+
+    pointer("pointerdown", outputPort, 0);
+    pointer("pointermove", fixture.document, 80);
+    pointer("pointerup", targetPort, 80);
+    await flush(3);
+
+    const after = fixture.document.querySelectorAll("#flow-connections .workflow-connection-group").length;
+    assert.ok(after > before, `conexoes antes=${before} depois=${after}`);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("clicar na saida e depois na entrada tambem conecta", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(8);
+    fixture.document.querySelector('[data-flow-node-kind="debug.log"]')?.click();
+    await flush(2);
+
+    const click = (element) => {
+      element.dispatchEvent(new fixture.window.MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: 0, clientY: 0 }));
+      element.dispatchEvent(new fixture.window.MouseEvent("pointerup", { bubbles: true, button: 0, clientX: 0, clientY: 0 }));
+      element.dispatchEvent(new fixture.window.MouseEvent("click", { bubbles: true, button: 0 }));
+    };
+
+    let nodes = [...fixture.document.querySelectorAll("#flow-nodes .workflow-node")];
+    click(nodes[0].querySelector('[data-port="output"]'));
+    await flush(2);
+
+    nodes = [...fixture.document.querySelectorAll("#flow-nodes .workflow-node")];
+    click(nodes[1].querySelector('[data-port="input"]'));
+    await flush(3);
+
+    assert.equal(fixture.document.querySelectorAll("#flow-connections .workflow-connection-group").length, 1);
   } finally {
     fixture.cleanup();
   }
