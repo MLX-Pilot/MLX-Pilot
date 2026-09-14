@@ -4,10 +4,10 @@ mod catalog;
 mod channels;
 mod chat_stream;
 mod config;
+mod flows;
 mod hwfit_routes;
 mod jobs;
 mod model_catalog;
-mod n8n_integration;
 mod plugins;
 mod provider_embedder;
 mod research_routes;
@@ -28,7 +28,7 @@ use axum::body::Body;
 use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{any, delete, get, patch, post};
 use axum::{Json, Router};
 use bytes::Bytes;
 use catalog::{
@@ -79,6 +79,8 @@ struct AppState {
     pub presets: Arc<mlx_agent_core::PresetStore>,
     pub compare: Arc<mlx_agent_core::CompareStore>,
     pub jobs: Arc<jobs::JobRegistry>,
+    /// Motor de workflows nativo e o repositorio de fluxos em disco.
+    pub flows: flows::FlowService,
     pub state_db_path: FsPathBuf,
     pub search_service: Arc<search::SearchService>,
     pub search_config: search::SearchConfig,
@@ -554,6 +556,12 @@ pub async fn run() -> anyhow::Result<()> {
             .expect("Failed to initialize compare store"),
         ),
         jobs: Arc::new(jobs::JobRegistry::new(4)),
+        flows: flows::FlowService::new(
+            AppConfig::get_settings_path()
+                .parent()
+                .unwrap_or(std::path::Path::new(".")),
+            resolve_default_agent_workspace(),
+        ),
         state_db_path: state_db_path.clone(),
         search_service: search_service.clone(),
         search_config: search_config.clone(),
@@ -576,6 +584,14 @@ pub async fn run() -> anyhow::Result<()> {
     let scheduler = jobs::Scheduler::new(state.state_db_path.clone(), state.jobs.clone());
     let scheduler_shutdown = tokio_util::sync::CancellationToken::new();
     scheduler.start(scheduler_shutdown);
+
+    // Motor de workflows: cria os diretorios e sobe o agendador de gatilhos
+    // `trigger.schedule` dos fluxos ativos.
+    if let Err(error) = state.flows.store.ensure_dirs().await {
+        warn!(%error, "nao foi possivel preparar o diretorio de fluxos");
+    }
+    let flow_scheduler_shutdown = tokio_util::sync::CancellationToken::new();
+    flows::FlowScheduler::new(state.clone()).start(flow_scheduler_shutdown);
 
     let app = Router::new()
         .route("/config", get(get_config).post(update_config))
@@ -653,24 +669,18 @@ pub async fn run() -> anyhow::Result<()> {
             "/catalog/downloads/{job_id}/cancel",
             post(catalog_cancel_download),
         )
+        // ── Workflows nativos (mlx-flow) ──
+        .route("/flows", get(flows::list_flows).post(flows::save_flow))
+        .route("/flows/node-types", get(flows::node_types))
+        .route("/flows/validate", post(flows::validate_flow))
+        .route("/flows/import/n8n", post(flows::import_n8n))
+        .route("/flows/runs", get(flows::list_all_runs))
+        .route("/flows/runs/{run_id}", get(flows::get_run))
+        .route("/flows/webhook/{*path}", any(flows::webhook))
+        .route("/flows/{id}", get(flows::get_flow).delete(flows::delete_flow))
+        .route("/flows/{id}/run", post(flows::run_flow))
+        .route("/flows/{id}/runs", get(flows::list_flow_runs))
         // ── Agent API ──
-        .route("/integrations/n8n/status", get(n8n_integration::status))
-        .route(
-            "/integrations/n8n/workflows/list",
-            post(n8n_integration::list_workflows),
-        )
-        .route(
-            "/integrations/n8n/workflows/get",
-            post(n8n_integration::get_workflow),
-        )
-        .route(
-            "/integrations/n8n/workflows/save",
-            post(n8n_integration::save_workflow),
-        )
-        .route(
-            "/integrations/n8n/workflows/generate",
-            post(n8n_integration::generate_workflow),
-        )
         .route(
             "/agent/gateway/events",
             post(agent_api::agent_gateway_event),

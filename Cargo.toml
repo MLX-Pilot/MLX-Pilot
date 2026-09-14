@@ -10,6 +10,8 @@ members = [
   "crates/agent-core",
   "crates/agent-tools",
   "crates/agent-skills",
+  # Motor de workflows embutido
+  "crates/flow",
   # Research & hardware-fit (Wave 5)
   "crates/research",
   "crates/hardware-fit",

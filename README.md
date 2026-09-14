@@ -69,9 +69,6 @@ O repositorio e um workspace Rust com multiplas crates (core, providers e daemon
 - `POST /agent/run`
 - `POST /agent/gateway/events`
 - `POST /agent/stream` (stub para streaming de eventos)
-- `GET /integrations/n8n/status`
-- `POST /integrations/n8n/workflows/list`
-- `POST /integrations/n8n/workflows/generate`
 - `GET /agent/providers`
 - `GET/POST /agent/config`
 - `GET /agent/skills`
@@ -105,7 +102,7 @@ O repositorio e um workspace Rust com multiplas crates (core, providers e daemon
 - Controle de skills/tools ativos direto na UI.
 - Control Plane completo para channels, plugins, skills, tools/policies, context/memory e runtime/health.
 - Chat do agente integrado ao fluxo principal do MLX-Pilot.
-- Integracao direta com n8n local via API publica, editor visual nativo na aba Workflows e fonte vendorizado em `vendor/n8n`, documentada em `docs/n8n-integration.md`.
+- Aba **Workflows** com editor visual e motor de execucao nativo (`mlx-flow`), sem servico externo nem chave de API, documentado em `docs/workflows.md`.
 
 ### Validacao do Agente
 

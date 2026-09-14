@@ -13,7 +13,7 @@
   const MIN_SPLASH_MS = 480;
   const MODEL_CACHE_KEY = 'mlxPilotModelCache';
   const CURRENT_MODEL_KEY = 'mlxPilotCurrentModel';
-  const N8N_BASE_URL_KEY = 'mlxPilotN8nBaseUrl';
+
   const AGENT_LOCAL_PROVIDER_CHOICE = 'mlx-pilot-local';
   const CLOUD_PROVIDER_DEFAULTS = {
     anthropic: {
@@ -70,17 +70,6 @@
     { value: 'zai', label: 'ZAI' },
     { value: 'perplexity', label: 'Perplexity' },
   ];
-  const WORKFLOW_NODE_CATALOG = [
-    { key: 'manual', label: 'Manual Trigger', group: 'Triggers', glyph: 'GO', color: '#f2b84b', type: 'n8n-nodes-base.manualTrigger', typeVersion: 1, input: false, parameters: () => ({}) },
-    { key: 'webhook', label: 'Webhook', group: 'Triggers', glyph: 'WH', color: '#e76f51', type: 'n8n-nodes-base.webhook', typeVersion: 2.1, input: false, parameters: () => ({ httpMethod: 'POST', path: 'mlx-pilot', responseMode: 'onReceived', options: {} }) },
-    { key: 'schedule', label: 'Schedule Trigger', group: 'Triggers', glyph: 'SC', color: '#ff8fab', type: 'n8n-nodes-base.scheduleTrigger', typeVersion: 1.2, input: false, parameters: () => ({ rule: { interval: [{ field: 'minutes', minutesInterval: 5 }] } }) },
-    { key: 'mlx-agent', label: 'MLX Pilot Agent', group: 'MLX Pilot', glyph: 'AI', color: '#00d4ff', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.5, parameters: workflowMlxAgentParameters },
-    { key: 'http', label: 'HTTP Request', group: 'Acoes', glyph: 'HTTP', color: '#53a9ff', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.5, parameters: () => ({ method: 'GET', url: 'https://example.com', options: {} }) },
-    { key: 'set', label: 'Edit Fields', group: 'Dados', glyph: 'SET', color: '#2ec4b6', type: 'n8n-nodes-base.set', typeVersion: 3.4, parameters: () => ({ assignments: { assignments: [] }, options: {} }) },
-    { key: 'code', label: 'Code', group: 'Dados', glyph: 'JS', color: '#b38cff', type: 'n8n-nodes-base.code', typeVersion: 2, parameters: () => ({ jsCode: 'return items;' }) },
-    { key: 'respond', label: 'Respond to Webhook', group: 'Acoes', glyph: 'OUT', color: '#e9c46a', type: 'n8n-nodes-base.respondToWebhook', typeVersion: 1.4, output: false, parameters: () => ({ respondWith: 'json', responseBody: '={{ $json }}', options: {} }) },
-  ];
-
   function readStorage(key) {
     try {
       return localStorage.getItem(key);
@@ -134,16 +123,17 @@
     tools: [],
     channels: [],
     environmentVars: [],
-    n8nBaseUrl: readStorage(N8N_BASE_URL_KEY) || 'http://127.0.0.1:5678',
-    n8nApiKey: '',
-    n8nStatus: null,
-    n8nWorkflows: [],
-    n8nEditor: {
+    // Workflows nativos (mlx-flow).
+    flows: [],
+    flowCatalog: { nodes: [], tools: [] },
+    flowRun: null,
+    flowRuns: [],
+    flowEditor: {
       initialized: false,
-      workflowId: null,
-      workflow: null,
+      flow: null,
       selectedNodeId: null,
       connectingFrom: null,
+      validation: null,
       viewport: { x: 80, y: 80, zoom: 1 },
       drag: null,
       history: [],
@@ -819,13 +809,14 @@
   // -- API ----------------------------------------------------
   async function api(path, opts = {}) {
     const url = (state.daemonUrl || DEFAULT_DAEMON_URL) + path;
-    const workflowGenerationRequest = path.startsWith('/integrations/n8n/workflows/generate');
+    // Executar um fluxo pode envolver varias chamadas ao modelo, entao ganha o
+    // teto maior; as demais rotas de /flows sao operacoes de arquivo.
+    const flowRunRequest = /^\/flows\/[^/]+\/run$/.test(path);
     const longRequest =
       path.startsWith('/chat')
       || path.startsWith('/agent/run')
-      || path.startsWith('/integrations/n8n')
       || path.startsWith('/catalog/downloads');
-    const inferredTimeoutMs = workflowGenerationRequest
+    const inferredTimeoutMs = flowRunRequest
       ? 600000
       : longRequest
         ? 120000
@@ -3045,55 +3036,26 @@
     } catch (e) { alert('Erro: ' + e.message); }
   }
 
-  // -- n8n Direct Integration --------------------------------
-  function n8nInputValue(id, fallback = '') {
-    return String(document.getElementById(id)?.value || fallback).trim();
-  }
+  // -- Workflows nativos (mlx-flow) ---------------------------
+  // O editor trabalha direto no formato `mlxflow.v1`: nos com `kind`, arestas
+  // explicitas com porta de origem, e posicao como { x, y }. A paleta e o
+  // formulario do inspetor sao montados a partir do catalogo que o daemon
+  // publica em /flows/node-types, entao um no novo no Rust aparece aqui sem
+  // precisar mexer neste arquivo.
 
-  function persistN8nSettings() {
-    state.n8nBaseUrl = n8nInputValue('n8n-base-url', state.n8nBaseUrl || 'http://127.0.0.1:5678');
-    state.n8nApiKey = n8nInputValue('n8n-api-key', state.n8nApiKey || '');
-    try {
-      localStorage.setItem(N8N_BASE_URL_KEY, state.n8nBaseUrl);
-    } catch {
-      /* storage unavailable */
-    }
-  }
+  const FLOW_NODE_WIDTH = 210;
+  const FLOW_NODE_HEIGHT = 78;
 
-  function n8nEditorUrl() {
-    return (state.n8nBaseUrl || 'http://127.0.0.1:5678').replace(/\/+$/, '') + '/';
-  }
-
-  function workflowMlxAgentParameters() {
-    const mlxUrl = n8nInputValue('n8n-mlx-url', state.daemonUrl || DEFAULT_DAEMON_URL).replace(/\/+$/, '');
-    const ollamaUrl = n8nInputValue('n8n-ollama-url', 'http://127.0.0.1:11434').replace(/\/+$/, '');
-    const modelId = n8nInputValue('n8n-workflow-model', 'qwen3.5:9b');
-    return {
-      method: 'POST',
-      url: `${mlxUrl}/agent/run`,
-      sendBody: true,
-      specifyBody: 'json',
-      jsonBody: JSON.stringify({
-        message: 'Responda ao conteudo recebido em uma frase.',
-        provider: 'ollama',
-        model_id: modelId,
-        base_url: ollamaUrl,
-        max_iterations: 1,
-      }),
-      options: {},
-    };
-  }
-
-  function workflowId() {
+  function flowUid() {
     if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-    return `node-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   }
 
-  function workflowClone(value) {
+  function flowClone(value) {
     return JSON.parse(JSON.stringify(value));
   }
 
-  function workflowAttr(value) {
+  function flowAttr(value) {
     return String(value ?? '')
       .replace(/&/g, '&amp;')
       .replace(/"/g, '&quot;')
@@ -3101,60 +3063,96 @@
       .replace(/>/g, '&gt;');
   }
 
-  function blankWorkflow(name = 'Novo workflow') {
+  function blankFlow(name = 'Novo fluxo') {
     return {
+      schema: 'mlxflow.v1',
+      id: '',
       name,
+      description: '',
+      active: false,
       nodes: [],
-      connections: {},
-      settings: { executionOrder: 'v1' },
+      edges: [],
+      settings: { timeout_secs: 300, max_parallel: 8, save_runs: true },
     };
   }
 
-  function normalizeWorkflowForEditor(source) {
-    const workflow = source && typeof source === 'object' && !Array.isArray(source)
-      ? workflowClone(source)
-      : blankWorkflow();
-    workflow.name = String(workflow.name || 'Novo workflow');
-    workflow.nodes = Array.isArray(workflow.nodes) ? workflow.nodes : [];
-    workflow.connections = workflow.connections && typeof workflow.connections === 'object' && !Array.isArray(workflow.connections)
-      ? workflow.connections
-      : {};
-    workflow.settings = workflow.settings && typeof workflow.settings === 'object' && !Array.isArray(workflow.settings)
-      ? workflow.settings
-      : { executionOrder: 'v1' };
+  function flowDescriptor(kind) {
+    return state.flowCatalog.nodes.find(item => item.kind === kind) || {
+      kind: String(kind || 'desconhecido'),
+      label: String(kind || 'Desconhecido').split('.').pop(),
+      group: 'Desconhecido',
+      description: 'Tipo de no nao registrado no daemon.',
+      color: '#8899b0',
+      glyph: '??',
+      inputs: ['main'],
+      outputs: ['main'],
+      defaults: {},
+      fields: [],
+    };
+  }
+
+  function normalizeFlowForEditor(source) {
+    const flow = source && typeof source === 'object' && !Array.isArray(source)
+      ? flowClone(source)
+      : blankFlow();
+    flow.schema = 'mlxflow.v1';
+    flow.id = String(flow.id || '');
+    flow.name = String(flow.name || 'Novo fluxo');
+    flow.description = String(flow.description || '');
+    flow.active = Boolean(flow.active);
+    flow.nodes = Array.isArray(flow.nodes) ? flow.nodes : [];
+    flow.edges = Array.isArray(flow.edges) ? flow.edges : [];
+    flow.settings = flow.settings && typeof flow.settings === 'object' && !Array.isArray(flow.settings)
+      ? flow.settings
+      : blankFlow().settings;
 
     const usedIds = new Set();
-    workflow.nodes.forEach((node, index) => {
-      let id = String(node?.id || workflowId());
-      while (usedIds.has(id)) id = workflowId();
+    const usedNames = new Set();
+    flow.nodes.forEach((node, index) => {
+      let id = String(node?.id || flowUid());
+      while (usedIds.has(id)) id = flowUid();
       usedIds.add(id);
       node.id = id;
-      node.name = String(node.name || `Node ${index + 1}`);
-      node.type = String(node.type || 'n8n-nodes-base.set');
-      node.typeVersion = Number(node.typeVersion || 1);
-      node.parameters = node.parameters && typeof node.parameters === 'object' ? node.parameters : {};
-      if (!Array.isArray(node.position) || node.position.length < 2) {
-        node.position = [360 + index * 260, 320];
-      }
-      node.position = [Number(node.position[0]) || 0, Number(node.position[1]) || 0];
+
+      let name = String(node.name || `No ${index + 1}`).trim() || `No ${index + 1}`;
+      // Nomes precisam ser unicos: sao a chave de $node["..."].
+      let suffix = 2;
+      while (usedNames.has(name)) name = `${node.name} ${suffix++}`;
+      usedNames.add(name);
+      node.name = name;
+
+      node.kind = String(node.kind || 'debug.log');
+      node.parameters = node.parameters && typeof node.parameters === 'object' && !Array.isArray(node.parameters)
+        ? node.parameters
+        : {};
+      const position = node.position && typeof node.position === 'object' ? node.position : {};
+      node.position = {
+        x: Number.isFinite(Number(position.x)) ? Number(position.x) : 240 + index * 260,
+        y: Number.isFinite(Number(position.y)) ? Number(position.y) : 200,
+      };
+      node.disabled = Boolean(node.disabled);
+      node.on_error = node.on_error === 'continue' ? 'continue' : 'stop';
     });
-    return workflow;
+
+    const nodeIds = new Set(flow.nodes.map(node => node.id));
+    flow.edges = flow.edges
+      .filter(edge => edge && nodeIds.has(edge.from) && nodeIds.has(edge.to) && edge.from !== edge.to)
+      .map(edge => ({
+        id: String(edge.id || flowUid()),
+        from: edge.from,
+        from_port: String(edge.from_port || 'main'),
+        to: edge.to,
+        to_port: String(edge.to_port || 'main'),
+      }));
+    return flow;
   }
 
-  function workflowEditorNodeById(nodeId) {
-    return state.n8nEditor.workflow?.nodes?.find(node => node.id === nodeId) || null;
+  function flowEditorNodeById(nodeId) {
+    return state.flowEditor.flow?.nodes?.find(node => node.id === nodeId) || null;
   }
 
-  function workflowCatalogEntry(node) {
-    if (node?.type === 'n8n-nodes-base.httpRequest' && String(node.parameters?.url || '').includes('/agent/run')) {
-      return WORKFLOW_NODE_CATALOG.find(item => item.key === 'mlx-agent');
-    }
-    return WORKFLOW_NODE_CATALOG.find(item => item.type === node?.type)
-      || { label: String(node?.type || 'Node').split('.').pop(), group: 'n8n', glyph: 'N8', color: '#8899b0', input: true, output: true };
-  }
-
-  function workflowUniqueNodeName(base, excludeId = null) {
-    const names = new Set((state.n8nEditor.workflow?.nodes || [])
+  function flowUniqueNodeName(base, excludeId = null) {
+    const names = new Set((state.flowEditor.flow?.nodes || [])
       .filter(node => node.id !== excludeId)
       .map(node => node.name));
     if (!names.has(base)) return base;
@@ -3163,156 +3161,186 @@
     return `${base} ${suffix}`;
   }
 
-  function workflowEditorSnapshot() {
-    return JSON.stringify(state.n8nEditor.workflow || blankWorkflow());
+  function flowEditorSnapshot() {
+    return JSON.stringify(state.flowEditor.flow || blankFlow());
   }
 
-  function workflowEditorResetHistory(saved) {
-    const snapshot = workflowEditorSnapshot();
-    state.n8nEditor.history = [snapshot];
-    state.n8nEditor.historyIndex = 0;
-    state.n8nEditor.savedSnapshot = saved ? snapshot : null;
+  function flowEditorResetHistory(saved) {
+    const snapshot = flowEditorSnapshot();
+    state.flowEditor.history = [snapshot];
+    state.flowEditor.historyIndex = 0;
+    state.flowEditor.savedSnapshot = saved ? snapshot : null;
   }
 
-  function workflowEditorCheckpoint() {
-    const editor = state.n8nEditor;
-    const snapshot = workflowEditorSnapshot();
+  function flowEditorCheckpoint() {
+    const editor = state.flowEditor;
+    const snapshot = flowEditorSnapshot();
     if (editor.history[editor.historyIndex] !== snapshot) {
       editor.history = editor.history.slice(0, editor.historyIndex + 1);
       editor.history.push(snapshot);
       if (editor.history.length > 60) editor.history.shift();
       editor.historyIndex = editor.history.length - 1;
     }
-    renderWorkflowEditor();
+    renderFlowEditor();
   }
 
-  function workflowEditorLoad(workflow, { workflowId: loadedId = null, saved = true, fit = true } = {}) {
-    const editor = state.n8nEditor;
-    editor.workflow = normalizeWorkflowForEditor(workflow);
-    editor.workflowId = loadedId || null;
+  function flowEditorLoad(flow, { saved = true, fit = true } = {}) {
+    const editor = state.flowEditor;
+    editor.flow = normalizeFlowForEditor(flow);
     editor.selectedNodeId = null;
     editor.connectingFrom = null;
     editor.drag = null;
-    workflowEditorResetHistory(saved);
-    renderWorkflowEditor();
-    if (fit) requestAnimationFrame(() => workflowEditorFitView());
+    editor.validation = null;
+    flowEditorResetHistory(saved);
+    renderFlowEditor();
+    if (fit) requestAnimationFrame(() => flowEditorFitView());
   }
 
-  function workflowEditorNew() {
-    const workflow = blankWorkflow();
-    const manual = WORKFLOW_NODE_CATALOG.find(item => item.key === 'manual');
-    workflow.nodes.push({
-      id: workflowId(),
-      name: manual.label,
-      type: manual.type,
-      typeVersion: manual.typeVersion,
-      position: [520, 360],
-      parameters: manual.parameters(),
+  function flowEditorNew() {
+    const flow = blankFlow();
+    const trigger = flowDescriptor('trigger.manual');
+    flow.nodes.push({
+      id: flowUid(),
+      name: trigger.label,
+      kind: 'trigger.manual',
+      parameters: flowClone(trigger.defaults || {}),
+      position: { x: 280, y: 240 },
+      disabled: false,
+      on_error: 'stop',
     });
-    workflowEditorLoad(workflow, { saved: false });
+    flowEditorLoad(flow, { saved: false });
   }
 
-  function workflowEditorSaveState() {
-    const label = document.getElementById('workflow-save-state');
-    const undo = document.getElementById('workflow-undo-btn');
-    const redo = document.getElementById('workflow-redo-btn');
-    const open = document.getElementById('workflow-open-n8n-btn');
-    const editor = state.n8nEditor;
-    const isSaved = Boolean(editor.savedSnapshot) && editor.savedSnapshot === workflowEditorSnapshot();
+  function flowEditorSaveState() {
+    const label = document.getElementById('flow-save-state');
+    const undo = document.getElementById('flow-undo-btn');
+    const redo = document.getElementById('flow-redo-btn');
+    const run = document.getElementById('flow-run-btn');
+    const remove = document.getElementById('flow-delete-btn');
+    const editor = state.flowEditor;
+    const isSaved = Boolean(editor.savedSnapshot) && editor.savedSnapshot === flowEditorSnapshot();
     if (label) {
-      label.className = `workflow-save-state ${isSaved ? 'saved' : editor.historyIndex > 0 || editor.workflowId ? 'dirty' : ''}`;
-      label.textContent = isSaved ? 'Salvo' : editor.workflowId ? 'Alterado' : editor.historyIndex > 0 ? 'Nao salvo' : 'Novo';
+      label.className = `workflow-save-state ${isSaved ? 'saved' : editor.historyIndex > 0 || editor.flow?.id ? 'dirty' : ''}`;
+      label.textContent = isSaved ? 'Salvo' : editor.flow?.id ? 'Alterado' : editor.historyIndex > 0 ? 'Nao salvo' : 'Novo';
     }
     if (undo) undo.disabled = editor.historyIndex <= 0;
     if (redo) redo.disabled = editor.historyIndex >= editor.history.length - 1;
-    if (open) open.hidden = !editor.workflowId;
+    // Executar exige um fluxo gravado: o motor le do disco.
+    if (run) run.disabled = !editor.flow?.id || !isSaved;
+    if (remove) remove.hidden = !editor.flow?.id;
   }
 
-  function renderWorkflowPalette(query = '') {
-    const palette = document.getElementById('workflow-node-palette');
+  function renderFlowPalette(query = '') {
+    const palette = document.getElementById('flow-node-palette');
     if (!palette) return;
     const needle = String(query || '').trim().toLowerCase();
-    const matches = WORKFLOW_NODE_CATALOG.filter(item => `${item.label} ${item.group}`.toLowerCase().includes(needle));
-    palette.innerHTML = matches.map(item => `
-      <button class="workflow-palette-item" type="button" draggable="true" data-workflow-node-type="${workflowAttr(item.key)}" style="--node-color:${item.color}">
-        <span class="workflow-node-glyph">${esc(item.glyph)}</span>
-        <span><strong>${esc(item.label)}</strong><span>${esc(item.group)}</span></span>
-      </button>
-    `).join('') || '<div class="n8n-empty">Nenhum no encontrado</div>';
-  }
-
-  function workflowConnectionEntries() {
-    const entries = [];
-    const connections = state.n8nEditor.workflow?.connections || {};
-    Object.entries(connections).forEach(([sourceName, channels]) => {
-      const outputs = Array.isArray(channels?.main) ? channels.main : [];
-      outputs.forEach((targets, outputIndex) => {
-        if (!Array.isArray(targets)) return;
-        targets.forEach((target, connectionIndex) => {
-          if (!target?.node) return;
-          entries.push({ sourceName, targetName: target.node, outputIndex, connectionIndex });
-        });
-      });
+    const matches = state.flowCatalog.nodes.filter(item =>
+      `${item.label} ${item.group} ${item.kind} ${item.description}`.toLowerCase().includes(needle));
+    if (!matches.length) {
+      palette.innerHTML = '<div class="flow-empty">Nenhum no encontrado</div>';
+      return;
+    }
+    const groups = new Map();
+    matches.forEach(item => {
+      if (!groups.has(item.group)) groups.set(item.group, []);
+      groups.get(item.group).push(item);
     });
-    return entries;
+    palette.innerHTML = [...groups.entries()].map(([group, items]) => `
+      <div class="workflow-palette-group">${esc(group)}</div>
+      ${items.map(item => `
+        <button class="workflow-palette-item" type="button" draggable="true" data-flow-node-kind="${flowAttr(item.kind)}" style="--node-color:${flowAttr(item.color)}" title="${flowAttr(item.description)}">
+          <span class="workflow-node-glyph">${esc(item.glyph)}</span>
+          <span><strong>${esc(item.label)}</strong><span>${esc(item.kind)}</span></span>
+        </button>
+      `).join('')}
+    `).join('');
   }
 
-  function workflowConnectionPath(source, target) {
-    const x1 = source.position[0] + 210;
-    const y1 = source.position[1] + 39;
-    const x2 = target.position[0];
-    const y2 = target.position[1] + 39;
+  /// Coordenada de uma porta de saida, distribuida ao longo da borda direita.
+  function flowOutputPortOffset(index, total) {
+    if (total <= 1) return FLOW_NODE_HEIGHT / 2;
+    const step = FLOW_NODE_HEIGHT / (total + 1);
+    return step * (index + 1);
+  }
+
+  function flowEdgePath(source, sourcePortIndex, sourcePortTotal, target) {
+    const x1 = source.position.x + FLOW_NODE_WIDTH;
+    const y1 = source.position.y + flowOutputPortOffset(sourcePortIndex, sourcePortTotal);
+    const x2 = target.position.x;
+    const y2 = target.position.y + FLOW_NODE_HEIGHT / 2;
     const bend = Math.max(72, Math.abs(x2 - x1) * 0.48);
     return `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`;
   }
 
-  function renderWorkflowCanvas() {
-    const editor = state.n8nEditor;
-    const workflow = editor.workflow || blankWorkflow();
-    const scene = document.getElementById('workflow-canvas-scene');
-    const nodesLayer = document.getElementById('workflow-nodes');
-    const edgesLayer = document.getElementById('workflow-connections');
-    const empty = document.getElementById('workflow-canvas-empty');
-    const zoomLabel = document.getElementById('workflow-zoom-label');
+  function renderFlowCanvas() {
+    const editor = state.flowEditor;
+    const flow = editor.flow || blankFlow();
+    const scene = document.getElementById('flow-canvas-scene');
+    const nodesLayer = document.getElementById('flow-nodes');
+    const edgesLayer = document.getElementById('flow-connections');
+    const empty = document.getElementById('flow-canvas-empty');
+    const zoomLabel = document.getElementById('flow-zoom-label');
     if (scene) {
       const { x, y, zoom } = editor.viewport;
       scene.style.transform = `translate(${x}px, ${y}px) scale(${zoom})`;
     }
     if (zoomLabel) zoomLabel.textContent = `${Math.round(editor.viewport.zoom * 100)}%`;
-    if (empty) empty.hidden = workflow.nodes.length > 0;
+    if (empty) empty.hidden = flow.nodes.length > 0;
+
+    // Estado do ultimo run, para colorir os nos pelo que aconteceu.
+    const runByNode = new Map((state.flowRun?.nodes || []).map(item => [item.node_id, item]));
+    const issuesByNode = new Map();
+    (editor.validation?.issues || []).forEach(issue => {
+      (issue.node_ids || []).forEach(id => {
+        if (!issuesByNode.has(id)) issuesByNode.set(id, issue);
+      });
+    });
 
     if (nodesLayer) {
-      nodesLayer.innerHTML = workflow.nodes.map(node => {
-        const catalog = workflowCatalogEntry(node);
+      nodesLayer.innerHTML = flow.nodes.map(node => {
+        const descriptor = flowDescriptor(node.kind);
         const selected = node.id === editor.selectedNodeId;
-        const position = Array.isArray(node.position) ? node.position : [0, 0];
-        const inputPort = catalog.input === false ? '' : `<button class="workflow-node-port input" type="button" data-port="input" data-node-id="${workflowAttr(node.id)}" aria-label="Conectar entrada"></button>`;
-        const outputPort = catalog.output === false ? '' : `<button class="workflow-node-port output ${editor.connectingFrom === node.id ? 'connecting' : ''}" type="button" data-port="output" data-node-id="${workflowAttr(node.id)}" aria-label="Conectar saida"></button>`;
-        const parameterCount = Object.keys(node.parameters || {}).length;
+        const outputs = descriptor.outputs || ['main'];
+        const inputPort = (descriptor.inputs || []).length === 0
+          ? ''
+          : `<button class="workflow-node-port input" type="button" data-port="input" data-node-id="${flowAttr(node.id)}" aria-label="Conectar entrada"></button>`;
+        const outputPorts = outputs.map((port, index) => {
+          const connecting = editor.connectingFrom?.nodeId === node.id && editor.connectingFrom?.port === port;
+          const top = flowOutputPortOffset(index, outputs.length);
+          const label = outputs.length > 1 ? `<span class="workflow-port-label">${esc(port)}</span>` : '';
+          return `<button class="workflow-node-port output ${connecting ? 'connecting' : ''}" type="button" data-port="output" data-node-id="${flowAttr(node.id)}" data-port-name="${flowAttr(port)}" style="top:${top}px" aria-label="Conectar saida ${flowAttr(port)}">${label}</button>`;
+        }).join('');
+        const run = runByNode.get(node.id);
+        const issue = issuesByNode.get(node.id);
+        const statusClass = issue ? 'invalid' : run ? `run-${run.status}` : '';
+        const meta = run
+          ? `${esc(flowStatusLabel(run.status))} - ${run.output_count} item${run.output_count === 1 ? '' : 's'}`
+          : `${Object.keys(node.parameters || {}).length} parametro${Object.keys(node.parameters || {}).length === 1 ? '' : 's'}`;
         return `
-          <article class="workflow-node ${selected ? 'selected' : ''} ${node.disabled ? 'disabled' : ''}" data-node-id="${workflowAttr(node.id)}" style="left:${position[0]}px;top:${position[1]}px;--node-color:${catalog.color}">
+          <article class="workflow-node ${selected ? 'selected' : ''} ${node.disabled ? 'disabled' : ''} ${statusClass}" data-node-id="${flowAttr(node.id)}" style="left:${node.position.x}px;top:${node.position.y}px;--node-color:${flowAttr(descriptor.color)}" title="${flowAttr(issue?.message || descriptor.description)}">
             ${inputPort}
             <div class="workflow-node-head">
-              <span class="workflow-node-glyph">${esc(catalog.glyph)}</span>
-              <span><strong>${esc(node.name)}</strong><span>${esc(catalog.label)}</span></span>
+              <span class="workflow-node-glyph">${esc(descriptor.glyph)}</span>
+              <span><strong>${esc(node.name)}</strong><span>${esc(descriptor.label)}</span></span>
             </div>
-            <div class="workflow-node-meta">${parameterCount} parametro${parameterCount === 1 ? '' : 's'}</div>
-            ${outputPort}
+            <div class="workflow-node-meta">${meta}</div>
+            ${outputPorts}
           </article>
         `;
       }).join('');
     }
 
     if (edgesLayer) {
-      const byName = new Map(workflow.nodes.map(node => [node.name, node]));
-      edgesLayer.innerHTML = workflowConnectionEntries().map(connection => {
-        const source = byName.get(connection.sourceName);
-        const target = byName.get(connection.targetName);
+      const byId = new Map(flow.nodes.map(node => [node.id, node]));
+      edgesLayer.innerHTML = flow.edges.map(edge => {
+        const source = byId.get(edge.from);
+        const target = byId.get(edge.to);
         if (!source || !target) return '';
-        const path = workflowConnectionPath(source, target);
-        const payload = workflowAttr(JSON.stringify(connection));
+        const outputs = flowDescriptor(source.kind).outputs || ['main'];
+        const portIndex = Math.max(0, outputs.indexOf(edge.from_port));
+        const path = flowEdgePath(source, portIndex, outputs.length, target);
         return `
-          <g class="workflow-connection-group" data-connection="${payload}">
+          <g class="workflow-connection-group ${edge.from_port === 'false' ? 'branch-false' : ''}" data-edge-id="${flowAttr(edge.id)}">
             <path class="workflow-connection-hit" d="${path}"></path>
             <path class="workflow-connection-line" d="${path}"></path>
           </g>
@@ -3321,158 +3349,241 @@
     }
   }
 
-  function renderWorkflowInspector() {
-    const inspector = document.getElementById('workflow-inspector');
+  function flowFieldControl(node, field) {
+    const value = node.parameters?.[field.key];
+    const id = `flow-field-${field.key}`;
+    const help = field.help ? `<span class="workflow-inspector-muted">${esc(field.help)}</span>` : '';
+    const attrs = `id="${flowAttr(id)}" data-field-key="${flowAttr(field.key)}" data-field-kind="${flowAttr(field.kind)}"`;
+    let control;
+    switch (field.kind) {
+      case 'boolean':
+        return `
+          <label class="workflow-inspector-toggle">
+            <input type="checkbox" ${attrs} ${value ? 'checked' : ''} />
+            <span>${esc(field.label)}</span>
+          </label>
+          ${help}
+        `;
+      case 'number':
+        control = `<input class="input" type="number" ${attrs} value="${flowAttr(value ?? '')}" />`;
+        break;
+      case 'select':
+        control = `<select class="input" ${attrs}>${(field.options || []).map(option =>
+          `<option value="${flowAttr(option.value)}" ${String(value) === option.value ? 'selected' : ''}>${esc(option.label)}</option>`
+        ).join('')}</select>`;
+        break;
+      case 'textarea':
+      case 'expression':
+        control = `<textarea class="input ${field.kind === 'expression' ? 'workflow-expression-input' : ''}" rows="3" spellcheck="false" ${attrs}>${esc(value ?? '')}</textarea>`;
+        break;
+      case 'json':
+        control = `<textarea class="input workflow-expression-input" rows="5" spellcheck="false" ${attrs}>${esc(value === undefined ? '' : JSON.stringify(value, null, 2))}</textarea>`;
+        break;
+      default:
+        control = `<input class="input" type="text" ${attrs} value="${flowAttr(value ?? '')}" placeholder="${flowAttr(field.placeholder || '')}" />`;
+    }
+    return `
+      <div class="settings-field">
+        <label for="${flowAttr(id)}">${esc(field.label)}${field.required ? ' *' : ''}</label>
+        ${control}
+        ${help}
+      </div>
+    `;
+  }
+
+  function renderFlowInspector() {
+    const inspector = document.getElementById('flow-inspector');
     if (!inspector) return;
-    const node = workflowEditorNodeById(state.n8nEditor.selectedNodeId);
+    const node = flowEditorNodeById(state.flowEditor.selectedNodeId);
     if (!node) {
       inspector.innerHTML = '<div class="workflow-inspector-empty"><div class="workflow-pane-title">Propriedades</div><span>Nenhum no selecionado</span></div>';
       return;
     }
-    const catalog = workflowCatalogEntry(node);
-    const outgoing = workflowConnectionEntries().filter(connection => connection.sourceName === node.name);
+    const descriptor = flowDescriptor(node.kind);
+    const outgoing = (state.flowEditor.flow?.edges || []).filter(edge => edge.from === node.id);
+    const byId = new Map((state.flowEditor.flow?.nodes || []).map(item => [item.id, item]));
+    const run = (state.flowRun?.nodes || []).find(item => item.node_id === node.id);
+
     inspector.innerHTML = `
-      <div class="workflow-node-selected" style="--node-color:${catalog.color}">
+      <div class="workflow-node-selected" style="--node-color:${flowAttr(descriptor.color)}">
         <div class="workflow-node-head workflow-inspector-head">
-          <span class="workflow-node-glyph">${esc(catalog.glyph)}</span>
-          <span><strong>${esc(node.name)}</strong><span>${esc(node.type)}</span></span>
-          <button class="workflow-icon-btn" id="workflow-delete-node-btn" type="button" title="Excluir no" aria-label="Excluir no">&times;</button>
+          <span class="workflow-node-glyph">${esc(descriptor.glyph)}</span>
+          <span><strong>${esc(node.name)}</strong><span>${esc(node.kind)}</span></span>
+          <button class="workflow-icon-btn" id="flow-delete-node-btn" type="button" title="Excluir no" aria-label="Excluir no">&times;</button>
         </div>
         <div class="workflow-inspector-form">
           <div class="settings-field">
-            <label for="workflow-node-name">Nome</label>
-            <input class="input" id="workflow-node-name" value="${workflowAttr(node.name)}" />
+            <label for="flow-node-name">Nome</label>
+            <input class="input" id="flow-node-name" value="${flowAttr(node.name)}" />
+            <span class="workflow-inspector-muted">Usado por expressoes $node["${flowAttr(node.name)}"].</span>
           </div>
-          <label class="workflow-inspector-toggle">
-            <input id="workflow-node-disabled" type="checkbox" ${node.disabled ? 'checked' : ''} />
-            <span>No desativado</span>
-          </label>
-          <div class="settings-field">
-            <label for="workflow-node-parameters">Parametros JSON</label>
-            <textarea class="input" id="workflow-node-parameters" spellcheck="false">${esc(JSON.stringify(node.parameters || {}, null, 2))}</textarea>
-            <div class="workflow-parameter-error" id="workflow-parameter-error"></div>
-            <button class="action-btn" id="workflow-apply-parameters-btn" type="button">Aplicar parametros</button>
-          </div>
+          ${descriptor.fields.map(field => flowFieldControl(node, field)).join('')}
+          <details class="workflow-inspector-advanced">
+            <summary>Avancado</summary>
+            <label class="workflow-inspector-toggle">
+              <input id="flow-node-disabled" type="checkbox" ${node.disabled ? 'checked' : ''} />
+              <span>No desativado (repassa a entrada)</span>
+            </label>
+            <div class="settings-field">
+              <label for="flow-node-on-error">Em caso de erro</label>
+              <select class="input" id="flow-node-on-error">
+                <option value="stop" ${node.on_error !== 'continue' ? 'selected' : ''}>Parar a execucao</option>
+                <option value="continue" ${node.on_error === 'continue' ? 'selected' : ''}>Continuar com a entrada</option>
+              </select>
+            </div>
+            <div class="settings-field">
+              <label for="flow-node-retries">Tentativas</label>
+              <input class="input" id="flow-node-retries" type="number" min="1" max="10" value="${flowAttr(node.retry?.max_attempts || 1)}" />
+            </div>
+            <div class="settings-field">
+              <label for="flow-node-parameters">Parametros (JSON bruto)</label>
+              <textarea class="input workflow-expression-input" id="flow-node-parameters" rows="6" spellcheck="false">${esc(JSON.stringify(node.parameters || {}, null, 2))}</textarea>
+              <div class="workflow-parameter-error" id="flow-parameter-error"></div>
+              <button class="action-btn" id="flow-apply-parameters-btn" type="button">Aplicar JSON</button>
+            </div>
+          </details>
           <div class="settings-field">
             <label>Saidas</label>
             <div class="workflow-node-connections">
-              ${outgoing.map(connection => `<button class="workflow-connection-row" type="button" data-remove-connection="${workflowAttr(JSON.stringify(connection))}"><span>${esc(connection.targetName)}</span><span>&times;</span></button>`).join('') || '<span class="workflow-inspector-muted">Nenhuma conexao</span>'}
+              ${outgoing.map(edge => `
+                <button class="workflow-connection-row" type="button" data-remove-edge="${flowAttr(edge.id)}">
+                  <span>${esc(edge.from_port === 'main' ? '' : `${edge.from_port} -> `)}${esc(byId.get(edge.to)?.name || edge.to)}</span>
+                  <span>&times;</span>
+                </button>
+              `).join('') || '<span class="workflow-inspector-muted">Nenhuma conexao</span>'}
             </div>
           </div>
+          ${run ? `
+            <div class="settings-field">
+              <label>Ultima execucao</label>
+              <div class="flow-node-run ${flowAttr(run.status)}">
+                <strong>${esc(flowStatusLabel(run.status))}</strong>
+                <span>${run.duration_ms} ms - ${run.attempts} tentativa${run.attempts === 1 ? '' : 's'}</span>
+                ${run.error ? `<span class="flow-run-error">${esc(run.error)}</span>` : ''}
+              </div>
+              <pre class="flow-run-output">${esc(JSON.stringify(run.output ?? {}, null, 2))}</pre>
+            </div>
+          ` : ''}
         </div>
       </div>
     `;
   }
 
-  function renderWorkflowEditor() {
-    if (!state.n8nEditor.workflow) return;
-    const name = document.getElementById('workflow-editor-name');
-    const label = document.getElementById('n8n-editor-url');
-    if (name && document.activeElement !== name) name.value = state.n8nEditor.workflow.name;
-    if (label) {
-      const suffix = state.n8nEditor.workflowId ? `workflow/${state.n8nEditor.workflowId}` : '';
-      label.textContent = `${n8nEditorUrl()}${suffix}`;
-    }
-    renderWorkflowCanvas();
-    renderWorkflowInspector();
-    workflowEditorSaveState();
+  function flowStatusLabel(status) {
+    return {
+      success: 'Sucesso',
+      failed: 'Falhou',
+      skipped: 'Pulado',
+      disabled: 'Desativado',
+      pending: 'Nao executado',
+      running: 'Executando',
+      cancelled: 'Cancelado',
+      timed_out: 'Tempo esgotado',
+    }[status] || String(status || '-');
   }
 
-  function workflowEditorAddNode(key, position = null) {
-    const catalog = WORKFLOW_NODE_CATALOG.find(item => item.key === key);
-    if (!catalog || !state.n8nEditor.workflow) return;
-    const viewport = document.getElementById('workflow-canvas-viewport');
-    const view = state.n8nEditor.viewport;
+  function renderFlowValidation() {
+    const box = document.getElementById('flow-validation');
+    if (!box) return;
+    const report = state.flowEditor.validation;
+    if (!report || !report.issues?.length) {
+      box.hidden = Boolean(!report);
+      box.className = 'flow-validation ok';
+      box.innerHTML = report ? '<span class="status-dot online"></span><span>Fluxo valido</span>' : '';
+      return;
+    }
+    box.hidden = false;
+    box.className = `flow-validation ${report.valid ? 'warn' : 'error'}`;
+    box.innerHTML = report.issues.map(issue => `
+      <div class="flow-validation-row ${flowAttr(issue.severity)}">
+        <span class="status-dot ${issue.severity === 'error' ? 'offline' : ''}"></span>
+        <span>${esc(issue.message)}</span>
+      </div>
+    `).join('');
+  }
+
+  function renderFlowEditor() {
+    if (!state.flowEditor.flow) return;
+    const name = document.getElementById('flow-editor-name');
+    const active = document.getElementById('flow-active-toggle');
+    if (name && document.activeElement !== name) name.value = state.flowEditor.flow.name;
+    if (active) active.checked = Boolean(state.flowEditor.flow.active);
+    renderFlowCanvas();
+    renderFlowInspector();
+    renderFlowValidation();
+    flowEditorSaveState();
+  }
+
+  function flowEditorAddNode(kind, position = null) {
+    const descriptor = state.flowCatalog.nodes.find(item => item.kind === kind);
+    if (!descriptor || !state.flowEditor.flow) return;
+    const viewport = document.getElementById('flow-canvas-viewport');
+    const view = state.flowEditor.viewport;
     const fallback = viewport
-      ? [(viewport.clientWidth / 2 - view.x) / view.zoom - 105, (viewport.clientHeight / 2 - view.y) / view.zoom - 39]
-      : [520, 360];
+      ? [(viewport.clientWidth / 2 - view.x) / view.zoom - FLOW_NODE_WIDTH / 2, (viewport.clientHeight / 2 - view.y) / view.zoom - FLOW_NODE_HEIGHT / 2]
+      : [320, 240];
+    const [x, y] = (position || fallback).map(value => Math.max(24, Math.round(value / 20) * 20));
     const node = {
-      id: workflowId(),
-      name: workflowUniqueNodeName(catalog.label),
-      type: catalog.type,
-      typeVersion: catalog.typeVersion,
-      position: (position || fallback).map(value => Math.max(24, Math.round(value / 20) * 20)),
-      parameters: catalog.parameters(),
+      id: flowUid(),
+      name: flowUniqueNodeName(descriptor.label),
+      kind: descriptor.kind,
+      parameters: flowClone(descriptor.defaults || {}),
+      position: { x, y },
+      disabled: false,
+      on_error: 'stop',
     };
-    state.n8nEditor.workflow.nodes.push(node);
-    state.n8nEditor.selectedNodeId = node.id;
-    workflowEditorCheckpoint();
+    state.flowEditor.flow.nodes.push(node);
+    state.flowEditor.selectedNodeId = node.id;
+    flowEditorCheckpoint();
   }
 
-  function workflowEditorRenameNode(node, nextName) {
-    const oldName = node.name;
-    const cleanName = workflowUniqueNodeName(String(nextName || '').trim() || oldName, node.id);
-    if (cleanName === oldName) return;
-    const connections = state.n8nEditor.workflow.connections;
-    if (connections[oldName]) {
-      connections[cleanName] = connections[oldName];
-      delete connections[oldName];
+  function flowEditorConnect(sourceId, port, targetId) {
+    const flow = state.flowEditor.flow;
+    if (!flow || sourceId === targetId) return;
+    const source = flowEditorNodeById(sourceId);
+    const target = flowEditorNodeById(targetId);
+    if (!source || !target) return;
+    if (!(flowDescriptor(target.kind).inputs || []).length) return;
+    const exists = flow.edges.some(edge =>
+      edge.from === sourceId && edge.from_port === port && edge.to === targetId);
+    if (!exists) {
+      flow.edges.push({ id: flowUid(), from: sourceId, from_port: port, to: targetId, to_port: 'main' });
     }
-    Object.values(connections).forEach(channels => {
-      (channels?.main || []).forEach(targets => {
-        (targets || []).forEach(target => {
-          if (target.node === oldName) target.node = cleanName;
-        });
-      });
-    });
-    node.name = cleanName;
+    state.flowEditor.connectingFrom = null;
+    flowEditorCheckpoint();
   }
 
-  function workflowEditorConnect(sourceId, targetId) {
-    const source = workflowEditorNodeById(sourceId);
-    const target = workflowEditorNodeById(targetId);
-    if (!source || !target || source.id === target.id) return;
-    const connections = state.n8nEditor.workflow.connections;
-    const channels = connections[source.name] || { main: [[]] };
-    if (!Array.isArray(channels.main)) channels.main = [[]];
-    if (!Array.isArray(channels.main[0])) channels.main[0] = [];
-    const exists = channels.main[0].some(item => item.node === target.name && item.type === 'main');
-    if (!exists) channels.main[0].push({ node: target.name, type: 'main', index: 0 });
-    connections[source.name] = channels;
-    state.n8nEditor.connectingFrom = null;
-    workflowEditorCheckpoint();
+  function flowEditorRemoveEdge(edgeId) {
+    const flow = state.flowEditor.flow;
+    if (!flow) return;
+    flow.edges = flow.edges.filter(edge => edge.id !== edgeId);
+    flowEditorCheckpoint();
   }
 
-  function workflowEditorRemoveConnection(connection) {
-    const channels = state.n8nEditor.workflow?.connections?.[connection.sourceName];
-    const targets = channels?.main?.[connection.outputIndex];
-    if (!Array.isArray(targets)) return;
-    targets.splice(connection.connectionIndex, 1);
-    if (targets.length === 0 && channels.main.every(output => !output?.length)) {
-      delete state.n8nEditor.workflow.connections[connection.sourceName];
-    }
-    workflowEditorCheckpoint();
+  function flowEditorDeleteSelected() {
+    const node = flowEditorNodeById(state.flowEditor.selectedNodeId);
+    const flow = state.flowEditor.flow;
+    if (!node || !flow) return;
+    flow.nodes = flow.nodes.filter(item => item.id !== node.id);
+    flow.edges = flow.edges.filter(edge => edge.from !== node.id && edge.to !== node.id);
+    state.flowEditor.selectedNodeId = null;
+    state.flowEditor.connectingFrom = null;
+    flowEditorCheckpoint();
   }
 
-  function workflowEditorDeleteSelected() {
-    const node = workflowEditorNodeById(state.n8nEditor.selectedNodeId);
-    if (!node) return;
-    state.n8nEditor.workflow.nodes = state.n8nEditor.workflow.nodes.filter(item => item.id !== node.id);
-    delete state.n8nEditor.workflow.connections[node.name];
-    Object.values(state.n8nEditor.workflow.connections).forEach(channels => {
-      if (!Array.isArray(channels?.main)) return;
-      channels.main.forEach((targets, index) => {
-        if (Array.isArray(targets)) channels.main[index] = targets.filter(target => target.node !== node.name);
-      });
-    });
-    state.n8nEditor.selectedNodeId = null;
-    state.n8nEditor.connectingFrom = null;
-    workflowEditorCheckpoint();
-  }
-
-  function workflowEditorUndo(direction) {
-    const editor = state.n8nEditor;
+  function flowEditorUndo(direction) {
+    const editor = state.flowEditor;
     const nextIndex = editor.historyIndex + direction;
     if (nextIndex < 0 || nextIndex >= editor.history.length) return;
     editor.historyIndex = nextIndex;
-    editor.workflow = normalizeWorkflowForEditor(JSON.parse(editor.history[nextIndex]));
-    if (!workflowEditorNodeById(editor.selectedNodeId)) editor.selectedNodeId = null;
+    editor.flow = normalizeFlowForEditor(JSON.parse(editor.history[nextIndex]));
+    if (!flowEditorNodeById(editor.selectedNodeId)) editor.selectedNodeId = null;
     editor.connectingFrom = null;
-    renderWorkflowEditor();
+    renderFlowEditor();
   }
 
-  function workflowEditorSetZoom(nextZoom, anchor = null) {
-    const editor = state.n8nEditor;
+  function flowEditorSetZoom(nextZoom, anchor = null) {
+    const editor = state.flowEditor;
     const oldZoom = editor.viewport.zoom;
     const zoom = Math.min(1.65, Math.max(0.35, nextZoom));
     if (anchor) {
@@ -3482,55 +3593,99 @@
       editor.viewport.y = anchor.y - worldY * zoom;
     }
     editor.viewport.zoom = zoom;
-    renderWorkflowCanvas();
+    renderFlowCanvas();
   }
 
-  function workflowEditorFitView() {
-    const viewport = document.getElementById('workflow-canvas-viewport');
-    const nodes = state.n8nEditor.workflow?.nodes || [];
+  function flowEditorFitView() {
+    const viewport = document.getElementById('flow-canvas-viewport');
+    const nodes = state.flowEditor.flow?.nodes || [];
     if (!viewport || nodes.length === 0) {
-      state.n8nEditor.viewport = { x: 80, y: 80, zoom: 1 };
-      renderWorkflowCanvas();
+      state.flowEditor.viewport = { x: 80, y: 80, zoom: 1 };
+      renderFlowCanvas();
       return;
     }
-    const minX = Math.min(...nodes.map(node => node.position[0]));
-    const minY = Math.min(...nodes.map(node => node.position[1]));
-    const maxX = Math.max(...nodes.map(node => node.position[0] + 210));
-    const maxY = Math.max(...nodes.map(node => node.position[1] + 78));
-    const width = Math.max(210, maxX - minX);
-    const height = Math.max(78, maxY - minY);
+    const minX = Math.min(...nodes.map(node => node.position.x));
+    const minY = Math.min(...nodes.map(node => node.position.y));
+    const maxX = Math.max(...nodes.map(node => node.position.x + FLOW_NODE_WIDTH));
+    const maxY = Math.max(...nodes.map(node => node.position.y + FLOW_NODE_HEIGHT));
+    const width = Math.max(FLOW_NODE_WIDTH, maxX - minX);
+    const height = Math.max(FLOW_NODE_HEIGHT, maxY - minY);
     const zoom = Math.min(1.15, Math.max(0.35, Math.min((viewport.clientWidth - 100) / width, (viewport.clientHeight - 100) / height)));
-    state.n8nEditor.viewport = {
+    state.flowEditor.viewport = {
       zoom,
       x: (viewport.clientWidth - width * zoom) / 2 - minX * zoom,
       y: (viewport.clientHeight - height * zoom) / 2 - minY * zoom,
     };
-    renderWorkflowCanvas();
+    renderFlowCanvas();
   }
 
-  async function workflowEditorSave() {
-    const button = document.getElementById('workflow-save-btn');
-    const original = button?.textContent || 'Salvar no n8n';
+  // -- Catalogo, lista e persistencia -------------------------
+
+  async function loadFlowCatalog() {
+    try {
+      const payload = await api('/flows/node-types');
+      state.flowCatalog = {
+        nodes: Array.isArray(payload?.nodes) ? payload.nodes : [],
+        tools: Array.isArray(payload?.tools) ? payload.tools : [],
+      };
+      renderFlowPalette(document.getElementById('flow-node-search')?.value || '');
+    } catch (error) {
+      pushConsoleEntry('error', 'flows', `Catalogo de nos indisponivel: ${error.message}`);
+    }
+  }
+
+  function renderFlowList() {
+    const list = document.getElementById('flow-list');
+    if (!list) return;
+    if (!state.flows.length) {
+      list.innerHTML = '<div class="flow-empty">Nenhum fluxo salvo ainda</div>';
+      return;
+    }
+    list.innerHTML = state.flows.map(flow => `
+      <div class="flow-list-row ${flow.id === state.flowEditor.flow?.id ? 'current' : ''}">
+        <div class="flow-list-summary">
+          <strong>${esc(flow.name)}</strong>
+          <span>${flow.node_count} no${flow.node_count === 1 ? '' : 's'} - ${esc((flow.trigger_kinds || []).join(', ') || 'sem gatilho')}</span>
+        </div>
+        <span class="flow-list-state ${flow.active ? 'active' : ''}">${flow.active ? 'Ativo' : 'Inativo'}</span>
+        <button class="action-btn" type="button" data-flow-open="${flowAttr(flow.id)}">Abrir</button>
+      </div>
+    `).join('');
+  }
+
+  async function listFlows() {
+    try {
+      const payload = await api('/flows');
+      state.flows = Array.isArray(payload?.flows) ? payload.flows : [];
+      renderFlowList();
+    } catch (error) {
+      pushConsoleEntry('error', 'flows', error.message);
+    }
+  }
+
+  async function flowEditorSave() {
+    const button = document.getElementById('flow-save-btn');
+    const original = button?.textContent || 'Salvar';
     if (button) {
       button.disabled = true;
       button.textContent = 'Salvando...';
     }
     try {
-      const payload = await api('/integrations/n8n/workflows/save', {
+      const payload = await api('/flows', {
         method: 'POST',
-        body: JSON.stringify(n8nApiBody({
-          workflow_id: state.n8nEditor.workflowId,
-          workflow: state.n8nEditor.workflow,
-        })),
+        body: JSON.stringify(state.flowEditor.flow),
       });
-      state.n8nEditor.workflowId = payload.workflow_id || state.n8nEditor.workflowId;
-      state.n8nEditor.savedSnapshot = workflowEditorSnapshot();
-      renderWorkflowEditor();
-      pushConsoleEntry('info', 'n8n', `Workflow salvo: ${state.n8nEditor.workflowId || '-'}`);
-      await listN8nWorkflows();
+      state.flowEditor.flow = normalizeFlowForEditor(payload.flow);
+      state.flowEditor.validation = payload.validation || null;
+      state.flowEditor.savedSnapshot = flowEditorSnapshot();
+      renderFlowEditor();
+      pushConsoleEntry('info', 'flows', `Fluxo salvo: ${state.flowEditor.flow.name}`);
+      await listFlows();
     } catch (error) {
-      pushConsoleEntry('error', 'n8n', error.message);
-      alert('Erro ao salvar workflow: ' + error.message);
+      state.flowEditor.validation = error.payload?.validation || null;
+      renderFlowEditor();
+      pushConsoleEntry('error', 'flows', error.message);
+      alert('Erro ao salvar o fluxo: ' + error.message);
     } finally {
       if (button) {
         button.disabled = false;
@@ -3539,450 +3694,486 @@
     }
   }
 
-  async function workflowEditorOpen(workflowIdToOpen) {
+  async function flowEditorValidate() {
     try {
-      const payload = await api('/integrations/n8n/workflows/get', {
+      state.flowEditor.validation = await api('/flows/validate', {
         method: 'POST',
-        body: JSON.stringify(n8nApiBody({ workflow_id: workflowIdToOpen })),
+        body: JSON.stringify(state.flowEditor.flow),
       });
-      workflowEditorLoad(payload.workflow, { workflowId: payload.workflow_id || workflowIdToOpen, saved: true });
-      pushConsoleEntry('info', 'n8n', `Workflow aberto: ${workflowIdToOpen}`);
-      document.getElementById('workflow-builder')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      renderFlowEditor();
+      const report = state.flowEditor.validation;
+      pushConsoleEntry(report?.valid ? 'info' : 'warn', 'flows',
+        report?.valid ? 'Fluxo valido' : `Fluxo invalido: ${report.issues.map(issue => issue.message).join('; ')}`);
     } catch (error) {
-      pushConsoleEntry('error', 'n8n', error.message);
-      alert('Erro ao abrir workflow: ' + error.message);
+      pushConsoleEntry('error', 'flows', error.message);
     }
   }
 
-  function workflowEditorExport() {
-    const workflow = state.n8nEditor.workflow;
-    if (!workflow) return;
-    const blob = new Blob([JSON.stringify(workflow, null, 2)], { type: 'application/json' });
+  async function flowEditorOpen(flowId) {
+    try {
+      const flow = await api(`/flows/${encodeURIComponent(flowId)}`);
+      state.flowRun = null;
+      flowEditorLoad(flow, { saved: true });
+      renderFlowList();
+      await loadFlowRuns();
+      pushConsoleEntry('info', 'flows', `Fluxo aberto: ${flow.name}`);
+      document.getElementById('flow-builder')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (error) {
+      pushConsoleEntry('error', 'flows', error.message);
+      alert('Erro ao abrir o fluxo: ' + error.message);
+    }
+  }
+
+  async function flowEditorDelete() {
+    const flow = state.flowEditor.flow;
+    if (!flow?.id) return;
+    if (!confirm(`Apagar o fluxo "${flow.name}" e todo o seu historico?`)) return;
+    try {
+      await api(`/flows/${encodeURIComponent(flow.id)}`, { method: 'DELETE' });
+      pushConsoleEntry('info', 'flows', `Fluxo apagado: ${flow.name}`);
+      state.flowRun = null;
+      state.flowRuns = [];
+      flowEditorNew();
+      await listFlows();
+      renderFlowRunHistory();
+    } catch (error) {
+      pushConsoleEntry('error', 'flows', error.message);
+      alert('Erro ao apagar o fluxo: ' + error.message);
+    }
+  }
+
+  // -- Execucao -----------------------------------------------
+
+  function flowRunPayloadInput() {
+    const raw = String(document.getElementById('flow-run-payload')?.value || '').trim();
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch (error) {
+      throw new Error(`Payload de teste invalido: ${error.message}`);
+    }
+  }
+
+  async function flowEditorRun() {
+    const flow = state.flowEditor.flow;
+    if (!flow?.id) return;
+    const button = document.getElementById('flow-run-btn');
+    const original = button?.textContent || 'Executar';
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Executando...';
+    }
+    try {
+      const payload = flowRunPayloadInput();
+      state.flowRun = await api(`/flows/${encodeURIComponent(flow.id)}/run`, {
+        method: 'POST',
+        body: JSON.stringify(payload === null ? {} : { payload }),
+      });
+      renderFlowRun();
+      renderFlowEditor();
+      await loadFlowRuns();
+      pushConsoleEntry(
+        state.flowRun.status === 'success' ? 'info' : 'error',
+        'flows',
+        `Execucao ${flowStatusLabel(state.flowRun.status)} em ${state.flowRun.duration_ms} ms${state.flowRun.error ? ` - ${state.flowRun.error}` : ''}`,
+      );
+    } catch (error) {
+      pushConsoleEntry('error', 'flows', error.message);
+      alert('Erro ao executar: ' + error.message);
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = original;
+      }
+    }
+  }
+
+  function renderFlowRun() {
+    const box = document.getElementById('flow-run-result');
+    if (!box) return;
+    const run = state.flowRun;
+    if (!run) {
+      box.hidden = true;
+      box.innerHTML = '';
+      return;
+    }
+    box.hidden = false;
+    const logs = run.nodes.flatMap(node => (node.logs || []).map(line => ({ node: node.node_name, line })));
+    box.innerHTML = `
+      <div class="flow-run-head ${flowAttr(run.status)}">
+        <span class="status-dot ${run.status === 'success' ? 'online' : 'offline'}"></span>
+        <strong>${esc(flowStatusLabel(run.status))}</strong>
+        <span>${run.duration_ms} ms</span>
+        <span>${esc(run.trigger)}</span>
+      </div>
+      ${run.error ? `<div class="flow-run-error">${esc(run.error)}</div>` : ''}
+      <table class="flow-run-table">
+        <thead><tr><th>No</th><th>Estado</th><th>Entrada</th><th>Saida</th><th>Tempo</th></tr></thead>
+        <tbody>
+          ${run.nodes.map(node => `
+            <tr class="${flowAttr(node.status)}">
+              <td>${esc(node.node_name)}</td>
+              <td>${esc(flowStatusLabel(node.status))}</td>
+              <td>${node.input_count}</td>
+              <td>${node.output_count}</td>
+              <td>${node.duration_ms} ms</td>
+            </tr>
+            ${node.error ? `<tr class="flow-run-error-row"><td colspan="5">${esc(node.error)}</td></tr>` : ''}
+          `).join('')}
+        </tbody>
+      </table>
+      ${logs.length ? `
+        <div class="flow-run-logs">
+          <strong>Logs</strong>
+          ${logs.map(entry => `<div><code>${esc(entry.node)}</code> ${esc(entry.line)}</div>`).join('')}
+        </div>
+      ` : ''}
+      <details class="flow-run-payload-details">
+        <summary>Saida final (${run.output.length} item${run.output.length === 1 ? '' : 's'})</summary>
+        <pre class="flow-run-output">${esc(JSON.stringify(run.output, null, 2))}</pre>
+      </details>
+    `;
+  }
+
+  async function loadFlowRuns() {
+    const flowId = state.flowEditor.flow?.id;
+    if (!flowId) {
+      state.flowRuns = [];
+      renderFlowRunHistory();
+      return;
+    }
+    try {
+      const payload = await api(`/flows/${encodeURIComponent(flowId)}/runs?limit=20`);
+      state.flowRuns = Array.isArray(payload?.runs) ? payload.runs : [];
+    } catch (error) {
+      state.flowRuns = [];
+      pushConsoleEntry('warn', 'flows', `Historico indisponivel: ${error.message}`);
+    }
+    renderFlowRunHistory();
+  }
+
+  function renderFlowRunHistory() {
+    const list = document.getElementById('flow-run-history');
+    if (!list) return;
+    if (!state.flowRuns.length) {
+      list.innerHTML = '<div class="flow-empty">Nenhuma execucao registrada</div>';
+      return;
+    }
+    list.innerHTML = state.flowRuns.map(run => `
+      <button class="flow-run-row ${flowAttr(run.status)}" type="button" data-run-open="${flowAttr(run.id)}">
+        <span class="status-dot ${run.status === 'success' ? 'online' : 'offline'}"></span>
+        <span class="flow-run-row-main">
+          <strong>${esc(flowStatusLabel(run.status))}</strong>
+          <span>${esc(new Date(run.started_at).toLocaleString())}</span>
+        </span>
+        <span>${run.duration_ms} ms</span>
+        <span>${esc(run.trigger)}</span>
+      </button>
+    `).join('');
+  }
+
+  async function openFlowRun(runId) {
+    try {
+      state.flowRun = await api(`/flows/runs/${encodeURIComponent(runId)}`);
+      renderFlowRun();
+      renderFlowEditor();
+    } catch (error) {
+      pushConsoleEntry('error', 'flows', error.message);
+    }
+  }
+
+  // -- Import / export ----------------------------------------
+
+  function flowEditorExport() {
+    const flow = state.flowEditor.flow;
+    if (!flow) return;
+    const blob = new Blob([JSON.stringify(flow, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${String(workflow.name || 'workflow').replace(/[^a-z0-9_-]+/gi, '-').toLowerCase()}.json`;
+    link.download = `${String(flow.name || 'fluxo').replace(/[^a-z0-9_-]+/gi, '-').toLowerCase()}.mlxflow.json`;
     document.body.appendChild(link);
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
   }
 
-  function workflowEditorImport(file) {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        workflowEditorLoad(JSON.parse(String(reader.result || '')), { saved: false });
-        pushConsoleEntry('info', 'n8n', `Workflow importado: ${file.name}`);
-      } catch (error) {
-        alert('JSON de workflow invalido: ' + error.message);
-      }
-    };
-    reader.readAsText(file);
+  /// Um JSON com `connections` e `nodes[].type` veio do n8n; qualquer outro e
+  /// tratado como formato nativo.
+  function looksLikeN8nWorkflow(value) {
+    if (!value || typeof value !== 'object') return false;
+    if (value.schema === 'mlxflow.v1') return false;
+    if (Array.isArray(value.edges)) return false;
+    return Boolean(value.connections) || (Array.isArray(value.nodes) && value.nodes.some(node => typeof node?.type === 'string'));
   }
 
-  function workflowEditorPointerMove(event) {
-    const drag = state.n8nEditor.drag;
+  async function flowEditorImportFile(file) {
+    if (!file) return;
+    const text = await file.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (error) {
+      alert('JSON invalido: ' + error.message);
+      return;
+    }
+
+    if (!looksLikeN8nWorkflow(parsed)) {
+      state.flowRun = null;
+      // Um fluxo importado vira um fluxo novo: o id do arquivo nao vale aqui.
+      parsed.id = '';
+      flowEditorLoad(parsed, { saved: false });
+      pushConsoleEntry('info', 'flows', `Fluxo importado: ${file.name}`);
+      return;
+    }
+
+    try {
+      const payload = await api('/flows/import/n8n', {
+        method: 'POST',
+        body: JSON.stringify(parsed),
+      });
+      state.flowRun = null;
+      flowEditorLoad(payload.flow, { saved: false });
+      state.flowEditor.validation = payload.validation || null;
+      renderFlowEditor();
+      const warnings = payload.warnings || [];
+      pushConsoleEntry(warnings.length ? 'warn' : 'info', 'flows',
+        `Workflow do n8n convertido: ${payload.flow.nodes.length} nos${warnings.length ? `, ${warnings.length} aviso(s)` : ''}`);
+      warnings.forEach(warning => pushConsoleEntry('warn', 'flows', warning));
+      if (warnings.length) {
+        alert(`Workflow convertido com ${warnings.length} aviso(s):\n\n${warnings.join('\n')}`);
+      }
+    } catch (error) {
+      pushConsoleEntry('error', 'flows', error.message);
+      alert('Erro ao converter o workflow do n8n: ' + error.message);
+    }
+  }
+
+  // -- Eventos ------------------------------------------------
+
+  function flowEditorPointerMove(event) {
+    const drag = state.flowEditor.drag;
     if (!drag) return;
     if (drag.type === 'node') {
-      const node = workflowEditorNodeById(drag.nodeId);
+      const node = flowEditorNodeById(drag.nodeId);
       if (!node) return;
-      const dx = (event.clientX - drag.clientX) / state.n8nEditor.viewport.zoom;
-      const dy = (event.clientY - drag.clientY) / state.n8nEditor.viewport.zoom;
-      node.position = [Math.round((drag.x + dx) / 10) * 10, Math.round((drag.y + dy) / 10) * 10];
+      const dx = (event.clientX - drag.clientX) / state.flowEditor.viewport.zoom;
+      const dy = (event.clientY - drag.clientY) / state.flowEditor.viewport.zoom;
+      node.position = { x: Math.round((drag.x + dx) / 10) * 10, y: Math.round((drag.y + dy) / 10) * 10 };
       drag.moved = Math.abs(dx) > 2 || Math.abs(dy) > 2;
-      renderWorkflowCanvas();
+      renderFlowCanvas();
       return;
     }
     if (drag.type === 'pan') {
-      state.n8nEditor.viewport.x = drag.x + event.clientX - drag.clientX;
-      state.n8nEditor.viewport.y = drag.y + event.clientY - drag.clientY;
-      document.getElementById('workflow-canvas-viewport')?.classList.add('panning');
-      renderWorkflowCanvas();
+      state.flowEditor.viewport.x = drag.x + event.clientX - drag.clientX;
+      state.flowEditor.viewport.y = drag.y + event.clientY - drag.clientY;
+      document.getElementById('flow-canvas-viewport')?.classList.add('panning');
+      renderFlowCanvas();
     }
   }
 
-  function workflowEditorPointerUp() {
-    const drag = state.n8nEditor.drag;
-    state.n8nEditor.drag = null;
-    document.getElementById('workflow-canvas-viewport')?.classList.remove('panning');
-    if (drag?.type === 'node' && drag.moved) workflowEditorCheckpoint();
+  function flowEditorPointerUp() {
+    const drag = state.flowEditor.drag;
+    state.flowEditor.drag = null;
+    document.getElementById('flow-canvas-viewport')?.classList.remove('panning');
+    if (drag?.type === 'node' && drag.moved) flowEditorCheckpoint();
   }
 
-  function initWorkflowEditorEvents() {
-    const editor = state.n8nEditor;
+  function flowApplyFieldChange(node, target) {
+    const key = target.dataset.fieldKey;
+    if (!key) return false;
+    const kind = target.dataset.fieldKind;
+    if (kind === 'boolean') {
+      node.parameters[key] = target.checked;
+      return true;
+    }
+    if (kind === 'number') {
+      const parsed = Number(target.value);
+      node.parameters[key] = Number.isFinite(parsed) ? parsed : 0;
+      return true;
+    }
+    if (kind === 'json') {
+      const raw = String(target.value || '').trim();
+      const errorBox = document.getElementById('flow-parameter-error');
+      if (!raw) {
+        delete node.parameters[key];
+        if (errorBox) errorBox.textContent = '';
+        return true;
+      }
+      try {
+        node.parameters[key] = JSON.parse(raw);
+        if (errorBox) errorBox.textContent = '';
+        return true;
+      } catch (error) {
+        if (errorBox) errorBox.textContent = `${key}: ${error.message}`;
+        return false;
+      }
+    }
+    node.parameters[key] = target.value;
+    return true;
+  }
+
+  function initFlowEditorEvents() {
+    const editor = state.flowEditor;
     if (editor.initialized) return;
     editor.initialized = true;
-    const palette = document.getElementById('workflow-node-palette');
-    const nodes = document.getElementById('workflow-nodes');
-    const viewport = document.getElementById('workflow-canvas-viewport');
-    const inspector = document.getElementById('workflow-inspector');
+    const palette = document.getElementById('flow-node-palette');
+    const nodes = document.getElementById('flow-nodes');
+    const viewport = document.getElementById('flow-canvas-viewport');
+    const inspector = document.getElementById('flow-inspector');
 
     palette?.addEventListener('click', event => {
-      const item = event.target.closest('[data-workflow-node-type]');
-      if (item) workflowEditorAddNode(item.dataset.workflowNodeType);
+      const item = event.target.closest('[data-flow-node-kind]');
+      if (item) flowEditorAddNode(item.dataset.flowNodeKind);
     });
     palette?.addEventListener('dragstart', event => {
-      const item = event.target.closest('[data-workflow-node-type]');
-      if (item) event.dataTransfer?.setData('text/x-mlx-workflow-node', item.dataset.workflowNodeType);
+      const item = event.target.closest('[data-flow-node-kind]');
+      if (item) event.dataTransfer?.setData('text/x-mlx-flow-node', item.dataset.flowNodeKind);
     });
     viewport?.addEventListener('dragover', event => event.preventDefault());
     viewport?.addEventListener('drop', event => {
       event.preventDefault();
-      const key = event.dataTransfer?.getData('text/x-mlx-workflow-node');
-      if (!key) return;
+      const kind = event.dataTransfer?.getData('text/x-mlx-flow-node');
+      if (!kind) return;
       const rect = viewport.getBoundingClientRect();
       const view = editor.viewport;
-      workflowEditorAddNode(key, [(event.clientX - rect.left - view.x) / view.zoom - 105, (event.clientY - rect.top - view.y) / view.zoom - 39]);
+      flowEditorAddNode(kind, [
+        (event.clientX - rect.left - view.x) / view.zoom - FLOW_NODE_WIDTH / 2,
+        (event.clientY - rect.top - view.y) / view.zoom - FLOW_NODE_HEIGHT / 2,
+      ]);
     });
     nodes?.addEventListener('click', event => {
       const port = event.target.closest('[data-port]');
       if (port) {
         event.stopPropagation();
         if (port.dataset.port === 'output') {
-          editor.connectingFrom = editor.connectingFrom === port.dataset.nodeId ? null : port.dataset.nodeId;
-          renderWorkflowCanvas();
+          const candidate = { nodeId: port.dataset.nodeId, port: port.dataset.portName || 'main' };
+          const same = editor.connectingFrom?.nodeId === candidate.nodeId && editor.connectingFrom?.port === candidate.port;
+          editor.connectingFrom = same ? null : candidate;
+          renderFlowCanvas();
         } else if (editor.connectingFrom) {
-          workflowEditorConnect(editor.connectingFrom, port.dataset.nodeId);
+          flowEditorConnect(editor.connectingFrom.nodeId, editor.connectingFrom.port, port.dataset.nodeId);
         }
         return;
       }
       const node = event.target.closest('.workflow-node');
       if (node) {
         editor.selectedNodeId = node.dataset.nodeId;
-        renderWorkflowEditor();
+        renderFlowEditor();
       }
     });
     nodes?.addEventListener('pointerdown', event => {
       if (event.button !== 0 || event.target.closest('[data-port]')) return;
       const element = event.target.closest('.workflow-node');
-      const node = workflowEditorNodeById(element?.dataset.nodeId);
+      const node = flowEditorNodeById(element?.dataset.nodeId);
       if (!node) return;
       event.preventDefault();
       editor.selectedNodeId = node.id;
-      editor.drag = { type: 'node', nodeId: node.id, clientX: event.clientX, clientY: event.clientY, x: node.position[0], y: node.position[1], moved: false };
+      editor.drag = { type: 'node', nodeId: node.id, clientX: event.clientX, clientY: event.clientY, x: node.position.x, y: node.position.y, moved: false };
       nodes.querySelectorAll('.workflow-node').forEach(item => item.classList.toggle('selected', item.dataset.nodeId === node.id));
-      renderWorkflowInspector();
-      workflowEditorSaveState();
+      renderFlowInspector();
+      flowEditorSaveState();
     });
     viewport?.addEventListener('pointerdown', event => {
       if (event.button !== 0 || event.target.closest('.workflow-node') || event.target.closest('.workflow-canvas-controls') || event.target.closest('.workflow-connection-group')) return;
       editor.selectedNodeId = null;
       editor.connectingFrom = null;
       editor.drag = { type: 'pan', clientX: event.clientX, clientY: event.clientY, x: editor.viewport.x, y: editor.viewport.y };
-      renderWorkflowEditor();
+      renderFlowEditor();
     });
     viewport?.addEventListener('wheel', event => {
       event.preventDefault();
       const rect = viewport.getBoundingClientRect();
-      workflowEditorSetZoom(editor.viewport.zoom * (event.deltaY < 0 ? 1.1 : 0.9), { x: event.clientX - rect.left, y: event.clientY - rect.top });
+      flowEditorSetZoom(editor.viewport.zoom * (event.deltaY < 0 ? 1.1 : 0.9), { x: event.clientX - rect.left, y: event.clientY - rect.top });
     }, { passive: false });
-    document.getElementById('workflow-connections')?.addEventListener('click', event => {
-      const group = event.target.closest('[data-connection]');
-      if (group) workflowEditorRemoveConnection(JSON.parse(group.dataset.connection));
+    document.getElementById('flow-connections')?.addEventListener('click', event => {
+      const group = event.target.closest('[data-edge-id]');
+      if (group) flowEditorRemoveEdge(group.dataset.edgeId);
     });
     inspector?.addEventListener('change', event => {
-      const node = workflowEditorNodeById(editor.selectedNodeId);
+      const node = flowEditorNodeById(editor.selectedNodeId);
       if (!node) return;
-      if (event.target.id === 'workflow-node-name') {
-        workflowEditorRenameNode(node, event.target.value);
-        workflowEditorCheckpoint();
+      const target = event.target;
+      if (target.id === 'flow-node-name') {
+        node.name = flowUniqueNodeName(String(target.value || '').trim() || node.name, node.id);
+        flowEditorCheckpoint();
+        return;
       }
-      if (event.target.id === 'workflow-node-disabled') {
-        node.disabled = event.target.checked;
-        workflowEditorCheckpoint();
+      if (target.id === 'flow-node-disabled') {
+        node.disabled = target.checked;
+        flowEditorCheckpoint();
+        return;
+      }
+      if (target.id === 'flow-node-on-error') {
+        node.on_error = target.value === 'continue' ? 'continue' : 'stop';
+        flowEditorCheckpoint();
+        return;
+      }
+      if (target.id === 'flow-node-retries') {
+        const attempts = Math.min(10, Math.max(1, Number(target.value) || 1));
+        node.retry = attempts > 1 ? { max_attempts: attempts, delay_ms: 500 } : undefined;
+        flowEditorCheckpoint();
+        return;
+      }
+      if (target.dataset.fieldKey && flowApplyFieldChange(node, target)) {
+        flowEditorCheckpoint();
       }
     });
     inspector?.addEventListener('click', event => {
-      if (event.target.closest('#workflow-delete-node-btn')) {
-        workflowEditorDeleteSelected();
+      if (event.target.closest('#flow-delete-node-btn')) {
+        flowEditorDeleteSelected();
         return;
       }
-      const remove = event.target.closest('[data-remove-connection]');
+      const remove = event.target.closest('[data-remove-edge]');
       if (remove) {
-        workflowEditorRemoveConnection(JSON.parse(remove.dataset.removeConnection));
+        flowEditorRemoveEdge(remove.dataset.removeEdge);
         return;
       }
-      if (event.target.closest('#workflow-apply-parameters-btn')) {
-        const node = workflowEditorNodeById(editor.selectedNodeId);
-        const input = document.getElementById('workflow-node-parameters');
-        const errorBox = document.getElementById('workflow-parameter-error');
+      if (event.target.closest('#flow-apply-parameters-btn')) {
+        const node = flowEditorNodeById(editor.selectedNodeId);
+        const input = document.getElementById('flow-node-parameters');
+        const errorBox = document.getElementById('flow-parameter-error');
         if (!node || !input) return;
         try {
           const parameters = JSON.parse(input.value);
           if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) throw new Error('Use um objeto JSON.');
           node.parameters = parameters;
           if (errorBox) errorBox.textContent = '';
-          workflowEditorCheckpoint();
+          flowEditorCheckpoint();
         } catch (error) {
           if (errorBox) errorBox.textContent = error.message;
         }
       }
     });
-    document.addEventListener('pointermove', workflowEditorPointerMove);
-    document.addEventListener('pointerup', workflowEditorPointerUp);
+    document.addEventListener('pointermove', flowEditorPointerMove);
+    document.addEventListener('pointerup', flowEditorPointerUp);
     document.addEventListener('keydown', event => {
-      if (state.activePanel !== 'workflows' || ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
+      if (state.activePanel !== 'workflows' || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
         event.preventDefault();
-        workflowEditorUndo(event.shiftKey ? 1 : -1);
+        flowEditorUndo(event.shiftKey ? 1 : -1);
       } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') {
         event.preventDefault();
-        workflowEditorUndo(1);
+        flowEditorUndo(1);
       } else if (event.key === 'Delete' || event.key === 'Backspace') {
         event.preventDefault();
-        workflowEditorDeleteSelected();
+        flowEditorDeleteSelected();
       } else if (event.key === 'Escape') {
         editor.connectingFrom = null;
-        renderWorkflowCanvas();
+        renderFlowCanvas();
       }
     });
   }
 
-  function initN8nPanel() {
-    const base = document.getElementById('n8n-base-url');
-    const key = document.getElementById('n8n-api-key');
-    const name = document.getElementById('n8n-workflow-name');
-    const model = document.getElementById('n8n-workflow-model');
-    const prompt = document.getElementById('n8n-workflow-prompt');
-    const mlxUrl = document.getElementById('n8n-mlx-url');
-    const ollamaUrl = document.getElementById('n8n-ollama-url');
-
-    if (base && !base.value) base.value = state.n8nBaseUrl || 'http://127.0.0.1:5678';
-    if (key && !key.value) key.value = state.n8nApiKey || '';
-    if (name && !name.value) name.value = 'Workflow gerado pelo MLX Pilot';
-    if (model && !model.value) {
-      const activeWorkflowModel = activeAgentModelId();
-      const activeWorkflowProvider = inferModelProvider(activeWorkflowModel, state.agentConfig?.provider);
-      model.value = activeWorkflowProvider === 'ollama'
-        ? humanizeModelLabel(activeWorkflowModel)
-        : 'qwen3.5:9b';
-    }
-    if (prompt && !prompt.value) prompt.value = 'Crie um workflow manual que mande um texto para o MLX Pilot, resuma em uma frase e deixe a resposta disponivel no output.';
-    if (mlxUrl && !mlxUrl.value) mlxUrl.value = state.daemonUrl || DEFAULT_DAEMON_URL;
-    if (ollamaUrl && !ollamaUrl.value) ollamaUrl.value = 'http://127.0.0.1:11434';
-    renderN8nStatus();
-    renderN8nWorkflows();
-    initWorkflowEditorEvents();
-    renderWorkflowPalette(document.getElementById('workflow-node-search')?.value || '');
-    if (!state.n8nEditor.workflow) workflowEditorNew();
-    else renderWorkflowEditor();
-  }
-
-  function renderN8nStatus() {
-    const box = document.getElementById('n8n-status');
-    if (!box) {
-      renderN8nSourceStatus();
-      return;
-    }
-    const status = state.n8nStatus;
-    if (!status) {
-      box.className = 'n8n-status';
-      box.innerHTML = '<span class="status-dot offline"></span><span>Aguardando verificacao</span>';
-      renderN8nSourceStatus();
-      return;
-    }
-    box.className = `n8n-status ${status.healthy ? 'connected' : 'failed'}`;
-    box.innerHTML = `
-      <span class="status-dot ${status.healthy ? 'online' : 'offline'}"></span>
-      <span>${esc(status.message || (status.healthy ? 'n8n online' : 'n8n offline'))}</span>
-    `;
-    renderN8nSourceStatus();
-  }
-
-  function renderN8nSourceStatus() {
-    const box = document.getElementById('n8n-source-status');
-    if (!box) return;
-    const source = state.n8nStatus?.source_tree;
-    if (!source) {
-      box.className = 'n8n-source';
-      box.innerHTML = `
-        <span>Fonte local</span>
-        <strong>Aguardando status</strong>
-        <code>vendor/n8n</code>
-      `;
-      return;
-    }
-
-    const details = [
-      source.version ? `n8n ${source.version}` : '',
-      source.node_engine ? `Node ${source.node_engine}` : '',
-      source.pnpm_engine ? `pnpm ${source.pnpm_engine}` : '',
-    ].filter(Boolean).join(' | ');
-    const sourcePath = source.path || 'vendor/n8n';
-
-    box.className = `n8n-source ${source.present ? 'present' : 'missing'}`;
-    box.innerHTML = `
-      <span>Fonte local</span>
-      <strong>${esc(source.message || (source.present ? 'vendor/n8n encontrado' : 'vendor/n8n ausente'))}</strong>
-      <code>${esc(details || sourcePath)}</code>
-    `;
-  }
-
-  function n8nApiBody(extra = {}) {
-    persistN8nSettings();
-    return {
-      base_url: state.n8nBaseUrl || 'http://127.0.0.1:5678',
-      api_key: state.n8nApiKey || '',
-      ...extra,
-    };
-  }
-
-  function n8nAgentGenerationOverrides() {
-    const selected = selectedAgentProviderOption();
-    const activeProvider = normalizeProviderId(state.agentConfig?.provider || 'ollama') || 'ollama';
-    const activeModel = state.agentConfig?.model_id || activeAgentModelId();
-    const externalOllamaUrl = n8nInputValue('n8n-ollama-url', 'http://127.0.0.1:11434');
-    const base = {
-      agent_provider: activeProvider,
-      agent_model_id: agentConfigModelId(activeModel, activeProvider),
-      agent_base_url: activeProvider === 'ollama'
-        ? (state.agentConfig?.base_url || externalOllamaUrl)
-        : (state.agentConfig?.base_url || ''),
-      agent_provider_profile_id: state.agentConfig?.provider_profile_id || '',
-    };
-
-    if (!selected) return base;
-    if (selected.kind === 'cloud') {
-      return {
-        ...base,
-        agent_provider: selected.provider || base.agent_provider,
-        agent_model_id: agentConfigModelId(selected.modelId || base.agent_model_id, selected.provider || base.agent_provider),
-        agent_provider_profile_id: selected.profileId || base.agent_provider_profile_id,
-      };
-    }
-
-    const localModel = activeAgentModelId() || selected.modelId || base.agent_model_id;
-    const localProvider = inferModelProvider(localModel, state.agentConfig?.provider || 'ollama');
-    return {
-      ...base,
-      agent_provider: localProvider,
-      agent_model_id: agentConfigModelId(localModel, localProvider),
-      agent_base_url: localProvider === 'ollama'
-        ? (state.agentConfig?.base_url || externalOllamaUrl)
-        : base.agent_base_url,
-      agent_provider_profile_id: selected.profileId || base.agent_provider_profile_id,
-    };
-  }
-
-  async function checkN8nStatus() {
-    persistN8nSettings();
-    const query = encodeURIComponent(state.n8nBaseUrl || 'http://127.0.0.1:5678');
-    const btn = document.getElementById('n8n-status-btn');
-    if (btn) btn.disabled = true;
-    try {
-      state.n8nStatus = await api(`/integrations/n8n/status?base_url=${query}`);
-      pushConsoleEntry(state.n8nStatus?.healthy ? 'info' : 'warn', 'n8n', state.n8nStatus?.message || 'status recebido');
-    } catch (error) {
-      state.n8nStatus = { healthy: false, message: error.message };
-      pushConsoleEntry('error', 'n8n', error.message);
-    } finally {
-      if (btn) btn.disabled = false;
-      renderN8nStatus();
-    }
-  }
-
-  function workflowItemsFromResponse(payload) {
-    const raw = payload?.workflows;
-    if (Array.isArray(raw)) return raw;
-    if (Array.isArray(raw?.data)) return raw.data;
-    if (Array.isArray(raw?.workflows)) return raw.workflows;
-    return [];
-  }
-
-  function renderN8nWorkflows() {
-    const list = document.getElementById('n8n-workflow-list');
-    if (!list) return;
-    if (!state.n8nWorkflows.length) {
-      list.innerHTML = '<div class="n8n-empty">Nenhum workflow carregado</div>';
-      return;
-    }
-    list.innerHTML = state.n8nWorkflows.map((workflow) => `
-      <div class="n8n-workflow-row">
-        <div class="n8n-workflow-summary">
-          <strong>${esc(workflow.name || workflow.id || 'Workflow')}</strong>
-          <span>${esc(workflow.id || '-')}</span>
-        </div>
-        <span class="n8n-workflow-state ${workflow.active ? 'active' : ''}">${workflow.active ? 'Ativo' : 'Inativo'}</span>
-        <button class="action-btn" type="button" data-workflow-open="${workflowAttr(workflow.id || '')}" ${workflow.id ? '' : 'disabled'}>Editar</button>
-      </div>
-    `).join('');
-  }
-
-  async function listN8nWorkflows() {
-    const btn = document.getElementById('n8n-list-btn');
-    if (btn) btn.disabled = true;
-    try {
-      const payload = await api('/integrations/n8n/workflows/list', {
-        method: 'POST',
-        body: JSON.stringify(n8nApiBody()),
-      });
-      state.n8nWorkflows = workflowItemsFromResponse(payload);
-      renderN8nWorkflows();
-      pushConsoleEntry('info', 'n8n', `Workflows carregados: ${state.n8nWorkflows.length}`);
-    } catch (error) {
-      pushConsoleEntry('error', 'n8n', error.message);
-      alert('Erro n8n: ' + error.message);
-    } finally {
-      if (btn) btn.disabled = false;
-    }
-  }
-
-  async function createN8nGeneratedWorkflow() {
-    const btn = document.getElementById('n8n-generate-workflow-btn');
-    const originalText = btn?.textContent || 'Gerar workflow';
-    if (btn) btn.disabled = true;
-    if (btn) btn.textContent = 'Gerando...';
-    try {
-      const prompt = n8nInputValue('n8n-workflow-prompt', '');
-      if (!prompt) {
-        alert('Descreva o workflow antes de gerar.');
-        return;
-      }
-
-      const payload = await api('/integrations/n8n/workflows/generate', {
-        method: 'POST',
-        body: JSON.stringify(n8nApiBody({
-          name: n8nInputValue('n8n-workflow-name', 'Workflow gerado pelo MLX Pilot'),
-          mlx_base_url: n8nInputValue('n8n-mlx-url', state.daemonUrl || DEFAULT_DAEMON_URL),
-          ollama_base_url: n8nInputValue('n8n-ollama-url', 'http://127.0.0.1:11434'),
-          workflow_model_id: n8nInputValue('n8n-workflow-model', 'qwen3.5:9b'),
-          prompt,
-          ...n8nAgentGenerationOverrides(),
-        })),
-      });
-      const link = document.getElementById('n8n-created-link');
-      if (link) {
-        if (payload?.editor_url) {
-          link.hidden = false;
-          link.href = payload.editor_url;
-          link.textContent = 'Abrir workflow criado';
-        } else {
-          link.hidden = true;
-        }
-      }
-      const generatedJson = document.getElementById('n8n-generated-json');
-      const generatedJsonBody = document.getElementById('n8n-generated-json-body');
-      if (generatedJson && generatedJsonBody) {
-        generatedJson.hidden = false;
-        generatedJsonBody.textContent = JSON.stringify(payload?.generated_workflow || payload?.workflow || {}, null, 2);
-      }
-      workflowEditorLoad(payload?.generated_workflow || payload?.workflow || blankWorkflow(), {
-        workflowId: payload?.workflow_id || null,
-        saved: Boolean(payload?.workflow_id),
-      });
-      pushConsoleEntry('info', 'n8n', `Workflow gerado: ${payload?.workflow_id || '-'}`);
-      await listN8nWorkflows();
-    } catch (error) {
-      pushConsoleEntry('error', 'n8n', error.message);
-      alert('Erro ao gerar workflow: ' + error.message);
-    } finally {
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = originalText;
-      }
-    }
+  async function initFlowsPanel() {
+    initFlowEditorEvents();
+    if (!state.flowCatalog.nodes.length) await loadFlowCatalog();
+    renderFlowPalette(document.getElementById('flow-node-search')?.value || '');
+    if (!state.flowEditor.flow) flowEditorNew();
+    else renderFlowEditor();
+    await listFlows();
+    await loadFlowRuns();
+    renderFlowRun();
   }
 
   // -- Tab Navigation -----------------------------------------
@@ -4007,7 +4198,7 @@
       void ensureAgentCompatibleModel({ persist: true });
       updateAgentWorkspaceSummary();
     }
-    if (target === 'workflows') initN8nPanel();
+    if (target === 'workflows') void initFlowsPanel();
     if (target === 'ai-interaction') initAICanvas();
     if (target === 'console') void loadConsoleSnapshot();
   }
@@ -4358,44 +4549,41 @@
   });
 
   document.getElementById('save-env-btn')?.addEventListener('click', saveEnvironment);
-  document.getElementById('n8n-base-url')?.addEventListener('change', () => {
-    persistN8nSettings();
-    renderWorkflowEditor();
-  });
-  document.getElementById('n8n-status-btn')?.addEventListener('click', checkN8nStatus);
-  document.getElementById('n8n-list-btn')?.addEventListener('click', listN8nWorkflows);
-  document.getElementById('n8n-generate-workflow-btn')?.addEventListener('click', createN8nGeneratedWorkflow);
-  document.getElementById('n8n-open-editor-btn')?.addEventListener('click', () => {
-    persistN8nSettings();
-    window.open(n8nEditorUrl(), '_blank');
-  });
-  document.getElementById('workflow-new-btn')?.addEventListener('click', workflowEditorNew);
-  document.getElementById('workflow-import-btn')?.addEventListener('click', () => document.getElementById('workflow-import-file')?.click());
-  document.getElementById('workflow-import-file')?.addEventListener('change', event => {
-    workflowEditorImport(event.target.files?.[0]);
+  document.getElementById('flow-new-btn')?.addEventListener('click', flowEditorNew);
+  document.getElementById('flow-import-btn')?.addEventListener('click', () => document.getElementById('flow-import-file')?.click());
+  document.getElementById('flow-import-file')?.addEventListener('change', event => {
+    void flowEditorImportFile(event.target.files?.[0]);
     event.target.value = '';
   });
-  document.getElementById('workflow-export-btn')?.addEventListener('click', workflowEditorExport);
-  document.getElementById('workflow-save-btn')?.addEventListener('click', workflowEditorSave);
-  document.getElementById('workflow-open-n8n-btn')?.addEventListener('click', () => {
-    persistN8nSettings();
-    const suffix = state.n8nEditor.workflowId ? `workflow/${state.n8nEditor.workflowId}` : '';
-    window.open(`${n8nEditorUrl()}${suffix}`, '_blank');
+  document.getElementById('flow-export-btn')?.addEventListener('click', flowEditorExport);
+  document.getElementById('flow-save-btn')?.addEventListener('click', flowEditorSave);
+  document.getElementById('flow-validate-btn')?.addEventListener('click', flowEditorValidate);
+  document.getElementById('flow-run-btn')?.addEventListener('click', flowEditorRun);
+  document.getElementById('flow-delete-btn')?.addEventListener('click', flowEditorDelete);
+  document.getElementById('flow-refresh-btn')?.addEventListener('click', () => void listFlows());
+  document.getElementById('flow-undo-btn')?.addEventListener('click', () => flowEditorUndo(-1));
+  document.getElementById('flow-redo-btn')?.addEventListener('click', () => flowEditorUndo(1));
+  document.getElementById('flow-zoom-out-btn')?.addEventListener('click', () => flowEditorSetZoom(state.flowEditor.viewport.zoom - 0.1));
+  document.getElementById('flow-zoom-in-btn')?.addEventListener('click', () => flowEditorSetZoom(state.flowEditor.viewport.zoom + 0.1));
+  document.getElementById('flow-fit-btn')?.addEventListener('click', flowEditorFitView);
+  document.getElementById('flow-node-search')?.addEventListener('input', event => renderFlowPalette(event.target.value));
+  document.getElementById('flow-editor-name')?.addEventListener('change', event => {
+    if (!state.flowEditor.flow) return;
+    state.flowEditor.flow.name = String(event.target.value || '').trim() || 'Novo fluxo';
+    flowEditorCheckpoint();
   });
-  document.getElementById('workflow-undo-btn')?.addEventListener('click', () => workflowEditorUndo(-1));
-  document.getElementById('workflow-redo-btn')?.addEventListener('click', () => workflowEditorUndo(1));
-  document.getElementById('workflow-zoom-out-btn')?.addEventListener('click', () => workflowEditorSetZoom(state.n8nEditor.viewport.zoom - 0.1));
-  document.getElementById('workflow-zoom-in-btn')?.addEventListener('click', () => workflowEditorSetZoom(state.n8nEditor.viewport.zoom + 0.1));
-  document.getElementById('workflow-fit-btn')?.addEventListener('click', workflowEditorFitView);
-  document.getElementById('workflow-node-search')?.addEventListener('input', event => renderWorkflowPalette(event.target.value));
-  document.getElementById('workflow-editor-name')?.addEventListener('change', event => {
-    if (!state.n8nEditor.workflow) return;
-    state.n8nEditor.workflow.name = String(event.target.value || '').trim() || 'Novo workflow';
-    workflowEditorCheckpoint();
+  document.getElementById('flow-active-toggle')?.addEventListener('change', event => {
+    if (!state.flowEditor.flow) return;
+    state.flowEditor.flow.active = event.target.checked;
+    flowEditorCheckpoint();
   });
-  document.getElementById('n8n-workflow-list')?.addEventListener('click', event => {
-    const button = event.target.closest('[data-workflow-open]');
-    if (button?.dataset.workflowOpen) void workflowEditorOpen(button.dataset.workflowOpen);
+  document.getElementById('flow-list')?.addEventListener('click', event => {
+    const button = event.target.closest('[data-flow-open]');
+    if (button?.dataset.flowOpen) void flowEditorOpen(button.dataset.flowOpen);
+  });
+  document.getElementById('flow-run-history')?.addEventListener('click', event => {
+    const button = event.target.closest('[data-run-open]');
+    if (button?.dataset.runOpen) void openFlowRun(button.dataset.runOpen);
   });
 
   // Range input live value

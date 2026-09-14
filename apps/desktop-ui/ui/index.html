@@ -587,54 +587,61 @@
           <div class="panel-scroll">
             <div class="section-header">
               <h2 class="section-title">Workflows</h2>
-              <p class="section-subtitle">n8n local controlado diretamente pelo MLX Pilot.</p>
+              <p class="section-subtitle">Motor nativo do MLX Pilot. Sem servico externo, sem chave de API.</p>
             </div>
 
-            <section class="workflow-builder n8n-editor-primary" id="workflow-builder">
+            <section class="workflow-builder flow-editor-primary" id="flow-builder">
               <header class="workflow-builder-toolbar">
                 <div class="workflow-title-group">
-                  <input class="workflow-title-input" id="workflow-editor-name" value="Novo workflow" aria-label="Nome do workflow" />
-                  <span class="workflow-save-state" id="workflow-save-state">Novo</span>
-                  <span class="n8n-editor-url" id="n8n-editor-url">http://127.0.0.1:5678</span>
+                  <input class="workflow-title-input" id="flow-editor-name" value="Novo fluxo" aria-label="Nome do fluxo" />
+                  <span class="workflow-save-state" id="flow-save-state">Novo</span>
+                  <label class="workflow-inspector-toggle flow-active-switch" title="Publica os gatilhos de webhook e agenda">
+                    <input id="flow-active-toggle" type="checkbox" />
+                    <span>Ativo</span>
+                  </label>
                 </div>
                 <div class="workflow-toolbar-actions">
-                  <button class="workflow-icon-btn" id="workflow-undo-btn" type="button" title="Desfazer" aria-label="Desfazer">&#8630;</button>
-                  <button class="workflow-icon-btn" id="workflow-redo-btn" type="button" title="Refazer" aria-label="Refazer">&#8631;</button>
+                  <button class="workflow-icon-btn" id="flow-undo-btn" type="button" title="Desfazer" aria-label="Desfazer">&#8630;</button>
+                  <button class="workflow-icon-btn" id="flow-redo-btn" type="button" title="Refazer" aria-label="Refazer">&#8631;</button>
                   <span class="workflow-toolbar-divider"></span>
-                  <button class="action-btn" id="workflow-new-btn" type="button">Novo</button>
-                  <button class="action-btn" id="workflow-import-btn" type="button">Importar JSON</button>
-                  <button class="action-btn" id="workflow-export-btn" type="button">Exportar JSON</button>
-                  <button class="primary-btn" id="workflow-save-btn" type="button">Salvar no n8n</button>
-                  <button class="action-btn" id="workflow-open-n8n-btn" type="button" hidden>Abrir no n8n</button>
-                  <input id="workflow-import-file" type="file" accept="application/json,.json" hidden />
+                  <button class="action-btn" id="flow-new-btn" type="button">Novo</button>
+                  <button class="action-btn" id="flow-import-btn" type="button" title="Aceita o formato nativo e workflows exportados do n8n">Importar</button>
+                  <button class="action-btn" id="flow-export-btn" type="button">Exportar</button>
+                  <button class="action-btn" id="flow-validate-btn" type="button">Validar</button>
+                  <button class="primary-btn" id="flow-save-btn" type="button">Salvar</button>
+                  <button class="primary-btn flow-run-btn" id="flow-run-btn" type="button" disabled>Executar</button>
+                  <button class="action-btn danger" id="flow-delete-btn" type="button" hidden>Excluir</button>
+                  <input id="flow-import-file" type="file" accept="application/json,.json" hidden />
                 </div>
               </header>
+
+              <div class="flow-validation" id="flow-validation" hidden></div>
 
               <div class="workflow-builder-body">
                 <aside class="workflow-node-browser">
                   <div class="workflow-pane-title">Nos</div>
-                  <input class="input workflow-node-search" id="workflow-node-search" type="search" placeholder="Buscar no" />
-                  <div class="workflow-node-palette" id="workflow-node-palette"></div>
+                  <input class="input workflow-node-search" id="flow-node-search" type="search" placeholder="Buscar no" />
+                  <div class="workflow-node-palette" id="flow-node-palette"></div>
                 </aside>
 
-                <main class="workflow-canvas-viewport" id="workflow-canvas-viewport" tabindex="0" aria-label="Canvas do workflow">
-                  <div class="workflow-canvas-scene" id="workflow-canvas-scene">
-                    <svg class="workflow-connections" id="workflow-connections" width="4000" height="2400" viewBox="0 0 4000 2400" aria-hidden="true"></svg>
-                    <div class="workflow-nodes" id="workflow-nodes"></div>
+                <main class="workflow-canvas-viewport" id="flow-canvas-viewport" tabindex="0" aria-label="Canvas do fluxo">
+                  <div class="workflow-canvas-scene" id="flow-canvas-scene">
+                    <svg class="workflow-connections" id="flow-connections" width="4000" height="2400" viewBox="0 0 4000 2400" aria-hidden="true"></svg>
+                    <div class="workflow-nodes" id="flow-nodes"></div>
                   </div>
-                  <div class="workflow-canvas-empty" id="workflow-canvas-empty" hidden>
-                    <strong>Workflow vazio</strong>
+                  <div class="workflow-canvas-empty" id="flow-canvas-empty" hidden>
+                    <strong>Fluxo vazio</strong>
                     <span>Adicione um no pela paleta.</span>
                   </div>
                   <div class="workflow-canvas-controls">
-                    <button class="workflow-icon-btn" id="workflow-zoom-out-btn" type="button" title="Diminuir zoom" aria-label="Diminuir zoom">-</button>
-                    <span id="workflow-zoom-label">100%</span>
-                    <button class="workflow-icon-btn" id="workflow-zoom-in-btn" type="button" title="Aumentar zoom" aria-label="Aumentar zoom">+</button>
-                    <button class="action-btn" id="workflow-fit-btn" type="button">Ajustar</button>
+                    <button class="workflow-icon-btn" id="flow-zoom-out-btn" type="button" title="Diminuir zoom" aria-label="Diminuir zoom">-</button>
+                    <span id="flow-zoom-label">100%</span>
+                    <button class="workflow-icon-btn" id="flow-zoom-in-btn" type="button" title="Aumentar zoom" aria-label="Aumentar zoom">+</button>
+                    <button class="action-btn" id="flow-fit-btn" type="button">Ajustar</button>
                   </div>
                 </main>
 
-                <aside class="workflow-inspector" id="workflow-inspector">
+                <aside class="workflow-inspector" id="flow-inspector">
                   <div class="workflow-inspector-empty">
                     <div class="workflow-pane-title">Propriedades</div>
                     <span>Nenhum no selecionado</span>
@@ -645,75 +652,32 @@
 
             <div class="settings-grid workflow-grid">
               <div class="settings-card">
-                <h3>n8n</h3>
+                <h3>Executar</h3>
                 <div class="settings-field">
-                  <label for="n8n-base-url">Base URL</label>
-                  <input type="text" id="n8n-base-url" class="input" placeholder="http://127.0.0.1:5678" />
-                </div>
-                <div class="settings-field">
-                  <label for="n8n-api-key">API Key</label>
-                  <input type="password" id="n8n-api-key" class="input" placeholder="Cole a chave do n8n" />
-                </div>
-                <div class="workflow-actions">
-                  <button class="primary-btn" id="n8n-status-btn" type="button">Status</button>
-                  <button class="action-btn" id="n8n-open-editor-btn" type="button">Abrir editor</button>
-                </div>
-                <div class="n8n-status" id="n8n-status">
-                  <span class="status-dot offline"></span>
-                  <span>Aguardando verificacao</span>
-                </div>
-                <div class="n8n-source" id="n8n-source-status">
-                  <span>Fonte local</span>
-                  <strong>Aguardando status</strong>
-                  <code>vendor/n8n</code>
+                  <label for="flow-run-payload">Payload de teste (JSON)</label>
+                  <textarea id="flow-run-payload" class="input workflow-expression-input" rows="5" spellcheck="false" placeholder='{ "texto": "Conteudo de exemplo" }'></textarea>
+                  <span class="workflow-inspector-muted">Vira os itens do no inicial. Uma lista JSON gera varios itens. Salve o fluxo antes de executar.</span>
                 </div>
               </div>
 
               <div class="settings-card">
-                <h3>Gerador de workflow</h3>
-                <div class="settings-field">
-                  <label for="n8n-workflow-name">Nome</label>
-                  <input type="text" id="n8n-workflow-name" class="input" placeholder="Workflow gerado pelo MLX Pilot" />
-                </div>
-                <div class="settings-field">
-                  <label for="n8n-workflow-model">Modelo no workflow</label>
-                  <input type="text" id="n8n-workflow-model" class="input" placeholder="qwen3.5:9b" />
-                </div>
-                <div class="settings-field">
-                  <label for="n8n-workflow-prompt">Prompt</label>
-                  <textarea id="n8n-workflow-prompt" class="input workflow-textarea workflow-generator-prompt" rows="5" placeholder="Crie um workflow manual que mande um texto para o MLX Pilot, resuma em uma frase e deixe a resposta disponivel no output."></textarea>
-                </div>
-                <div class="workflow-actions">
-                  <button class="primary-btn" id="n8n-generate-workflow-btn" type="button">Gerar workflow</button>
-                  <a class="action-btn workflow-link" id="n8n-created-link" href="#" target="_blank" rel="noreferrer" hidden>Abrir workflow criado</a>
-                </div>
-                <details class="n8n-generated-json" id="n8n-generated-json" hidden>
-                  <summary>JSON gerado</summary>
-                  <pre id="n8n-generated-json-body">{}</pre>
-                </details>
-              </div>
-
-              <div class="settings-card full-width">
-                <h3>Conexoes locais</h3>
-                <div class="workflow-inline-fields">
-                  <div class="settings-field">
-                    <label for="n8n-mlx-url">MLX Pilot URL</label>
-                    <input type="text" id="n8n-mlx-url" class="input" placeholder="http://127.0.0.1:11435" />
-                  </div>
-                  <div class="settings-field">
-                    <label for="n8n-ollama-url">Ollama URL</label>
-                    <input type="text" id="n8n-ollama-url" class="input" placeholder="http://127.0.0.1:11434" />
-                  </div>
-                </div>
-              </div>
-
-              <div class="settings-card full-width">
                 <div class="workflow-card-head">
-                  <h3>Workflows no n8n</h3>
-                  <button class="action-btn" id="n8n-list-btn" type="button">Atualizar</button>
+                  <h3>Fluxos salvos</h3>
+                  <button class="action-btn" id="flow-refresh-btn" type="button">Atualizar</button>
                 </div>
-                <div class="n8n-workflow-list" id="n8n-workflow-list">
-                  <div class="n8n-empty">Nenhum workflow carregado</div>
+                <div class="flow-list-box" id="flow-list">
+                  <div class="flow-empty">Nenhum fluxo salvo ainda</div>
+                </div>
+              </div>
+
+              <div class="settings-card full-width">
+                <h3>Resultado da execucao</h3>
+                <div class="flow-run-result" id="flow-run-result" hidden></div>
+                <div class="workflow-card-head">
+                  <h3>Historico</h3>
+                </div>
+                <div class="flow-run-history" id="flow-run-history">
+                  <div class="flow-empty">Nenhuma execucao registrada</div>
                 </div>
               </div>
 

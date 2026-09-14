@@ -1565,6 +1565,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "mlx-flow"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "mlx-hardware-fit"
 version = "0.1.0"
 dependencies = [
@@ -1619,6 +1637,7 @@ dependencies = [
  "mlx-agent-core",
  "mlx-agent-skills",
  "mlx-agent-tools",
+ "mlx-flow",
  "mlx-hardware-fit",
  "mlx-model-fit",
  "mlx-ollama-core",

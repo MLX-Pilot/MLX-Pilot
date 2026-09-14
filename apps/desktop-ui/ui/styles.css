@@ -3080,72 +3080,12 @@ code { font-family: var(--font-mono); }
 .workflow-link {
   text-decoration: none;
 }
-.n8n-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 16px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  color: var(--text-tertiary);
-  background: var(--bg-elevated);
-  font-size: 12px;
-}
-.n8n-status.connected {
-  color: var(--green);
-  border-color: rgba(46, 196, 182, 0.4);
-}
-.n8n-status.failed {
-  color: var(--rose);
-  border-color: rgba(230, 57, 70, 0.4);
-}
-.n8n-source {
-  display: grid;
-  gap: 4px;
-  margin-top: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--bg-elevated);
-}
-.n8n-source span {
-  color: var(--text-tertiary);
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-.n8n-source strong {
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-.n8n-source code {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.n8n-source.present {
-  border-color: rgba(46, 196, 182, 0.3);
-}
-.n8n-source.present strong {
-  color: var(--green);
-}
-.n8n-source.missing {
-  border-color: rgba(230, 57, 70, 0.3);
-}
-.n8n-source.missing strong {
-  color: var(--rose);
-}
-.n8n-workflow-list {
+.flow-list-box {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
-.n8n-workflow-row {
+.flow-list-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3155,53 +3095,40 @@ code { font-family: var(--font-mono); }
   border-radius: var(--r-sm);
   background: var(--bg-elevated);
 }
-.n8n-workflow-row strong,
-.n8n-workflow-row span {
+.flow-list-row strong,
+.flow-list-row span {
   display: block;
 }
-.n8n-workflow-row strong {
+.flow-list-row strong {
   color: var(--text-primary);
   font-size: 13px;
 }
-.n8n-workflow-row span {
+.flow-list-row span {
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   font-size: 11px;
 }
-.n8n-workflow-state {
+.flow-list-state {
   flex-shrink: 0;
   padding: 4px 8px;
   border-radius: var(--r-xs);
   color: var(--text-tertiary);
   background: rgba(255, 255, 255, 0.04);
 }
-.n8n-workflow-state.active {
+.flow-list-state.active {
   color: var(--green);
   background: rgba(46, 196, 182, 0.12);
 }
-.n8n-empty {
+.flow-empty {
   padding: 16px;
   color: var(--text-tertiary);
   text-align: center;
   border: 1px dashed var(--border);
   border-radius: var(--r-sm);
 }
-.n8n-editor-primary {
+.flow-editor-primary {
   margin-bottom: 16px;
 }
-.n8n-editor-url {
-  display: inline-block;
-  max-width: min(360px, 38vw);
-  overflow: hidden;
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  vertical-align: middle;
-  white-space: nowrap;
-}
-.workflow-builder {
-  min-width: 0;
   overflow: hidden;
   border: 1px solid var(--border-hover);
   border-radius: var(--r-sm);
@@ -3650,39 +3577,16 @@ code { font-family: var(--font-mono); }
   color: var(--text-tertiary);
   font-size: 11px;
 }
-.n8n-workflow-summary {
+.flow-list-summary {
   min-width: 0;
   flex: 1;
 }
-.n8n-workflow-row .action-btn {
+.flow-list-row .action-btn {
   flex-shrink: 0;
   min-height: 30px;
   margin: 0;
   padding: 5px 9px;
 }
-.n8n-generated-json {
-  margin-top: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--bg-elevated);
-}
-.n8n-generated-json summary {
-  cursor: pointer;
-  padding: 10px 12px;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 700;
-}
-.n8n-generated-json pre {
-  max-height: 260px;
-  margin: 0;
-  overflow: auto;
-  padding: 12px;
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.45;
-  white-space: pre-wrap;
 }
 
 /* Range input */
@@ -3840,9 +3744,6 @@ code { font-family: var(--font-mono); }
     flex-direction: row;
     align-items: center;
   }
-  .n8n-editor-url {
-    max-width: 100%;
-  }
   .workflow-builder-toolbar {
     align-items: stretch;
     flex-direction: column;
@@ -3988,4 +3889,274 @@ code { font-family: var(--font-mono); }
 .stop-btn:hover {
   background: rgba(230, 57, 70, 0.25);
   box-shadow: 0 0 12px rgba(230, 57, 70, 0.3);
+}
+
+/* ── Workflows nativos (mlx-flow) ─────────────────────────────── */
+
+.flow-active-switch {
+  margin: 0 0 0 8px;
+}
+.workflow-palette-group {
+  margin: 10px 0 4px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.workflow-palette-group:first-child {
+  margin-top: 0;
+}
+
+/* Portas nomeadas: o `flow.if` tem duas saidas empilhadas. */
+.workflow-node-port.output .workflow-port-label {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-tertiary);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.workflow-connection-group.branch-false .workflow-connection-line {
+  stroke-dasharray: 5 4;
+}
+
+/* Estado do no depois de uma execucao. */
+.workflow-node.run-success {
+  box-shadow: 0 0 0 1px rgba(46, 196, 182, 0.55);
+}
+.workflow-node.run-failed {
+  box-shadow: 0 0 0 1px rgba(230, 57, 70, 0.6);
+}
+.workflow-node.run-skipped,
+.workflow-node.run-pending {
+  opacity: 0.55;
+}
+.workflow-node.invalid {
+  box-shadow: 0 0 0 1px rgba(242, 184, 75, 0.7);
+}
+
+.flow-validation {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-elevated);
+  font-size: 12px;
+}
+.flow-validation.ok {
+  border-color: rgba(46, 196, 182, 0.35);
+  color: var(--green);
+}
+.flow-validation.warn {
+  border-color: rgba(242, 184, 75, 0.4);
+}
+.flow-validation.error {
+  border-color: rgba(230, 57, 70, 0.45);
+}
+.flow-validation-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--text-secondary);
+}
+.flow-validation-row.error {
+  color: var(--rose);
+}
+
+.workflow-expression-input {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.workflow-inspector-advanced {
+  margin: 4px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+}
+.workflow-inspector-advanced summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+.workflow-inspector-muted {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.flow-run-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.action-btn.danger {
+  border-color: rgba(230, 57, 70, 0.4);
+  color: var(--rose);
+}
+.flow-run-result {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.flow-run-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-elevated);
+  font-size: 12px;
+}
+.flow-run-head.success {
+  border-color: rgba(46, 196, 182, 0.4);
+}
+.flow-run-head.failed,
+.flow-run-head.timed_out {
+  border-color: rgba(230, 57, 70, 0.45);
+}
+.flow-run-head span:last-child {
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.flow-run-error {
+  padding: 8px 10px;
+  border: 1px solid rgba(230, 57, 70, 0.4);
+  border-radius: var(--r-sm);
+  color: var(--rose);
+  font-size: 12px;
+}
+.flow-run-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.flow-run-table th {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-tertiary);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-align: left;
+  text-transform: uppercase;
+}
+.flow-run-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.flow-run-table tr.success td:nth-child(2) {
+  color: var(--green);
+}
+.flow-run-table tr.failed td:nth-child(2) {
+  color: var(--rose);
+}
+.flow-run-table tr.skipped td,
+.flow-run-table tr.pending td {
+  opacity: 0.6;
+}
+.flow-run-error-row td {
+  color: var(--rose);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.flow-run-logs {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.flow-run-logs code {
+  margin-right: 6px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.flow-run-output {
+  max-height: 260px;
+  margin: 8px 0 0;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-elevated);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.flow-run-payload-details summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+.flow-node-run {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font-size: 12px;
+}
+.flow-node-run.success {
+  border-color: rgba(46, 196, 182, 0.35);
+}
+.flow-node-run.failed {
+  border-color: rgba(230, 57, 70, 0.4);
+}
+.flow-run-history {
+  display: grid;
+  gap: 8px;
+}
+.flow-run-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: left;
+}
+.flow-run-row:hover {
+  border-color: var(--accent);
+}
+.flow-run-row-main {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.flow-run-row-main span {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+.flow-list-row.current {
+  border-color: var(--accent);
+}
+
+/* `display` explicito vence o `hidden` do user-agent: reponha o none. */
+.flow-validation[hidden],
+.flow-run-result[hidden] {
+  display: none;
 }
