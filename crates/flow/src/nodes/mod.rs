@@ -148,6 +148,69 @@ mod tests {
     }
 
     #[test]
+    fn provider_model_and_tool_fields_are_resolved_by_the_ui() {
+        use crate::registry::OptionsSource;
+        let registry = builtin_registry();
+
+        let agent = registry.get("agent.run").unwrap().descriptor();
+        let source_of = |kind: &crate::registry::NodeDescriptor, key: &str| {
+            kind.fields
+                .iter()
+                .find(|field| field.key == key)
+                .unwrap_or_else(|| panic!("campo {key} ausente"))
+                .options_source
+        };
+        assert_eq!(
+            source_of(&agent, "provider"),
+            Some(OptionsSource::AgentProviders)
+        );
+        assert_eq!(
+            source_of(&agent, "model_id"),
+            Some(OptionsSource::AgentModels)
+        );
+
+        let tool = registry.get("tool.call").unwrap().descriptor();
+        assert_eq!(source_of(&tool, "tool"), Some(OptionsSource::FlowTools));
+    }
+
+    #[test]
+    fn inherited_settings_are_hidden_under_advanced() {
+        let registry = builtin_registry();
+        let advanced_keys = |kind: &str| {
+            registry
+                .get(kind)
+                .unwrap()
+                .descriptor()
+                .fields
+                .into_iter()
+                .filter(|field| field.advanced)
+                .map(|field| field.key)
+                .collect::<Vec<_>>()
+        };
+
+        // Base URL vem do provedor selecionado; workspace vem do agente.
+        assert!(advanced_keys("agent.run").contains(&"base_url".to_string()));
+        assert!(advanced_keys("tool.call").contains(&"workspace_root".to_string()));
+    }
+
+    #[test]
+    fn every_field_key_exists_in_the_node_defaults() {
+        // Um campo sem chave correspondente nos defaults apareceria vazio na UI
+        // e nunca seria enviado ao motor.
+        for descriptor in builtin_registry().catalog() {
+            let defaults = descriptor.defaults.as_object().expect("defaults objeto");
+            for field in &descriptor.fields {
+                assert!(
+                    defaults.contains_key(&field.key),
+                    "{} declara o campo `{}` sem default",
+                    descriptor.kind,
+                    field.key
+                );
+            }
+        }
+    }
+
+    #[test]
     fn param_helpers_are_tolerant_with_types() {
         let params = json!({
             "flag_text": "true",
