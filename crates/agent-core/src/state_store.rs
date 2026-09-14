@@ -1313,11 +1313,21 @@ fn table_exists(conn: &Connection, table: &str) -> bool {
     .is_ok()
 }
 
+/// Máximo de termos enviados a uma consulta FTS5.
+///
+/// Os termos são unidos por `OR`, então cada um a mais amplia o conjunto de linhas que o
+/// `bm25()` e o `snippet()` precisam avaliar. Uma mensagem longa colada gerava dezenas de
+/// termos repetidos, casava com quase todo o índice e pendurava o run.
+const FTS_MAX_TERMS: usize = 24;
+
 fn fts_query_string(query: &str) -> String {
+    let mut seen = std::collections::HashSet::new();
     let tokens = query
         .split(|ch: char| !ch.is_alphanumeric())
         .map(|token| token.trim())
         .filter(|token| token.len() >= 2)
+        .filter(|token| seen.insert(token.to_ascii_lowercase()))
+        .take(FTS_MAX_TERMS)
         .map(ToString::to_string)
         .collect::<Vec<_>>();
     if tokens.is_empty() {
@@ -1539,4 +1549,38 @@ fn run_migrations(conn: &Connection) -> io::Result<()> {
         .map_err(sql_error)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{fts_query_string, FTS_MAX_TERMS};
+
+    #[test]
+    fn fts_query_is_deduplicated_and_capped() {
+        // Regressão: uma mensagem longa colada virava um OR de dezenas de termos
+        // repetidos, casava com quase todo o índice e pendurava a busca de sessões.
+        let query = "lorem ipsum dolor ".repeat(500);
+        let built = fts_query_string(&query);
+
+        let terms = built.split(" OR ").collect::<Vec<_>>();
+        assert_eq!(terms.len(), 3, "esperava termos unicos, obteve: {terms:?}");
+        assert!(terms.contains(&"lorem"));
+    }
+
+    #[test]
+    fn fts_query_caps_the_number_of_distinct_terms() {
+        let query = (0..200)
+            .map(|idx| format!("termo{idx}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let built = fts_query_string(&query);
+
+        assert_eq!(built.split(" OR ").count(), FTS_MAX_TERMS);
+    }
+
+    #[test]
+    fn fts_query_is_empty_for_blank_input() {
+        assert!(fts_query_string("   ").is_empty());
+        assert!(fts_query_string("a !").is_empty());
+    }
 }

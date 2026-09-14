@@ -39,7 +39,7 @@ impl GrepTool {
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Numero maximo de matches retornados. Default: 200"
+                        "description": "Numero maximo de matches retornados. Use 0 ou omita para o default (200). Maximo: 1000"
                     }
                 },
                 "required": ["pattern"]
@@ -80,12 +80,23 @@ impl crate::Tool for GrepTool {
             .ok_or_else(|| ToolError::InvalidParams {
                 details: "missing 'pattern' string".into(),
             })?;
-        let path_glob = params["path"].as_str().unwrap_or("**/*");
+        // `path` e um filtro opcional. Modelos mandam `"path": ""` querendo dizer "sem
+        // filtro"; tratar a string vazia como glob fazia a busca nao casar com nada e o
+        // agente concluia que o termo nao existia no projeto.
+        let path_glob = params["path"]
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("**/*");
         let base_path = params["base_path"].as_str().unwrap_or(".");
         let case_sensitive = params["case_sensitive"].as_bool().unwrap_or(false);
+        // `limit: 0` vem do modelo querendo dizer "sem limite". Fazer clamp(1, ..) devolvia
+        // exatamente UM match, e o agente concluia que as outras ocorrencias nao existiam.
+        // Tratar 0 como "use o default" e o comportamento menos surpreendente.
         let limit = params["limit"]
             .as_u64()
-            .map(|value| value.clamp(1, 1000) as usize)
+            .filter(|value| *value > 0)
+            .map(|value| value.min(1000) as usize)
             .unwrap_or(DEFAULT_LIMIT);
 
         let regex = RegexBuilder::new(pattern)
@@ -196,7 +207,7 @@ fn collect_matches(
 }
 
 fn matches_glob_pattern(pattern: &str, path: &str) -> bool {
-    glob_match(pattern, path)
+    if glob_match(pattern, path)
         || pattern
             .contains("/**/")
             .then(|| pattern.replace("/**/", "/"))
@@ -204,6 +215,18 @@ fn matches_glob_pattern(pattern: &str, path: &str) -> bool {
         || pattern
             .strip_prefix("**/")
             .is_some_and(|alternate| glob_match(alternate, path))
+    {
+        return true;
+    }
+
+    // Mesma regra do `glob`: um filtro sem barra ("*.rs") e busca por nome de arquivo,
+    // nao um arquivo ancorado na raiz.
+    if !pattern.contains('/') {
+        let file_name = path.rsplit('/').next().unwrap_or(path);
+        return glob_match(pattern, file_name);
+    }
+
+    false
 }
 
 fn relative_path(workspace_root: &Path, path: &Path) -> String {
@@ -257,5 +280,45 @@ mod tests {
     fn grep_glob_helper_matches_shallow_and_nested() {
         assert!(matches_glob_pattern("src/**/*.rs", "src/main.rs"));
         assert!(matches_glob_pattern("src/**/*.rs", "src/nested/lib.rs"));
+
+        // Filtro sem barra busca pelo nome do arquivo em qualquer profundidade.
+        assert!(matches_glob_pattern("*.rs", "src/nested/lib.rs"));
+        assert!(!matches_glob_pattern("*.rs", "src/main.ts"));
+    }
+
+    /// Regressão: o modelo manda `"path": ""` querendo dizer "sem filtro". Tratar a
+    /// string vazia como glob fazia a busca não casar com nada, e o agente respondia que
+    /// o termo não existia no projeto.
+    #[tokio::test]
+    async fn grep_treats_empty_path_filter_as_no_filter() {
+        let tmp = std::env::temp_dir().join(format!("mlx-grep-empty-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(tmp.join("src")).unwrap();
+        fs::write(
+            tmp.join("src/config.rs"),
+            "pub const MAX_RETRIES: u32 = 3;\n",
+        )
+        .unwrap();
+
+        let ctx = ToolContext {
+            workspace_root: tmp.clone(),
+            mode: ExecutionMode::Full,
+            session_id: "test".to_string(),
+            active_skill: None,
+        };
+        let result = GrepTool::new()
+            .execute(
+                &serde_json::json!({"pattern": "MAX_RETRIES", "path": "", "limit": 0}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            result.output.contains("src/config.rs"),
+            "obtido: {}",
+            result.output
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 }

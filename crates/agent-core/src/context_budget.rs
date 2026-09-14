@@ -254,13 +254,62 @@ fn force_fit_candidate(candidate: &mut PromptCandidate, max_tokens: usize) {
         return;
     }
 
-    for message in candidate.messages.iter_mut().skip(1) {
-        message.content = compact_preview(&message.content, 96);
+    // Último recurso. Antes, cada mensagem era esmagada para 96 caracteres fixos,
+    // independentemente do budget disponível — um pedido de 14k tokens virava 158 e a
+    // pergunta do usuário, que costuma vir no fim do texto, sumia junto. Agora o espaço
+    // que sobra é repartido, com a fatia maior para a mensagem mais recente, e o corte
+    // preserva as duas pontas.
+    let tail_count = candidate.messages.len().saturating_sub(1);
+    if tail_count == 0 {
+        return;
+    }
+
+    let tools_tokens = estimate_prompt_tokens(&[], &candidate.tools);
+    let system_tokens = candidate
+        .messages
+        .first()
+        .map(|message| estimate_prompt_tokens(std::slice::from_ref(message), &[]))
+        .unwrap_or(0);
+
+    let available = max_tokens
+        .saturating_sub(tools_tokens)
+        .saturating_sub(system_tokens);
+
+    let last_idx = candidate.messages.len() - 1;
+    let last_budget_chars = ((available * LAST_MESSAGE_SHARE_NUMERATOR
+        / LAST_MESSAGE_SHARE_DENOMINATOR)
+        * CHARS_PER_TOKEN_APPROX)
+        .max(MIN_MESSAGE_PREVIEW_CHARS);
+    let other_budget_chars = if tail_count > 1 {
+        ((available.saturating_sub(
+            available * LAST_MESSAGE_SHARE_NUMERATOR / LAST_MESSAGE_SHARE_DENOMINATOR,
+        ) / (tail_count - 1))
+            * CHARS_PER_TOKEN_APPROX)
+            .max(MIN_MESSAGE_PREVIEW_CHARS)
+    } else {
+        MIN_MESSAGE_PREVIEW_CHARS
+    };
+
+    for (idx, message) in candidate.messages.iter_mut().enumerate().skip(1) {
+        let budget = if idx == last_idx {
+            last_budget_chars
+        } else {
+            other_budget_chars
+        };
+        message.content = compact_preview_keeping_ends(&message.content, budget);
         message.tool_calls.clear();
     }
     candidate.estimated_prompt_tokens =
         estimate_prompt_tokens(&candidate.messages, &candidate.tools);
 }
+
+/// Fatia do espaço restante reservada para a mensagem mais recente.
+const LAST_MESSAGE_SHARE_NUMERATOR: usize = 3;
+const LAST_MESSAGE_SHARE_DENOMINATOR: usize = 5;
+/// Piso de caracteres por mensagem, para nunca zerar o conteúdo.
+const MIN_MESSAGE_PREVIEW_CHARS: usize = 96;
+/// Mesma aproximação usada pelo `prompt_builder`.
+const CHARS_PER_TOKEN_APPROX: usize = 4;
 
 fn compress_oldest_history_chunk(
     history: &mut Vec<ChatMessage>,
@@ -374,6 +423,30 @@ fn build_budgeted_system_prompt(
     }
 
     prompt
+}
+
+/// Como `compact_preview`, mas descartando o **meio** em vez do fim.
+///
+/// Usado para conteúdo de mensagem, onde a instrução costuma estar na última linha.
+fn compact_preview_keeping_ends(value: &str, max_chars: usize) -> String {
+    let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    let chars = compact.chars().collect::<Vec<_>>();
+    if chars.len() <= max_chars {
+        return compact;
+    }
+
+    const ELISION: &str = " [...omitido...] ";
+    let elision_len = ELISION.chars().count();
+    if max_chars <= elision_len + 8 {
+        return compact_preview(&compact, max_chars);
+    }
+
+    let usable = max_chars - elision_len;
+    let head_len = (usable * 2 / 5).max(1);
+    let tail_len = usable - head_len;
+    let head = chars[..head_len].iter().collect::<String>();
+    let tail = chars[chars.len() - tail_len..].iter().collect::<String>();
+    format!("{head}{ELISION}{tail}")
 }
 
 fn compact_preview(value: &str, max_chars: usize) -> String {
@@ -496,5 +569,42 @@ mod tests {
         assert!(output.estimated_prompt_tokens <= profile.max_tokens_prompt);
         assert!(!output.summary_artifacts.is_empty());
         assert!(matches!(output.response_style, ResponseStyle::Short));
+    }
+
+    /// Regressão: uma única mensagem enorme era esmagada para 96 caracteres fixos,
+    /// descartando o fim — que é onde fica a pergunta quando se cola um texto antes dela.
+    #[test]
+    fn single_huge_message_keeps_the_trailing_question() {
+        let profile = ModelPromptProfile::for_kind(ModelPromptProfileKind::SmallLocal);
+        let filler = "lorem ipsum dolor sit amet consectetur adipiscing elit. ".repeat(700);
+        let message = format!("Contexto irrelevante:\n{filler}\nAgora responda: quanto e 17 + 25?");
+
+        let manager = ContextBudgetManager;
+        let output = manager.build(ContextBudgetInput {
+            session_id: "sess-huge",
+            provider_id: "ollama",
+            model_id: "qwen2.5:7b",
+            tool_profile: ToolProfileName::Coding,
+            execution_mode: ExecutionMode::Full,
+            profile: &profile,
+            system_prompt_override: None,
+            conversation: &[mk_message(MessageRole::User, &message)],
+            skill_summaries: &[],
+            tools: &[mk_tool("read_file")],
+            aggressive_tool_filtering: true,
+        });
+
+        let user_content = output
+            .messages
+            .iter()
+            .find(|m| matches!(m.role, MessageRole::User))
+            .map(|m| m.content.clone())
+            .unwrap_or_default();
+
+        assert!(
+            user_content.contains("17 + 25"),
+            "a pergunta final foi descartada. conteudo: {user_content:?}"
+        );
+        assert!(output.estimated_prompt_tokens <= profile.max_tokens_prompt);
     }
 }

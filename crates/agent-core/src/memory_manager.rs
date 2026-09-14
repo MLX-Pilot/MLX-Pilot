@@ -40,6 +40,26 @@ pub struct MemoryManager {
     session_recall: SessionRecall,
 }
 
+/// Tamanho máximo, em caracteres, de uma consulta de recall.
+const RECALL_QUERY_MAX_CHARS: usize = 512;
+
+/// Recorte da mensagem usado como consulta de memória e de sessões.
+///
+/// Mantém as duas pontas: o começo costuma ter o assunto e o fim costuma ter o pedido.
+fn recall_query_excerpt(query: &str) -> String {
+    let trimmed = query.trim();
+    let chars = trimmed.chars().collect::<Vec<_>>();
+    if chars.len() <= RECALL_QUERY_MAX_CHARS {
+        return trimmed.to_string();
+    }
+
+    let head_len = RECALL_QUERY_MAX_CHARS / 2;
+    let tail_len = RECALL_QUERY_MAX_CHARS - head_len;
+    let head = chars[..head_len].iter().collect::<String>();
+    let tail = chars[chars.len() - tail_len..].iter().collect::<String>();
+    format!("{head} {tail}")
+}
+
 impl MemoryManager {
     pub fn new(memory: Arc<MemoryStore>, sessions: Arc<SessionStore>) -> Self {
         Self {
@@ -69,10 +89,15 @@ impl MemoryManager {
             self.sessions.latest_snapshot(current_session_id).await?
         };
 
-        let memory_hits = self.memory.search(query, memory_limit).await?;
+        // A mensagem do usuário vai direto para busca FTS. Se ela for um documento colado,
+        // a consulta vira dezenas de milhares de termos e o MATCH do SQLite trava o run
+        // inteiro. Recall não precisa do texto completo — um recorte delimitado basta.
+        let recall_query = recall_query_excerpt(query);
+
+        let memory_hits = self.memory.search(&recall_query, memory_limit).await?;
         let session_hits = if session_search_enabled {
             self.session_recall
-                .search(query, Some(current_session_id), session_limit)
+                .search(&recall_query, Some(current_session_id), session_limit)
                 .await?
         } else {
             Vec::new()
@@ -327,4 +352,35 @@ fn preview(value: &str, max_chars: usize) -> String {
         .collect::<String>();
     out.push_str("...");
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regressão: a mensagem crua virava consulta FTS. Um documento colado gerava
+    /// dezenas de milhares de termos e o MATCH do SQLite pendurava o run inteiro.
+    #[test]
+    fn recall_query_is_bounded_and_keeps_both_ends() {
+        let filler = "lorem ipsum ".repeat(5000);
+        let message = format!("ASSUNTO_INICIAL {filler} PERGUNTA_FINAL");
+
+        let excerpt = recall_query_excerpt(&message);
+
+        assert!(
+            excerpt.chars().count() <= RECALL_QUERY_MAX_CHARS + 1,
+            "consulta ficou com {} chars",
+            excerpt.chars().count()
+        );
+        assert!(excerpt.contains("ASSUNTO_INICIAL"));
+        assert!(excerpt.contains("PERGUNTA_FINAL"));
+    }
+
+    #[test]
+    fn short_query_passes_through_unchanged() {
+        assert_eq!(
+            recall_query_excerpt("  leia src/main.rs  "),
+            "leia src/main.rs"
+        );
+    }
 }
