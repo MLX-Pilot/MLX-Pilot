@@ -70,6 +70,16 @@
     { value: 'zai', label: 'ZAI' },
     { value: 'perplexity', label: 'Perplexity' },
   ];
+  const WORKFLOW_NODE_CATALOG = [
+    { key: 'manual', label: 'Manual Trigger', group: 'Triggers', glyph: 'GO', color: '#f2b84b', type: 'n8n-nodes-base.manualTrigger', typeVersion: 1, input: false, parameters: () => ({}) },
+    { key: 'webhook', label: 'Webhook', group: 'Triggers', glyph: 'WH', color: '#e76f51', type: 'n8n-nodes-base.webhook', typeVersion: 2.1, input: false, parameters: () => ({ httpMethod: 'POST', path: 'mlx-pilot', responseMode: 'onReceived', options: {} }) },
+    { key: 'schedule', label: 'Schedule Trigger', group: 'Triggers', glyph: 'SC', color: '#ff8fab', type: 'n8n-nodes-base.scheduleTrigger', typeVersion: 1.2, input: false, parameters: () => ({ rule: { interval: [{ field: 'minutes', minutesInterval: 5 }] } }) },
+    { key: 'mlx-agent', label: 'MLX Pilot Agent', group: 'MLX Pilot', glyph: 'AI', color: '#00d4ff', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.5, parameters: workflowMlxAgentParameters },
+    { key: 'http', label: 'HTTP Request', group: 'Acoes', glyph: 'HTTP', color: '#53a9ff', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.5, parameters: () => ({ method: 'GET', url: 'https://example.com', options: {} }) },
+    { key: 'set', label: 'Edit Fields', group: 'Dados', glyph: 'SET', color: '#2ec4b6', type: 'n8n-nodes-base.set', typeVersion: 3.4, parameters: () => ({ assignments: { assignments: [] }, options: {} }) },
+    { key: 'code', label: 'Code', group: 'Dados', glyph: 'JS', color: '#b38cff', type: 'n8n-nodes-base.code', typeVersion: 2, parameters: () => ({ jsCode: 'return items;' }) },
+    { key: 'respond', label: 'Respond to Webhook', group: 'Acoes', glyph: 'OUT', color: '#e9c46a', type: 'n8n-nodes-base.respondToWebhook', typeVersion: 1.4, output: false, parameters: () => ({ respondWith: 'json', responseBody: '={{ $json }}', options: {} }) },
+  ];
 
   function readStorage(key) {
     try {
@@ -128,7 +138,18 @@
     n8nApiKey: '',
     n8nStatus: null,
     n8nWorkflows: [],
-    n8nEditorLoaded: false,
+    n8nEditor: {
+      initialized: false,
+      workflowId: null,
+      workflow: null,
+      selectedNodeId: null,
+      connectingFrom: null,
+      viewport: { x: 80, y: 80, zoom: 1 },
+      drag: null,
+      history: [],
+      historyIndex: -1,
+      savedSnapshot: null,
+    },
     agentProviderOptions: [],
     consoleEntries: [],
     desktopLogEntries: [],
@@ -3043,6 +3064,682 @@
     return (state.n8nBaseUrl || 'http://127.0.0.1:5678').replace(/\/+$/, '') + '/';
   }
 
+  function workflowMlxAgentParameters() {
+    const mlxUrl = n8nInputValue('n8n-mlx-url', state.daemonUrl || DEFAULT_DAEMON_URL).replace(/\/+$/, '');
+    const ollamaUrl = n8nInputValue('n8n-ollama-url', 'http://127.0.0.1:11434').replace(/\/+$/, '');
+    const modelId = n8nInputValue('n8n-workflow-model', 'qwen3.5:9b');
+    return {
+      method: 'POST',
+      url: `${mlxUrl}/agent/run`,
+      sendBody: true,
+      specifyBody: 'json',
+      jsonBody: JSON.stringify({
+        message: 'Responda ao conteudo recebido em uma frase.',
+        provider: 'ollama',
+        model_id: modelId,
+        base_url: ollamaUrl,
+        max_iterations: 1,
+      }),
+      options: {},
+    };
+  }
+
+  function workflowId() {
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+    return `node-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+
+  function workflowClone(value) {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function workflowAttr(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function blankWorkflow(name = 'Novo workflow') {
+    return {
+      name,
+      nodes: [],
+      connections: {},
+      settings: { executionOrder: 'v1' },
+    };
+  }
+
+  function normalizeWorkflowForEditor(source) {
+    const workflow = source && typeof source === 'object' && !Array.isArray(source)
+      ? workflowClone(source)
+      : blankWorkflow();
+    workflow.name = String(workflow.name || 'Novo workflow');
+    workflow.nodes = Array.isArray(workflow.nodes) ? workflow.nodes : [];
+    workflow.connections = workflow.connections && typeof workflow.connections === 'object' && !Array.isArray(workflow.connections)
+      ? workflow.connections
+      : {};
+    workflow.settings = workflow.settings && typeof workflow.settings === 'object' && !Array.isArray(workflow.settings)
+      ? workflow.settings
+      : { executionOrder: 'v1' };
+
+    const usedIds = new Set();
+    workflow.nodes.forEach((node, index) => {
+      let id = String(node?.id || workflowId());
+      while (usedIds.has(id)) id = workflowId();
+      usedIds.add(id);
+      node.id = id;
+      node.name = String(node.name || `Node ${index + 1}`);
+      node.type = String(node.type || 'n8n-nodes-base.set');
+      node.typeVersion = Number(node.typeVersion || 1);
+      node.parameters = node.parameters && typeof node.parameters === 'object' ? node.parameters : {};
+      if (!Array.isArray(node.position) || node.position.length < 2) {
+        node.position = [360 + index * 260, 320];
+      }
+      node.position = [Number(node.position[0]) || 0, Number(node.position[1]) || 0];
+    });
+    return workflow;
+  }
+
+  function workflowEditorNodeById(nodeId) {
+    return state.n8nEditor.workflow?.nodes?.find(node => node.id === nodeId) || null;
+  }
+
+  function workflowCatalogEntry(node) {
+    if (node?.type === 'n8n-nodes-base.httpRequest' && String(node.parameters?.url || '').includes('/agent/run')) {
+      return WORKFLOW_NODE_CATALOG.find(item => item.key === 'mlx-agent');
+    }
+    return WORKFLOW_NODE_CATALOG.find(item => item.type === node?.type)
+      || { label: String(node?.type || 'Node').split('.').pop(), group: 'n8n', glyph: 'N8', color: '#8899b0', input: true, output: true };
+  }
+
+  function workflowUniqueNodeName(base, excludeId = null) {
+    const names = new Set((state.n8nEditor.workflow?.nodes || [])
+      .filter(node => node.id !== excludeId)
+      .map(node => node.name));
+    if (!names.has(base)) return base;
+    let suffix = 2;
+    while (names.has(`${base} ${suffix}`)) suffix += 1;
+    return `${base} ${suffix}`;
+  }
+
+  function workflowEditorSnapshot() {
+    return JSON.stringify(state.n8nEditor.workflow || blankWorkflow());
+  }
+
+  function workflowEditorResetHistory(saved) {
+    const snapshot = workflowEditorSnapshot();
+    state.n8nEditor.history = [snapshot];
+    state.n8nEditor.historyIndex = 0;
+    state.n8nEditor.savedSnapshot = saved ? snapshot : null;
+  }
+
+  function workflowEditorCheckpoint() {
+    const editor = state.n8nEditor;
+    const snapshot = workflowEditorSnapshot();
+    if (editor.history[editor.historyIndex] !== snapshot) {
+      editor.history = editor.history.slice(0, editor.historyIndex + 1);
+      editor.history.push(snapshot);
+      if (editor.history.length > 60) editor.history.shift();
+      editor.historyIndex = editor.history.length - 1;
+    }
+    renderWorkflowEditor();
+  }
+
+  function workflowEditorLoad(workflow, { workflowId: loadedId = null, saved = true, fit = true } = {}) {
+    const editor = state.n8nEditor;
+    editor.workflow = normalizeWorkflowForEditor(workflow);
+    editor.workflowId = loadedId || null;
+    editor.selectedNodeId = null;
+    editor.connectingFrom = null;
+    editor.drag = null;
+    workflowEditorResetHistory(saved);
+    renderWorkflowEditor();
+    if (fit) requestAnimationFrame(() => workflowEditorFitView());
+  }
+
+  function workflowEditorNew() {
+    const workflow = blankWorkflow();
+    const manual = WORKFLOW_NODE_CATALOG.find(item => item.key === 'manual');
+    workflow.nodes.push({
+      id: workflowId(),
+      name: manual.label,
+      type: manual.type,
+      typeVersion: manual.typeVersion,
+      position: [520, 360],
+      parameters: manual.parameters(),
+    });
+    workflowEditorLoad(workflow, { saved: false });
+  }
+
+  function workflowEditorSaveState() {
+    const label = document.getElementById('workflow-save-state');
+    const undo = document.getElementById('workflow-undo-btn');
+    const redo = document.getElementById('workflow-redo-btn');
+    const open = document.getElementById('workflow-open-n8n-btn');
+    const editor = state.n8nEditor;
+    const isSaved = Boolean(editor.savedSnapshot) && editor.savedSnapshot === workflowEditorSnapshot();
+    if (label) {
+      label.className = `workflow-save-state ${isSaved ? 'saved' : editor.historyIndex > 0 || editor.workflowId ? 'dirty' : ''}`;
+      label.textContent = isSaved ? 'Salvo' : editor.workflowId ? 'Alterado' : editor.historyIndex > 0 ? 'Nao salvo' : 'Novo';
+    }
+    if (undo) undo.disabled = editor.historyIndex <= 0;
+    if (redo) redo.disabled = editor.historyIndex >= editor.history.length - 1;
+    if (open) open.hidden = !editor.workflowId;
+  }
+
+  function renderWorkflowPalette(query = '') {
+    const palette = document.getElementById('workflow-node-palette');
+    if (!palette) return;
+    const needle = String(query || '').trim().toLowerCase();
+    const matches = WORKFLOW_NODE_CATALOG.filter(item => `${item.label} ${item.group}`.toLowerCase().includes(needle));
+    palette.innerHTML = matches.map(item => `
+      <button class="workflow-palette-item" type="button" draggable="true" data-workflow-node-type="${workflowAttr(item.key)}" style="--node-color:${item.color}">
+        <span class="workflow-node-glyph">${esc(item.glyph)}</span>
+        <span><strong>${esc(item.label)}</strong><span>${esc(item.group)}</span></span>
+      </button>
+    `).join('') || '<div class="n8n-empty">Nenhum no encontrado</div>';
+  }
+
+  function workflowConnectionEntries() {
+    const entries = [];
+    const connections = state.n8nEditor.workflow?.connections || {};
+    Object.entries(connections).forEach(([sourceName, channels]) => {
+      const outputs = Array.isArray(channels?.main) ? channels.main : [];
+      outputs.forEach((targets, outputIndex) => {
+        if (!Array.isArray(targets)) return;
+        targets.forEach((target, connectionIndex) => {
+          if (!target?.node) return;
+          entries.push({ sourceName, targetName: target.node, outputIndex, connectionIndex });
+        });
+      });
+    });
+    return entries;
+  }
+
+  function workflowConnectionPath(source, target) {
+    const x1 = source.position[0] + 210;
+    const y1 = source.position[1] + 39;
+    const x2 = target.position[0];
+    const y2 = target.position[1] + 39;
+    const bend = Math.max(72, Math.abs(x2 - x1) * 0.48);
+    return `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`;
+  }
+
+  function renderWorkflowCanvas() {
+    const editor = state.n8nEditor;
+    const workflow = editor.workflow || blankWorkflow();
+    const scene = document.getElementById('workflow-canvas-scene');
+    const nodesLayer = document.getElementById('workflow-nodes');
+    const edgesLayer = document.getElementById('workflow-connections');
+    const empty = document.getElementById('workflow-canvas-empty');
+    const zoomLabel = document.getElementById('workflow-zoom-label');
+    if (scene) {
+      const { x, y, zoom } = editor.viewport;
+      scene.style.transform = `translate(${x}px, ${y}px) scale(${zoom})`;
+    }
+    if (zoomLabel) zoomLabel.textContent = `${Math.round(editor.viewport.zoom * 100)}%`;
+    if (empty) empty.hidden = workflow.nodes.length > 0;
+
+    if (nodesLayer) {
+      nodesLayer.innerHTML = workflow.nodes.map(node => {
+        const catalog = workflowCatalogEntry(node);
+        const selected = node.id === editor.selectedNodeId;
+        const position = Array.isArray(node.position) ? node.position : [0, 0];
+        const inputPort = catalog.input === false ? '' : `<button class="workflow-node-port input" type="button" data-port="input" data-node-id="${workflowAttr(node.id)}" aria-label="Conectar entrada"></button>`;
+        const outputPort = catalog.output === false ? '' : `<button class="workflow-node-port output ${editor.connectingFrom === node.id ? 'connecting' : ''}" type="button" data-port="output" data-node-id="${workflowAttr(node.id)}" aria-label="Conectar saida"></button>`;
+        const parameterCount = Object.keys(node.parameters || {}).length;
+        return `
+          <article class="workflow-node ${selected ? 'selected' : ''} ${node.disabled ? 'disabled' : ''}" data-node-id="${workflowAttr(node.id)}" style="left:${position[0]}px;top:${position[1]}px;--node-color:${catalog.color}">
+            ${inputPort}
+            <div class="workflow-node-head">
+              <span class="workflow-node-glyph">${esc(catalog.glyph)}</span>
+              <span><strong>${esc(node.name)}</strong><span>${esc(catalog.label)}</span></span>
+            </div>
+            <div class="workflow-node-meta">${parameterCount} parametro${parameterCount === 1 ? '' : 's'}</div>
+            ${outputPort}
+          </article>
+        `;
+      }).join('');
+    }
+
+    if (edgesLayer) {
+      const byName = new Map(workflow.nodes.map(node => [node.name, node]));
+      edgesLayer.innerHTML = workflowConnectionEntries().map(connection => {
+        const source = byName.get(connection.sourceName);
+        const target = byName.get(connection.targetName);
+        if (!source || !target) return '';
+        const path = workflowConnectionPath(source, target);
+        const payload = workflowAttr(JSON.stringify(connection));
+        return `
+          <g class="workflow-connection-group" data-connection="${payload}">
+            <path class="workflow-connection-hit" d="${path}"></path>
+            <path class="workflow-connection-line" d="${path}"></path>
+          </g>
+        `;
+      }).join('');
+    }
+  }
+
+  function renderWorkflowInspector() {
+    const inspector = document.getElementById('workflow-inspector');
+    if (!inspector) return;
+    const node = workflowEditorNodeById(state.n8nEditor.selectedNodeId);
+    if (!node) {
+      inspector.innerHTML = '<div class="workflow-inspector-empty"><div class="workflow-pane-title">Propriedades</div><span>Nenhum no selecionado</span></div>';
+      return;
+    }
+    const catalog = workflowCatalogEntry(node);
+    const outgoing = workflowConnectionEntries().filter(connection => connection.sourceName === node.name);
+    inspector.innerHTML = `
+      <div class="workflow-node-selected" style="--node-color:${catalog.color}">
+        <div class="workflow-node-head workflow-inspector-head">
+          <span class="workflow-node-glyph">${esc(catalog.glyph)}</span>
+          <span><strong>${esc(node.name)}</strong><span>${esc(node.type)}</span></span>
+          <button class="workflow-icon-btn" id="workflow-delete-node-btn" type="button" title="Excluir no" aria-label="Excluir no">&times;</button>
+        </div>
+        <div class="workflow-inspector-form">
+          <div class="settings-field">
+            <label for="workflow-node-name">Nome</label>
+            <input class="input" id="workflow-node-name" value="${workflowAttr(node.name)}" />
+          </div>
+          <label class="workflow-inspector-toggle">
+            <input id="workflow-node-disabled" type="checkbox" ${node.disabled ? 'checked' : ''} />
+            <span>No desativado</span>
+          </label>
+          <div class="settings-field">
+            <label for="workflow-node-parameters">Parametros JSON</label>
+            <textarea class="input" id="workflow-node-parameters" spellcheck="false">${esc(JSON.stringify(node.parameters || {}, null, 2))}</textarea>
+            <div class="workflow-parameter-error" id="workflow-parameter-error"></div>
+            <button class="action-btn" id="workflow-apply-parameters-btn" type="button">Aplicar parametros</button>
+          </div>
+          <div class="settings-field">
+            <label>Saidas</label>
+            <div class="workflow-node-connections">
+              ${outgoing.map(connection => `<button class="workflow-connection-row" type="button" data-remove-connection="${workflowAttr(JSON.stringify(connection))}"><span>${esc(connection.targetName)}</span><span>&times;</span></button>`).join('') || '<span class="workflow-inspector-muted">Nenhuma conexao</span>'}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderWorkflowEditor() {
+    if (!state.n8nEditor.workflow) return;
+    const name = document.getElementById('workflow-editor-name');
+    const label = document.getElementById('n8n-editor-url');
+    if (name && document.activeElement !== name) name.value = state.n8nEditor.workflow.name;
+    if (label) {
+      const suffix = state.n8nEditor.workflowId ? `workflow/${state.n8nEditor.workflowId}` : '';
+      label.textContent = `${n8nEditorUrl()}${suffix}`;
+    }
+    renderWorkflowCanvas();
+    renderWorkflowInspector();
+    workflowEditorSaveState();
+  }
+
+  function workflowEditorAddNode(key, position = null) {
+    const catalog = WORKFLOW_NODE_CATALOG.find(item => item.key === key);
+    if (!catalog || !state.n8nEditor.workflow) return;
+    const viewport = document.getElementById('workflow-canvas-viewport');
+    const view = state.n8nEditor.viewport;
+    const fallback = viewport
+      ? [(viewport.clientWidth / 2 - view.x) / view.zoom - 105, (viewport.clientHeight / 2 - view.y) / view.zoom - 39]
+      : [520, 360];
+    const node = {
+      id: workflowId(),
+      name: workflowUniqueNodeName(catalog.label),
+      type: catalog.type,
+      typeVersion: catalog.typeVersion,
+      position: (position || fallback).map(value => Math.max(24, Math.round(value / 20) * 20)),
+      parameters: catalog.parameters(),
+    };
+    state.n8nEditor.workflow.nodes.push(node);
+    state.n8nEditor.selectedNodeId = node.id;
+    workflowEditorCheckpoint();
+  }
+
+  function workflowEditorRenameNode(node, nextName) {
+    const oldName = node.name;
+    const cleanName = workflowUniqueNodeName(String(nextName || '').trim() || oldName, node.id);
+    if (cleanName === oldName) return;
+    const connections = state.n8nEditor.workflow.connections;
+    if (connections[oldName]) {
+      connections[cleanName] = connections[oldName];
+      delete connections[oldName];
+    }
+    Object.values(connections).forEach(channels => {
+      (channels?.main || []).forEach(targets => {
+        (targets || []).forEach(target => {
+          if (target.node === oldName) target.node = cleanName;
+        });
+      });
+    });
+    node.name = cleanName;
+  }
+
+  function workflowEditorConnect(sourceId, targetId) {
+    const source = workflowEditorNodeById(sourceId);
+    const target = workflowEditorNodeById(targetId);
+    if (!source || !target || source.id === target.id) return;
+    const connections = state.n8nEditor.workflow.connections;
+    const channels = connections[source.name] || { main: [[]] };
+    if (!Array.isArray(channels.main)) channels.main = [[]];
+    if (!Array.isArray(channels.main[0])) channels.main[0] = [];
+    const exists = channels.main[0].some(item => item.node === target.name && item.type === 'main');
+    if (!exists) channels.main[0].push({ node: target.name, type: 'main', index: 0 });
+    connections[source.name] = channels;
+    state.n8nEditor.connectingFrom = null;
+    workflowEditorCheckpoint();
+  }
+
+  function workflowEditorRemoveConnection(connection) {
+    const channels = state.n8nEditor.workflow?.connections?.[connection.sourceName];
+    const targets = channels?.main?.[connection.outputIndex];
+    if (!Array.isArray(targets)) return;
+    targets.splice(connection.connectionIndex, 1);
+    if (targets.length === 0 && channels.main.every(output => !output?.length)) {
+      delete state.n8nEditor.workflow.connections[connection.sourceName];
+    }
+    workflowEditorCheckpoint();
+  }
+
+  function workflowEditorDeleteSelected() {
+    const node = workflowEditorNodeById(state.n8nEditor.selectedNodeId);
+    if (!node) return;
+    state.n8nEditor.workflow.nodes = state.n8nEditor.workflow.nodes.filter(item => item.id !== node.id);
+    delete state.n8nEditor.workflow.connections[node.name];
+    Object.values(state.n8nEditor.workflow.connections).forEach(channels => {
+      if (!Array.isArray(channels?.main)) return;
+      channels.main.forEach((targets, index) => {
+        if (Array.isArray(targets)) channels.main[index] = targets.filter(target => target.node !== node.name);
+      });
+    });
+    state.n8nEditor.selectedNodeId = null;
+    state.n8nEditor.connectingFrom = null;
+    workflowEditorCheckpoint();
+  }
+
+  function workflowEditorUndo(direction) {
+    const editor = state.n8nEditor;
+    const nextIndex = editor.historyIndex + direction;
+    if (nextIndex < 0 || nextIndex >= editor.history.length) return;
+    editor.historyIndex = nextIndex;
+    editor.workflow = normalizeWorkflowForEditor(JSON.parse(editor.history[nextIndex]));
+    if (!workflowEditorNodeById(editor.selectedNodeId)) editor.selectedNodeId = null;
+    editor.connectingFrom = null;
+    renderWorkflowEditor();
+  }
+
+  function workflowEditorSetZoom(nextZoom, anchor = null) {
+    const editor = state.n8nEditor;
+    const oldZoom = editor.viewport.zoom;
+    const zoom = Math.min(1.65, Math.max(0.35, nextZoom));
+    if (anchor) {
+      const worldX = (anchor.x - editor.viewport.x) / oldZoom;
+      const worldY = (anchor.y - editor.viewport.y) / oldZoom;
+      editor.viewport.x = anchor.x - worldX * zoom;
+      editor.viewport.y = anchor.y - worldY * zoom;
+    }
+    editor.viewport.zoom = zoom;
+    renderWorkflowCanvas();
+  }
+
+  function workflowEditorFitView() {
+    const viewport = document.getElementById('workflow-canvas-viewport');
+    const nodes = state.n8nEditor.workflow?.nodes || [];
+    if (!viewport || nodes.length === 0) {
+      state.n8nEditor.viewport = { x: 80, y: 80, zoom: 1 };
+      renderWorkflowCanvas();
+      return;
+    }
+    const minX = Math.min(...nodes.map(node => node.position[0]));
+    const minY = Math.min(...nodes.map(node => node.position[1]));
+    const maxX = Math.max(...nodes.map(node => node.position[0] + 210));
+    const maxY = Math.max(...nodes.map(node => node.position[1] + 78));
+    const width = Math.max(210, maxX - minX);
+    const height = Math.max(78, maxY - minY);
+    const zoom = Math.min(1.15, Math.max(0.35, Math.min((viewport.clientWidth - 100) / width, (viewport.clientHeight - 100) / height)));
+    state.n8nEditor.viewport = {
+      zoom,
+      x: (viewport.clientWidth - width * zoom) / 2 - minX * zoom,
+      y: (viewport.clientHeight - height * zoom) / 2 - minY * zoom,
+    };
+    renderWorkflowCanvas();
+  }
+
+  async function workflowEditorSave() {
+    const button = document.getElementById('workflow-save-btn');
+    const original = button?.textContent || 'Salvar no n8n';
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Salvando...';
+    }
+    try {
+      const payload = await api('/integrations/n8n/workflows/save', {
+        method: 'POST',
+        body: JSON.stringify(n8nApiBody({
+          workflow_id: state.n8nEditor.workflowId,
+          workflow: state.n8nEditor.workflow,
+        })),
+      });
+      state.n8nEditor.workflowId = payload.workflow_id || state.n8nEditor.workflowId;
+      state.n8nEditor.savedSnapshot = workflowEditorSnapshot();
+      renderWorkflowEditor();
+      pushConsoleEntry('info', 'n8n', `Workflow salvo: ${state.n8nEditor.workflowId || '-'}`);
+      await listN8nWorkflows();
+    } catch (error) {
+      pushConsoleEntry('error', 'n8n', error.message);
+      alert('Erro ao salvar workflow: ' + error.message);
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = original;
+      }
+    }
+  }
+
+  async function workflowEditorOpen(workflowIdToOpen) {
+    try {
+      const payload = await api('/integrations/n8n/workflows/get', {
+        method: 'POST',
+        body: JSON.stringify(n8nApiBody({ workflow_id: workflowIdToOpen })),
+      });
+      workflowEditorLoad(payload.workflow, { workflowId: payload.workflow_id || workflowIdToOpen, saved: true });
+      pushConsoleEntry('info', 'n8n', `Workflow aberto: ${workflowIdToOpen}`);
+      document.getElementById('workflow-builder')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (error) {
+      pushConsoleEntry('error', 'n8n', error.message);
+      alert('Erro ao abrir workflow: ' + error.message);
+    }
+  }
+
+  function workflowEditorExport() {
+    const workflow = state.n8nEditor.workflow;
+    if (!workflow) return;
+    const blob = new Blob([JSON.stringify(workflow, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${String(workflow.name || 'workflow').replace(/[^a-z0-9_-]+/gi, '-').toLowerCase()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function workflowEditorImport(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        workflowEditorLoad(JSON.parse(String(reader.result || '')), { saved: false });
+        pushConsoleEntry('info', 'n8n', `Workflow importado: ${file.name}`);
+      } catch (error) {
+        alert('JSON de workflow invalido: ' + error.message);
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function workflowEditorPointerMove(event) {
+    const drag = state.n8nEditor.drag;
+    if (!drag) return;
+    if (drag.type === 'node') {
+      const node = workflowEditorNodeById(drag.nodeId);
+      if (!node) return;
+      const dx = (event.clientX - drag.clientX) / state.n8nEditor.viewport.zoom;
+      const dy = (event.clientY - drag.clientY) / state.n8nEditor.viewport.zoom;
+      node.position = [Math.round((drag.x + dx) / 10) * 10, Math.round((drag.y + dy) / 10) * 10];
+      drag.moved = Math.abs(dx) > 2 || Math.abs(dy) > 2;
+      renderWorkflowCanvas();
+      return;
+    }
+    if (drag.type === 'pan') {
+      state.n8nEditor.viewport.x = drag.x + event.clientX - drag.clientX;
+      state.n8nEditor.viewport.y = drag.y + event.clientY - drag.clientY;
+      document.getElementById('workflow-canvas-viewport')?.classList.add('panning');
+      renderWorkflowCanvas();
+    }
+  }
+
+  function workflowEditorPointerUp() {
+    const drag = state.n8nEditor.drag;
+    state.n8nEditor.drag = null;
+    document.getElementById('workflow-canvas-viewport')?.classList.remove('panning');
+    if (drag?.type === 'node' && drag.moved) workflowEditorCheckpoint();
+  }
+
+  function initWorkflowEditorEvents() {
+    const editor = state.n8nEditor;
+    if (editor.initialized) return;
+    editor.initialized = true;
+    const palette = document.getElementById('workflow-node-palette');
+    const nodes = document.getElementById('workflow-nodes');
+    const viewport = document.getElementById('workflow-canvas-viewport');
+    const inspector = document.getElementById('workflow-inspector');
+
+    palette?.addEventListener('click', event => {
+      const item = event.target.closest('[data-workflow-node-type]');
+      if (item) workflowEditorAddNode(item.dataset.workflowNodeType);
+    });
+    palette?.addEventListener('dragstart', event => {
+      const item = event.target.closest('[data-workflow-node-type]');
+      if (item) event.dataTransfer?.setData('text/x-mlx-workflow-node', item.dataset.workflowNodeType);
+    });
+    viewport?.addEventListener('dragover', event => event.preventDefault());
+    viewport?.addEventListener('drop', event => {
+      event.preventDefault();
+      const key = event.dataTransfer?.getData('text/x-mlx-workflow-node');
+      if (!key) return;
+      const rect = viewport.getBoundingClientRect();
+      const view = editor.viewport;
+      workflowEditorAddNode(key, [(event.clientX - rect.left - view.x) / view.zoom - 105, (event.clientY - rect.top - view.y) / view.zoom - 39]);
+    });
+    nodes?.addEventListener('click', event => {
+      const port = event.target.closest('[data-port]');
+      if (port) {
+        event.stopPropagation();
+        if (port.dataset.port === 'output') {
+          editor.connectingFrom = editor.connectingFrom === port.dataset.nodeId ? null : port.dataset.nodeId;
+          renderWorkflowCanvas();
+        } else if (editor.connectingFrom) {
+          workflowEditorConnect(editor.connectingFrom, port.dataset.nodeId);
+        }
+        return;
+      }
+      const node = event.target.closest('.workflow-node');
+      if (node) {
+        editor.selectedNodeId = node.dataset.nodeId;
+        renderWorkflowEditor();
+      }
+    });
+    nodes?.addEventListener('pointerdown', event => {
+      if (event.button !== 0 || event.target.closest('[data-port]')) return;
+      const element = event.target.closest('.workflow-node');
+      const node = workflowEditorNodeById(element?.dataset.nodeId);
+      if (!node) return;
+      event.preventDefault();
+      editor.selectedNodeId = node.id;
+      editor.drag = { type: 'node', nodeId: node.id, clientX: event.clientX, clientY: event.clientY, x: node.position[0], y: node.position[1], moved: false };
+      nodes.querySelectorAll('.workflow-node').forEach(item => item.classList.toggle('selected', item.dataset.nodeId === node.id));
+      renderWorkflowInspector();
+      workflowEditorSaveState();
+    });
+    viewport?.addEventListener('pointerdown', event => {
+      if (event.button !== 0 || event.target.closest('.workflow-node') || event.target.closest('.workflow-canvas-controls') || event.target.closest('.workflow-connection-group')) return;
+      editor.selectedNodeId = null;
+      editor.connectingFrom = null;
+      editor.drag = { type: 'pan', clientX: event.clientX, clientY: event.clientY, x: editor.viewport.x, y: editor.viewport.y };
+      renderWorkflowEditor();
+    });
+    viewport?.addEventListener('wheel', event => {
+      event.preventDefault();
+      const rect = viewport.getBoundingClientRect();
+      workflowEditorSetZoom(editor.viewport.zoom * (event.deltaY < 0 ? 1.1 : 0.9), { x: event.clientX - rect.left, y: event.clientY - rect.top });
+    }, { passive: false });
+    document.getElementById('workflow-connections')?.addEventListener('click', event => {
+      const group = event.target.closest('[data-connection]');
+      if (group) workflowEditorRemoveConnection(JSON.parse(group.dataset.connection));
+    });
+    inspector?.addEventListener('change', event => {
+      const node = workflowEditorNodeById(editor.selectedNodeId);
+      if (!node) return;
+      if (event.target.id === 'workflow-node-name') {
+        workflowEditorRenameNode(node, event.target.value);
+        workflowEditorCheckpoint();
+      }
+      if (event.target.id === 'workflow-node-disabled') {
+        node.disabled = event.target.checked;
+        workflowEditorCheckpoint();
+      }
+    });
+    inspector?.addEventListener('click', event => {
+      if (event.target.closest('#workflow-delete-node-btn')) {
+        workflowEditorDeleteSelected();
+        return;
+      }
+      const remove = event.target.closest('[data-remove-connection]');
+      if (remove) {
+        workflowEditorRemoveConnection(JSON.parse(remove.dataset.removeConnection));
+        return;
+      }
+      if (event.target.closest('#workflow-apply-parameters-btn')) {
+        const node = workflowEditorNodeById(editor.selectedNodeId);
+        const input = document.getElementById('workflow-node-parameters');
+        const errorBox = document.getElementById('workflow-parameter-error');
+        if (!node || !input) return;
+        try {
+          const parameters = JSON.parse(input.value);
+          if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) throw new Error('Use um objeto JSON.');
+          node.parameters = parameters;
+          if (errorBox) errorBox.textContent = '';
+          workflowEditorCheckpoint();
+        } catch (error) {
+          if (errorBox) errorBox.textContent = error.message;
+        }
+      }
+    });
+    document.addEventListener('pointermove', workflowEditorPointerMove);
+    document.addEventListener('pointerup', workflowEditorPointerUp);
+    document.addEventListener('keydown', event => {
+      if (state.activePanel !== 'workflows' || ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        workflowEditorUndo(event.shiftKey ? 1 : -1);
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') {
+        event.preventDefault();
+        workflowEditorUndo(1);
+      } else if (event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault();
+        workflowEditorDeleteSelected();
+      } else if (event.key === 'Escape') {
+        editor.connectingFrom = null;
+        renderWorkflowCanvas();
+      }
+    });
+  }
+
   function initN8nPanel() {
     const base = document.getElementById('n8n-base-url');
     const key = document.getElementById('n8n-api-key');
@@ -3067,42 +3764,10 @@
     if (ollamaUrl && !ollamaUrl.value) ollamaUrl.value = 'http://127.0.0.1:11434';
     renderN8nStatus();
     renderN8nWorkflows();
-    renderN8nEditor();
-    if (!state.n8nEditorLoaded) loadN8nEditor();
-  }
-
-  function renderN8nEditor() {
-    const editorUrl = n8nEditorUrl();
-    const label = document.getElementById('n8n-editor-url');
-    const placeholder = document.getElementById('n8n-editor-placeholder');
-
-    if (label) label.textContent = editorUrl;
-    if (placeholder && !state.n8nEditorLoaded) {
-      placeholder.hidden = false;
-      placeholder.innerHTML = `
-        <strong>Editor aguardando</strong>
-        <span>${esc(editorUrl)}</span>
-      `;
-    }
-  }
-
-  function loadN8nEditor({ force = false, url = null } = {}) {
-    persistN8nSettings();
-    const editorUrl = url || n8nEditorUrl();
-    const frame = document.getElementById('n8n-editor-frame');
-    const placeholder = document.getElementById('n8n-editor-placeholder');
-    const label = document.getElementById('n8n-editor-url');
-
-    if (label) label.textContent = editorUrl;
-    if (!frame) return;
-
-    const nextUrl = force ? `${editorUrl}?mlx_embed_reload=${Date.now()}` : editorUrl;
-    if (!force && frame.src === editorUrl) return;
-
-    state.n8nEditorLoaded = true;
-    frame.src = nextUrl;
-    if (placeholder) placeholder.hidden = true;
-    pushConsoleEntry('info', 'n8n', `Editor embed carregado: ${editorUrl}`);
+    initWorkflowEditorEvents();
+    renderWorkflowPalette(document.getElementById('workflow-node-search')?.value || '');
+    if (!state.n8nEditor.workflow) workflowEditorNew();
+    else renderWorkflowEditor();
   }
 
   function renderN8nStatus() {
@@ -3235,11 +3900,12 @@
     }
     list.innerHTML = state.n8nWorkflows.map((workflow) => `
       <div class="n8n-workflow-row">
-        <div>
+        <div class="n8n-workflow-summary">
           <strong>${esc(workflow.name || workflow.id || 'Workflow')}</strong>
           <span>${esc(workflow.id || '-')}</span>
         </div>
         <span class="n8n-workflow-state ${workflow.active ? 'active' : ''}">${workflow.active ? 'Ativo' : 'Inativo'}</span>
+        <button class="action-btn" type="button" data-workflow-open="${workflowAttr(workflow.id || '')}" ${workflow.id ? '' : 'disabled'}>Editar</button>
       </div>
     `).join('');
   }
@@ -3302,9 +3968,10 @@
         generatedJson.hidden = false;
         generatedJsonBody.textContent = JSON.stringify(payload?.generated_workflow || payload?.workflow || {}, null, 2);
       }
-      if (payload?.editor_url) {
-        loadN8nEditor({ force: true, url: payload.editor_url });
-      }
+      workflowEditorLoad(payload?.generated_workflow || payload?.workflow || blankWorkflow(), {
+        workflowId: payload?.workflow_id || null,
+        saved: Boolean(payload?.workflow_id),
+      });
       pushConsoleEntry('info', 'n8n', `Workflow gerado: ${payload?.workflow_id || '-'}`);
       await listN8nWorkflows();
     } catch (error) {
@@ -3693,20 +4360,42 @@
   document.getElementById('save-env-btn')?.addEventListener('click', saveEnvironment);
   document.getElementById('n8n-base-url')?.addEventListener('change', () => {
     persistN8nSettings();
-    state.n8nEditorLoaded = false;
-    renderN8nEditor();
+    renderWorkflowEditor();
   });
   document.getElementById('n8n-status-btn')?.addEventListener('click', checkN8nStatus);
   document.getElementById('n8n-list-btn')?.addEventListener('click', listN8nWorkflows);
   document.getElementById('n8n-generate-workflow-btn')?.addEventListener('click', createN8nGeneratedWorkflow);
-  document.getElementById('n8n-reload-editor-btn')?.addEventListener('click', () => loadN8nEditor({ force: true }));
   document.getElementById('n8n-open-editor-btn')?.addEventListener('click', () => {
     persistN8nSettings();
     window.open(n8nEditorUrl(), '_blank');
   });
-  document.getElementById('n8n-open-editor-embed-btn')?.addEventListener('click', () => {
+  document.getElementById('workflow-new-btn')?.addEventListener('click', workflowEditorNew);
+  document.getElementById('workflow-import-btn')?.addEventListener('click', () => document.getElementById('workflow-import-file')?.click());
+  document.getElementById('workflow-import-file')?.addEventListener('change', event => {
+    workflowEditorImport(event.target.files?.[0]);
+    event.target.value = '';
+  });
+  document.getElementById('workflow-export-btn')?.addEventListener('click', workflowEditorExport);
+  document.getElementById('workflow-save-btn')?.addEventListener('click', workflowEditorSave);
+  document.getElementById('workflow-open-n8n-btn')?.addEventListener('click', () => {
     persistN8nSettings();
-    window.open(n8nEditorUrl(), '_blank');
+    const suffix = state.n8nEditor.workflowId ? `workflow/${state.n8nEditor.workflowId}` : '';
+    window.open(`${n8nEditorUrl()}${suffix}`, '_blank');
+  });
+  document.getElementById('workflow-undo-btn')?.addEventListener('click', () => workflowEditorUndo(-1));
+  document.getElementById('workflow-redo-btn')?.addEventListener('click', () => workflowEditorUndo(1));
+  document.getElementById('workflow-zoom-out-btn')?.addEventListener('click', () => workflowEditorSetZoom(state.n8nEditor.viewport.zoom - 0.1));
+  document.getElementById('workflow-zoom-in-btn')?.addEventListener('click', () => workflowEditorSetZoom(state.n8nEditor.viewport.zoom + 0.1));
+  document.getElementById('workflow-fit-btn')?.addEventListener('click', workflowEditorFitView);
+  document.getElementById('workflow-node-search')?.addEventListener('input', event => renderWorkflowPalette(event.target.value));
+  document.getElementById('workflow-editor-name')?.addEventListener('change', event => {
+    if (!state.n8nEditor.workflow) return;
+    state.n8nEditor.workflow.name = String(event.target.value || '').trim() || 'Novo workflow';
+    workflowEditorCheckpoint();
+  });
+  document.getElementById('n8n-workflow-list')?.addEventListener('click', event => {
+    const button = event.target.closest('[data-workflow-open]');
+    if (button?.dataset.workflowOpen) void workflowEditorOpen(button.dataset.workflowOpen);
   });
 
   // Range input live value

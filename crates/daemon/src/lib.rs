@@ -660,6 +660,14 @@ pub async fn run() -> anyhow::Result<()> {
             post(n8n_integration::list_workflows),
         )
         .route(
+            "/integrations/n8n/workflows/get",
+            post(n8n_integration::get_workflow),
+        )
+        .route(
+            "/integrations/n8n/workflows/save",
+            post(n8n_integration::save_workflow),
+        )
+        .route(
             "/integrations/n8n/workflows/generate",
             post(n8n_integration::generate_workflow),
         )
