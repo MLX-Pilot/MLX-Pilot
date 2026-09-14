@@ -15,11 +15,15 @@ endpoint anymore. When a workflow needs to call MLX Pilot, it should use an n8n
   metadata from `vendor/n8n/package.json`.
 - `POST /integrations/n8n/workflows/list` lists workflows through the n8n Public
   API.
+- `POST /integrations/n8n/workflows/get` loads one workflow into the MLX Pilot
+  editor.
+- `POST /integrations/n8n/workflows/save` creates or updates a workflow from the
+  JSON edited in MLX Pilot.
 - `POST /integrations/n8n/workflows/generate` turns a prompt into n8n workflow
   JSON through the MLX Pilot agent, validates the shape, and creates the
   workflow through the n8n Public API.
-- The desktop app exposes these controls and embeds the n8n editor in the
-  `Workflows` tab.
+- The desktop app provides its own visual workflow editor in the `Workflows`
+  tab while n8n remains the execution engine and canonical JSON format.
 
 ## Source setup
 
@@ -87,10 +91,6 @@ By default it serves the editor at:
 ```text
 http://127.0.0.1:5678
 ```
-
-The start script sets `N8N_PREVIEW_MODE=true` so n8n does not send the
-`X-Frame-Options: sameorigin` header that blocks the embedded editor in the
-desktop app.
 
 ## n8n API key
 
@@ -164,8 +164,8 @@ For workflows that call MLX Pilot, the generated node should use:
 - `Manual Trigger` or another trigger requested in the prompt
 - `HTTP Request` to `POST /agent/run`
 
-The generated workflow is inactive by default; open it in n8n and run or adjust
-it from the editor.
+The generated workflow is inactive by default. It can be adjusted in the MLX
+Pilot canvas or opened in n8n for execution-specific features.
 
 ## Desktop UI
 
@@ -174,16 +174,19 @@ In the desktop app, open the `Workflows` tab:
 1. Set `Base URL` to `http://127.0.0.1:5678`.
 2. Paste the API key generated in n8n.
 3. Click `Status` to check both the running n8n instance and `vendor/n8n`.
-4. Use the embedded `Editor n8n` panel at the top of the tab for the visual
-   workflow editor.
+4. Use the visual editor at the top of the tab to add, drag, connect, configure,
+   import, or export nodes.
 5. In `Gerador de workflow`, write what the workflow should do.
 6. Click `Gerar workflow`. MLX Pilot generates the JSON, creates the workflow in
-   n8n, shows the JSON preview, and opens the created workflow in the embedded
-   editor when n8n returns its id.
+   n8n, shows the JSON preview, and loads the created workflow into the native
+   canvas when n8n returns its id.
+7. Click `Salvar no n8n` after visual edits. Existing workflow ids are updated;
+   a workflow without an id is created.
 
-If the embedded editor stays blank, click `Abrir fora`. Some local n8n/editor
-settings can reject iframe embedding; the direct API integration still works in
-that case.
+The native editor currently focuses on the portable n8n workflow surface:
+nodes, main-output connections, positions, disabled state, parameters, settings,
+and JSON round-tripping. Credentials remain references to credentials managed by
+n8n, and execution/history management still belongs to n8n.
 
 ## License note
 

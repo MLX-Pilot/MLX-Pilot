@@ -32,6 +32,18 @@ pub struct N8nApiRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct N8nWorkflowRequest {
+    #[serde(default)]
+    base_url: Option<String>,
+    #[serde(default)]
+    api_key: Option<String>,
+    #[serde(default)]
+    workflow_id: Option<String>,
+    #[serde(default)]
+    workflow: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct N8nGenerateWorkflowRequest {
     #[serde(default)]
     base_url: Option<String>,
@@ -98,6 +110,16 @@ pub struct N8nGenerateWorkflowResponse {
     editor_url: Option<String>,
     workflow_id: Option<String>,
     generated_workflow: Value,
+    workflow: Value,
+}
+
+#[derive(Debug, Serialize)]
+pub struct N8nWorkflowResponse {
+    created: bool,
+    base_url: String,
+    api_url: String,
+    editor_url: Option<String>,
+    workflow_id: Option<String>,
     workflow: Value,
 }
 
@@ -169,6 +191,121 @@ pub async fn list_workflows(Json(request): Json<N8nApiRequest>) -> Response {
                     base_url: base_url.clone(),
                     api_url: api_url.clone(),
                     workflows: body,
+                })
+                .into_response()
+            })
+            .await
+        }
+        Err(error) => n8n_error(
+            StatusCode::BAD_GATEWAY,
+            "n8n_request_failed",
+            Some(error.to_string()),
+        ),
+    }
+}
+
+pub async fn get_workflow(Json(request): Json<N8nWorkflowRequest>) -> Response {
+    let base_url = normalize_base_url(request.base_url.as_deref());
+    let api_key = match required_api_key(request.api_key.as_deref()) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let workflow_id = match required_workflow_id(request.workflow_id.as_deref()) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let api_url = api_url(&base_url);
+    let endpoint = format!("{api_url}/workflows/{workflow_id}");
+
+    match http_client()
+        .get(&endpoint)
+        .header("X-N8N-API-KEY", api_key)
+        .send()
+        .await
+    {
+        Ok(response) => {
+            json_response_from_n8n(response, |workflow| {
+                Json(N8nWorkflowResponse {
+                    created: false,
+                    base_url: base_url.clone(),
+                    api_url: api_url.clone(),
+                    editor_url: Some(format!("{base_url}/workflow/{workflow_id}")),
+                    workflow_id: Some(workflow_id.clone()),
+                    workflow,
+                })
+                .into_response()
+            })
+            .await
+        }
+        Err(error) => n8n_error(
+            StatusCode::BAD_GATEWAY,
+            "n8n_request_failed",
+            Some(error.to_string()),
+        ),
+    }
+}
+
+pub async fn save_workflow(Json(request): Json<N8nWorkflowRequest>) -> Response {
+    let base_url = normalize_base_url(request.base_url.as_deref());
+    let api_key = match required_api_key(request.api_key.as_deref()) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let workflow = match request.workflow {
+        Some(value) => match normalize_workflow_for_api(value, "MLX Pilot Workflow") {
+            Ok(workflow) => workflow,
+            Err(response) => return response,
+        },
+        None => {
+            return n8n_error(
+                StatusCode::BAD_REQUEST,
+                "workflow_required",
+                Some("A workflow JSON object is required.".to_string()),
+            )
+        }
+    };
+    let workflow_id = request
+        .workflow_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    let api_url = api_url(&base_url);
+    let endpoint = workflow_id
+        .as_deref()
+        .map(|id| format!("{api_url}/workflows/{id}"))
+        .unwrap_or_else(|| format!("{api_url}/workflows"));
+    let client = http_client();
+    let request_builder = if workflow_id.is_some() {
+        client.put(&endpoint)
+    } else {
+        client.post(&endpoint)
+    };
+
+    match request_builder
+        .header("X-N8N-API-KEY", api_key)
+        .json(&workflow)
+        .send()
+        .await
+    {
+        Ok(response) => {
+            let was_created = workflow_id.is_none();
+            json_response_from_n8n(response, |body| {
+                let saved_id = body
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string)
+                    .or_else(|| workflow_id.clone());
+                let editor_url = saved_id
+                    .as_deref()
+                    .map(|id| format!("{base_url}/workflow/{id}"));
+                Json(N8nWorkflowResponse {
+                    created: was_created,
+                    base_url: base_url.clone(),
+                    api_url: api_url.clone(),
+                    editor_url,
+                    workflow_id: saved_id,
+                    workflow: body,
                 })
                 .into_response()
             })
@@ -390,9 +527,14 @@ Return only the workflow JSON object."#
 }
 
 fn normalize_generated_workflow(
-    mut workflow: Value,
+    workflow: Value,
     request: &N8nGenerateWorkflowRequest,
 ) -> Result<Value, Response> {
+    let name = trimmed_or(request.name.as_deref(), "MLX Pilot Generated Workflow");
+    normalize_workflow_for_api(workflow, &name)
+}
+
+fn normalize_workflow_for_api(mut workflow: Value, fallback_name: &str) -> Result<Value, Response> {
     let object = workflow.as_object_mut().ok_or_else(|| {
         n8n_error(
             StatusCode::BAD_GATEWAY,
@@ -418,7 +560,6 @@ fn normalize_generated_workflow(
         object.remove(key);
     }
 
-    let name = trimmed_or(request.name.as_deref(), "MLX Pilot Generated Workflow");
     if object
         .get("name")
         .and_then(Value::as_str)
@@ -426,7 +567,7 @@ fn normalize_generated_workflow(
         .filter(|value| !value.is_empty())
         .is_none()
     {
-        object.insert("name".to_string(), json!(name));
+        object.insert("name".to_string(), json!(fallback_name));
     }
 
     let nodes = object
@@ -719,6 +860,20 @@ fn required_prompt(value: Option<&str>) -> Result<String, Response> {
         })
 }
 
+fn required_workflow_id(value: Option<&str>) -> Result<String, Response> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .ok_or_else(|| {
+            n8n_error(
+                StatusCode::BAD_REQUEST,
+                "workflow_id_required",
+                Some("A workflow id is required.".to_string()),
+            )
+        })
+}
+
 fn http_client() -> Client {
     Client::builder()
         .timeout(Duration::from_secs(20))
@@ -993,6 +1148,40 @@ mod tests {
         assert_eq!(workflow["settings"]["saveManualExecutions"], true);
         assert_eq!(workflow["settings"]["timezone"], "America/Sao_Paulo");
         assert_eq!(workflow["settings"]["executionOrder"], "v1");
+    }
+
+    #[test]
+    fn normalize_editor_workflow_keeps_editable_n8n_fields() {
+        let workflow = normalize_workflow_for_api(
+            json!({
+                "id": "server-owned-id",
+                "name": "Edited in MLX Pilot",
+                "nodes": [{
+                    "id": "node-1",
+                    "name": "HTTP Request",
+                    "type": "n8n-nodes-base.httpRequest",
+                    "typeVersion": 4.5,
+                    "position": [420, 260],
+                    "parameters": { "url": "https://example.com" },
+                    "credentials": { "httpHeaderAuth": { "id": "credential-id" } }
+                }],
+                "connections": {},
+                "settings": { "executionOrder": "v1" }
+            }),
+            "Fallback",
+        )
+        .expect("normalized editor workflow");
+
+        assert_eq!(workflow["name"], "Edited in MLX Pilot");
+        assert!(workflow.get("id").is_none());
+        assert_eq!(
+            workflow["nodes"][0]["parameters"]["url"],
+            "https://example.com"
+        );
+        assert_eq!(
+            workflow["nodes"][0]["credentials"]["httpHeaderAuth"]["id"],
+            "credential-id"
+        );
     }
 
     #[test]

@@ -590,31 +590,56 @@
               <p class="section-subtitle">n8n local controlado diretamente pelo MLX Pilot.</p>
             </div>
 
-            <section class="n8n-editor-shell n8n-editor-primary">
-              <div class="workflow-card-head">
-                <div>
-                  <h3>Editor n8n</h3>
+            <section class="workflow-builder n8n-editor-primary" id="workflow-builder">
+              <header class="workflow-builder-toolbar">
+                <div class="workflow-title-group">
+                  <input class="workflow-title-input" id="workflow-editor-name" value="Novo workflow" aria-label="Nome do workflow" />
+                  <span class="workflow-save-state" id="workflow-save-state">Novo</span>
                   <span class="n8n-editor-url" id="n8n-editor-url">http://127.0.0.1:5678</span>
                 </div>
-                <div class="workflow-actions compact">
-                  <button class="action-btn" id="n8n-reload-editor-btn" type="button">Recarregar embed</button>
-                  <button class="action-btn" id="n8n-open-editor-embed-btn" type="button">Abrir fora</button>
+                <div class="workflow-toolbar-actions">
+                  <button class="workflow-icon-btn" id="workflow-undo-btn" type="button" title="Desfazer" aria-label="Desfazer">&#8630;</button>
+                  <button class="workflow-icon-btn" id="workflow-redo-btn" type="button" title="Refazer" aria-label="Refazer">&#8631;</button>
+                  <span class="workflow-toolbar-divider"></span>
+                  <button class="action-btn" id="workflow-new-btn" type="button">Novo</button>
+                  <button class="action-btn" id="workflow-import-btn" type="button">Importar JSON</button>
+                  <button class="action-btn" id="workflow-export-btn" type="button">Exportar JSON</button>
+                  <button class="primary-btn" id="workflow-save-btn" type="button">Salvar no n8n</button>
+                  <button class="action-btn" id="workflow-open-n8n-btn" type="button" hidden>Abrir no n8n</button>
+                  <input id="workflow-import-file" type="file" accept="application/json,.json" hidden />
                 </div>
-              </div>
-              <div class="n8n-editor-frame-wrap">
-                <iframe
-                  id="n8n-editor-frame"
-                  class="n8n-editor-frame"
-                  title="Editor n8n"
-                  src="about:blank"
-                  loading="lazy"
-                  referrerpolicy="no-referrer"
-                  allow="clipboard-read; clipboard-write"
-                ></iframe>
-                <div class="n8n-editor-placeholder" id="n8n-editor-placeholder">
-                  <strong>Editor aguardando</strong>
-                  <span>http://127.0.0.1:5678</span>
-                </div>
+              </header>
+
+              <div class="workflow-builder-body">
+                <aside class="workflow-node-browser">
+                  <div class="workflow-pane-title">Nos</div>
+                  <input class="input workflow-node-search" id="workflow-node-search" type="search" placeholder="Buscar no" />
+                  <div class="workflow-node-palette" id="workflow-node-palette"></div>
+                </aside>
+
+                <main class="workflow-canvas-viewport" id="workflow-canvas-viewport" tabindex="0" aria-label="Canvas do workflow">
+                  <div class="workflow-canvas-scene" id="workflow-canvas-scene">
+                    <svg class="workflow-connections" id="workflow-connections" width="4000" height="2400" viewBox="0 0 4000 2400" aria-hidden="true"></svg>
+                    <div class="workflow-nodes" id="workflow-nodes"></div>
+                  </div>
+                  <div class="workflow-canvas-empty" id="workflow-canvas-empty" hidden>
+                    <strong>Workflow vazio</strong>
+                    <span>Adicione um no pela paleta.</span>
+                  </div>
+                  <div class="workflow-canvas-controls">
+                    <button class="workflow-icon-btn" id="workflow-zoom-out-btn" type="button" title="Diminuir zoom" aria-label="Diminuir zoom">-</button>
+                    <span id="workflow-zoom-label">100%</span>
+                    <button class="workflow-icon-btn" id="workflow-zoom-in-btn" type="button" title="Aumentar zoom" aria-label="Aumentar zoom">+</button>
+                    <button class="action-btn" id="workflow-fit-btn" type="button">Ajustar</button>
+                  </div>
+                </main>
+
+                <aside class="workflow-inspector" id="workflow-inspector">
+                  <div class="workflow-inspector-empty">
+                    <div class="workflow-pane-title">Propriedades</div>
+                    <span>Nenhum no selecionado</span>
+                  </div>
+                </aside>
               </div>
             </section>
 

@@ -105,7 +105,6 @@ $env:N8N_PORT = "$Port"
 $env:N8N_PROTOCOL = "http"
 $env:N8N_EDITOR_BASE_URL = $baseUrl
 $env:WEBHOOK_URL = "$baseUrl/"
-$env:N8N_PREVIEW_MODE = "true"
 
 Write-Host "Starting n8n from source: $($resolvedSource.Path)"
 Write-Host "Editor: $baseUrl"
