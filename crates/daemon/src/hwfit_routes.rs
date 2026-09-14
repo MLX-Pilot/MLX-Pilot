@@ -151,13 +151,15 @@ async fn resolve_hardware_profile(
     if overrides.manual_mode {
         Ok(mlx_hardware_fit::simulate_hardware(
             &profile,
-            overrides.manual_gpu_count,
-            overrides.manual_vram_gb,
-            overrides.manual_ram_gb,
-            overrides.manual_backend.map(str::to_string),
-            overrides.manual_gpu_name.map(str::to_string),
-            overrides.ignore_detected_gpu,
-            overrides.ignore_detected_ram,
+            mlx_hardware_fit::HardwareSimulationOptions {
+                manual_gpu_count: overrides.manual_gpu_count,
+                manual_vram_gb: overrides.manual_vram_gb,
+                manual_ram_gb: overrides.manual_ram_gb,
+                manual_backend: overrides.manual_backend.map(str::to_string),
+                manual_gpu_name: overrides.manual_gpu_name.map(str::to_string),
+                ignore_detected_gpu: overrides.ignore_detected_gpu,
+                ignore_detected_ram: overrides.ignore_detected_ram,
+            },
         ))
     } else {
         Ok(profile)
