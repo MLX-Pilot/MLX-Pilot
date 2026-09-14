@@ -15,6 +15,7 @@ pub mod embeddings;
 pub mod events;
 pub mod memory;
 pub mod memory_manager;
+pub mod ooda;
 pub mod policy;
 pub mod presets;
 pub mod prompt_builder;

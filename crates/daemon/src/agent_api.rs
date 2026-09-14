@@ -150,6 +150,15 @@ pub struct AgentRunRequest {
     /// Teto de tempo, em segundos, para cada chamada ao provider (0 = sem teto).
     #[serde(default)]
     pub provider_timeout_secs: Option<u64>,
+    /// Limites do ciclo OODA. Ignorados nas outras variantes de runtime.
+    #[serde(default)]
+    pub ooda_max_cycles: Option<usize>,
+    #[serde(default)]
+    pub ooda_max_steps: Option<usize>,
+    #[serde(default)]
+    pub ooda_max_tool_calls: Option<usize>,
+    #[serde(default)]
+    pub ooda_deadline_secs: Option<u64>,
 }
 
 /// POST /agent/gateway/events request body.
@@ -262,6 +271,9 @@ pub struct AgentRunResponse {
     pub latency_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_budget: Option<mlx_agent_core::ContextBudgetTelemetry>,
+    /// Plano, ciclos e motivo de parada. Presente apenas em `runtime_variant: "ooda"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ooda: Option<mlx_agent_core::ooda::OodaOutcome>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1289,8 +1301,31 @@ fn parse_runtime_variant(value: Option<&str>) -> RuntimeVariant {
         .as_str()
     {
         "hermes" | "hermes_inspired" | "hermes-inspired" => RuntimeVariant::HermesInspired,
+        "ooda" => RuntimeVariant::Ooda,
         _ => RuntimeVariant::Classic,
     }
+}
+
+/// Limites do ciclo OODA para esta requisição.
+///
+/// Cada campo é opcional; o que não vier usa o default do `OodaLimits`. Um valor 0 é
+/// tratado como ausente, porque "sem limite" não é uma opção suportada — todo run OODA
+/// precisa de um teto.
+fn resolve_ooda_limits(request: &AgentRunRequest) -> mlx_agent_core::ooda::OodaLimits {
+    let mut limits = mlx_agent_core::ooda::OodaLimits::default();
+    if let Some(value) = request.ooda_max_cycles.filter(|value| *value > 0) {
+        limits.max_cycles = value;
+    }
+    if let Some(value) = request.ooda_max_steps.filter(|value| *value > 0) {
+        limits.max_steps = value;
+    }
+    if let Some(value) = request.ooda_max_tool_calls.filter(|value| *value > 0) {
+        limits.max_tool_calls = value;
+    }
+    if let Some(value) = request.ooda_deadline_secs.filter(|value| *value > 0) {
+        limits.deadline = std::time::Duration::from_secs(value);
+    }
+    limits
 }
 
 fn parse_memory_snapshot_mode(value: Option<&str>) -> mlx_agent_core::MemorySnapshotMode {
@@ -2910,6 +2945,7 @@ impl crate::agent_runtime_tools::DelegateSessionExecutor for DelegateExecutor {
             enable_tool_call_fallback: Some(self.agent_cfg.enable_tool_call_fallback),
             runtime_variant: Some(match self.runtime_variant {
                 RuntimeVariant::HermesInspired => "hermes_inspired".to_string(),
+                RuntimeVariant::Ooda => "ooda".to_string(),
                 RuntimeVariant::Classic => "classic".to_string(),
             }),
             persist_tool_events: Some(self.persist_tool_events),
@@ -2947,6 +2983,10 @@ impl crate::agent_runtime_tools::DelegateSessionExecutor for DelegateExecutor {
             provider_profile_id: None,
             workspace_root: Some(self.workspace.display().to_string()),
             provider_timeout_secs: None,
+            ooda_max_cycles: None,
+            ooda_max_steps: None,
+            ooda_max_tool_calls: None,
+            ooda_deadline_secs: None,
         };
 
         let response = run_agent_once(
@@ -3622,6 +3662,7 @@ async fn run_agent_once(
         })
         .await;
 
+    let mut ooda_outcome: Option<mlx_agent_core::ooda::OodaOutcome> = None;
     let response = match runtime_variant {
         RuntimeVariant::Classic => {
             let mut agent = AgentLoop::new(
@@ -3658,10 +3699,12 @@ async fn run_agent_once(
 
             response
         }
-        RuntimeVariant::HermesInspired => {
+        // O OODA compartilha todo o preparo do Hermes (memória, sessão, persistência) e
+        // só difere em quem dirige o loop; ver `AgentRuntime::run`.
+        RuntimeVariant::HermesInspired | RuntimeVariant::Ooda => {
             let runtime = AgentRuntime::new(
                 AgentRuntimeConfig {
-                    variant: RuntimeVariant::HermesInspired,
+                    variant: runtime_variant,
                     persist_tool_events: request
                         .persist_tool_events
                         .unwrap_or(agent_cfg.persist_tool_events),
@@ -3682,6 +3725,7 @@ async fn run_agent_once(
                             .as_deref()
                             .or(Some(agent_cfg.memory_snapshot_mode.as_str())),
                     ),
+                    ooda_limits: resolve_ooda_limits(request),
                 },
                 state.session_store.clone(),
                 state.agent_state.memory.clone(),
@@ -3701,7 +3745,10 @@ async fn run_agent_once(
                     request.message.trim(),
                 )
                 .await
-                .map(|result| result.response)
+                .map(|result| {
+                    ooda_outcome = result.ooda;
+                    result.response
+                })
                 .map_err(AgentApiError::from_agent_error)?
         }
     };
@@ -3731,6 +3778,7 @@ async fn run_agent_once(
         total_tokens: response.usage.total_tokens,
         latency_ms: response.latency_ms,
         context_budget: Some(response.budget),
+        ooda: ooda_outcome,
     })
 }
 
@@ -3872,6 +3920,7 @@ pub(crate) async fn execute_agent_request(
             total_tokens: 0,
             latency_ms: started_at.elapsed().as_millis() as u64,
             context_budget: None,
+            ooda: None,
         });
     }
 
@@ -4075,6 +4124,10 @@ pub async fn agent_gateway_event(
         provider_profile_id: request.provider_profile_id.clone(),
         workspace_root: request.workspace_root.clone(),
         provider_timeout_secs: None,
+        ooda_max_cycles: None,
+        ooda_max_steps: None,
+        ooda_max_tool_calls: None,
+        ooda_deadline_secs: None,
     };
 
     let response = execute_agent_request(&state, run_request).await?;
@@ -5775,6 +5828,10 @@ mod tests {
             provider_profile_id: None,
             workspace_root: None,
             provider_timeout_secs: None,
+            ooda_max_cycles: None,
+            ooda_max_steps: None,
+            ooda_max_tool_calls: None,
+            ooda_deadline_secs: None,
         }
     }
 
@@ -5852,6 +5909,10 @@ mod tests {
             provider_profile_id: None,
             workspace_root: None,
             provider_timeout_secs: None,
+            ooda_max_cycles: None,
+            ooda_max_steps: None,
+            ooda_max_tool_calls: None,
+            ooda_deadline_secs: None,
         };
         let default_profile = resolve_provider_profile(&cfg, &default_request).unwrap();
         assert_eq!(default_profile.id, "ollama-local");
@@ -5892,6 +5953,10 @@ mod tests {
             provider_profile_id: Some("mlx-local".to_string()),
             workspace_root: None,
             provider_timeout_secs: None,
+            ooda_max_cycles: None,
+            ooda_max_steps: None,
+            ooda_max_tool_calls: None,
+            ooda_deadline_secs: None,
         };
         let explicit_profile = resolve_provider_profile(&cfg, &explicit_request).unwrap();
         assert_eq!(explicit_profile.id, "mlx-local");
