@@ -144,6 +144,8 @@
       workflow: null,
       selectedNodeId: null,
       connectingFrom: null,
+      connectingPointer: null,
+      connectingTargetId: null,
       viewport: { x: 80, y: 80, zoom: 1 },
       drag: null,
       history: [],
@@ -3192,6 +3194,8 @@
     editor.workflowId = loadedId || null;
     editor.selectedNodeId = null;
     editor.connectingFrom = null;
+    editor.connectingPointer = null;
+    editor.connectingTargetId = null;
     editor.drag = null;
     workflowEditorResetHistory(saved);
     renderWorkflowEditor();
@@ -3257,13 +3261,42 @@
     return entries;
   }
 
-  function workflowConnectionPath(source, target) {
-    const x1 = source.position[0] + 210;
-    const y1 = source.position[1] + 39;
-    const x2 = target.position[0];
-    const y2 = target.position[1] + 39;
+  function workflowConnectionPathBetween(x1, y1, x2, y2) {
     const bend = Math.max(72, Math.abs(x2 - x1) * 0.48);
     return `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`;
+  }
+
+  function workflowConnectionPath(source, target) {
+    return workflowConnectionPathBetween(
+      source.position[0] + 210,
+      source.position[1] + 39,
+      target.position[0],
+      target.position[1] + 39,
+    );
+  }
+
+  function workflowEditorClientPoint(clientX, clientY) {
+    const viewport = document.getElementById('workflow-canvas-viewport');
+    if (!viewport) return null;
+    const rect = viewport.getBoundingClientRect();
+    const view = state.n8nEditor.viewport;
+    return {
+      x: (clientX - rect.left - view.x) / view.zoom,
+      y: (clientY - rect.top - view.y) / view.zoom,
+    };
+  }
+
+  function workflowEditorInputAt(clientX, clientY) {
+    const element = document.elementFromPoint?.(clientX, clientY);
+    const port = element?.closest?.('[data-port="input"]');
+    return port?.dataset.nodeId || null;
+  }
+
+  function workflowEditorClearConnection() {
+    const editor = state.n8nEditor;
+    editor.connectingFrom = null;
+    editor.connectingPointer = null;
+    editor.connectingTargetId = null;
   }
 
   function renderWorkflowCanvas() {
@@ -3286,7 +3319,7 @@
         const catalog = workflowCatalogEntry(node);
         const selected = node.id === editor.selectedNodeId;
         const position = Array.isArray(node.position) ? node.position : [0, 0];
-        const inputPort = catalog.input === false ? '' : `<button class="workflow-node-port input" type="button" data-port="input" data-node-id="${workflowAttr(node.id)}" aria-label="Conectar entrada"></button>`;
+        const inputPort = catalog.input === false ? '' : `<button class="workflow-node-port input ${editor.connectingTargetId === node.id ? 'connect-target' : ''}" type="button" data-port="input" data-node-id="${workflowAttr(node.id)}" aria-label="Conectar entrada"></button>`;
         const outputPort = catalog.output === false ? '' : `<button class="workflow-node-port output ${editor.connectingFrom === node.id ? 'connecting' : ''}" type="button" data-port="output" data-node-id="${workflowAttr(node.id)}" aria-label="Conectar saida"></button>`;
         const parameterCount = Object.keys(node.parameters || {}).length;
         return `
@@ -3305,7 +3338,7 @@
 
     if (edgesLayer) {
       const byName = new Map(workflow.nodes.map(node => [node.name, node]));
-      edgesLayer.innerHTML = workflowConnectionEntries().map(connection => {
+      const connections = workflowConnectionEntries().map(connection => {
         const source = byName.get(connection.sourceName);
         const target = byName.get(connection.targetName);
         if (!source || !target) return '';
@@ -3314,10 +3347,37 @@
         return `
           <g class="workflow-connection-group" data-connection="${payload}">
             <path class="workflow-connection-hit" d="${path}"></path>
-            <path class="workflow-connection-line" d="${path}"></path>
+            <path class="workflow-connection-line" d="${path}" marker-end="url(#workflow-arrow)"></path>
           </g>
         `;
       }).join('');
+      const source = workflowEditorNodeById(editor.connectingFrom);
+      const target = workflowEditorNodeById(editor.connectingTargetId);
+      let preview = '';
+      if (source) {
+        const end = target
+          ? { x: target.position[0], y: target.position[1] + 39 }
+          : editor.connectingPointer || { x: source.position[0] + 290, y: source.position[1] + 39 };
+        const path = workflowConnectionPathBetween(
+          source.position[0] + 210,
+          source.position[1] + 39,
+          end.x,
+          end.y,
+        );
+        preview = `<path class="workflow-connection-preview" d="${path}" marker-end="url(#workflow-arrow-preview)"></path>`;
+      }
+      edgesLayer.innerHTML = `
+        <defs>
+          <marker id="workflow-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#62758d"></path>
+          </marker>
+          <marker id="workflow-arrow-preview" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#00d4ff"></path>
+          </marker>
+        </defs>
+        ${connections}
+        ${preview}
+      `;
     }
   }
 
@@ -3429,7 +3489,7 @@
     const exists = channels.main[0].some(item => item.node === target.name && item.type === 'main');
     if (!exists) channels.main[0].push({ node: target.name, type: 'main', index: 0 });
     connections[source.name] = channels;
-    state.n8nEditor.connectingFrom = null;
+    workflowEditorClearConnection();
     workflowEditorCheckpoint();
   }
 
@@ -3456,7 +3516,7 @@
       });
     });
     state.n8nEditor.selectedNodeId = null;
-    state.n8nEditor.connectingFrom = null;
+    workflowEditorClearConnection();
     workflowEditorCheckpoint();
   }
 
@@ -3467,7 +3527,7 @@
     editor.historyIndex = nextIndex;
     editor.workflow = normalizeWorkflowForEditor(JSON.parse(editor.history[nextIndex]));
     if (!workflowEditorNodeById(editor.selectedNodeId)) editor.selectedNodeId = null;
-    editor.connectingFrom = null;
+    workflowEditorClearConnection();
     renderWorkflowEditor();
   }
 
@@ -3585,6 +3645,19 @@
   function workflowEditorPointerMove(event) {
     const drag = state.n8nEditor.drag;
     if (!drag) return;
+    if (drag.type === 'connection') {
+      const dx = event.clientX - drag.clientX;
+      const dy = event.clientY - drag.clientY;
+      if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+      drag.moved = true;
+      const editor = state.n8nEditor;
+      editor.connectingFrom = drag.sourceId;
+      editor.connectingPointer = workflowEditorClientPoint(event.clientX, event.clientY);
+      const targetId = workflowEditorInputAt(event.clientX, event.clientY);
+      editor.connectingTargetId = targetId === drag.sourceId ? null : targetId;
+      renderWorkflowCanvas();
+      return;
+    }
     if (drag.type === 'node') {
       const node = workflowEditorNodeById(drag.nodeId);
       if (!node) return;
@@ -3603,10 +3676,21 @@
     }
   }
 
-  function workflowEditorPointerUp() {
+  function workflowEditorPointerUp(event) {
     const drag = state.n8nEditor.drag;
     state.n8nEditor.drag = null;
     document.getElementById('workflow-canvas-viewport')?.classList.remove('panning');
+    if (drag?.type === 'connection' && drag.moved) {
+      const targetId = state.n8nEditor.connectingTargetId
+        || workflowEditorInputAt(event.clientX, event.clientY);
+      if (targetId && targetId !== drag.sourceId) {
+        workflowEditorConnect(drag.sourceId, targetId);
+      } else {
+        workflowEditorClearConnection();
+        renderWorkflowCanvas();
+      }
+      return;
+    }
     if (drag?.type === 'node' && drag.moved) workflowEditorCheckpoint();
   }
 
@@ -3641,7 +3725,13 @@
       if (port) {
         event.stopPropagation();
         if (port.dataset.port === 'output') {
-          editor.connectingFrom = editor.connectingFrom === port.dataset.nodeId ? null : port.dataset.nodeId;
+          if (editor.connectingFrom === port.dataset.nodeId) {
+            workflowEditorClearConnection();
+          } else {
+            editor.connectingFrom = port.dataset.nodeId;
+            editor.connectingPointer = null;
+            editor.connectingTargetId = null;
+          }
           renderWorkflowCanvas();
         } else if (editor.connectingFrom) {
           workflowEditorConnect(editor.connectingFrom, port.dataset.nodeId);
@@ -3655,7 +3745,21 @@
       }
     });
     nodes?.addEventListener('pointerdown', event => {
-      if (event.button !== 0 || event.target.closest('[data-port]')) return;
+      if (event.button !== 0) return;
+      const port = event.target.closest('[data-port]');
+      if (port) {
+        if (port.dataset.port !== 'output') return;
+        event.preventDefault();
+        event.stopPropagation();
+        editor.drag = {
+          type: 'connection',
+          sourceId: port.dataset.nodeId,
+          clientX: event.clientX,
+          clientY: event.clientY,
+          moved: false,
+        };
+        return;
+      }
       const element = event.target.closest('.workflow-node');
       const node = workflowEditorNodeById(element?.dataset.nodeId);
       if (!node) return;
@@ -3669,7 +3773,7 @@
     viewport?.addEventListener('pointerdown', event => {
       if (event.button !== 0 || event.target.closest('.workflow-node') || event.target.closest('.workflow-canvas-controls') || event.target.closest('.workflow-connection-group')) return;
       editor.selectedNodeId = null;
-      editor.connectingFrom = null;
+      workflowEditorClearConnection();
       editor.drag = { type: 'pan', clientX: event.clientX, clientY: event.clientY, x: editor.viewport.x, y: editor.viewport.y };
       renderWorkflowEditor();
     });
@@ -3734,7 +3838,7 @@
         event.preventDefault();
         workflowEditorDeleteSelected();
       } else if (event.key === 'Escape') {
-        editor.connectingFrom = null;
+        workflowEditorClearConnection();
         renderWorkflowCanvas();
       }
     });
