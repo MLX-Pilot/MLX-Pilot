@@ -82,6 +82,43 @@ impl OllamaProvider {
         self.runtime.cancel();
     }
 
+    pub async fn delete_model(&self, model_id: &str) -> Result<(), ProviderError> {
+        let model = model_id.trim();
+        if model.is_empty() {
+            return Err(ProviderError::InvalidRequest {
+                details: "model_id nao pode ser vazio".to_string(),
+            });
+        }
+
+        if !self
+            .ping_server_with_timeout(Duration::from_secs(2), None)
+            .await
+        {
+            return Err(ProviderError::Unavailable {
+                details: "runtime Ollama nao esta acessivel para remover o modelo".to_string(),
+            });
+        }
+
+        let endpoint = self.endpoint("/api/delete")?;
+        let response = self
+            .client
+            .delete(endpoint)
+            .json(&OllamaDeleteRequestBody {
+                model: model.to_string(),
+            })
+            .send()
+            .await
+            .map_err(Self::map_network_error)?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(Self::http_error(status, body));
+        }
+
+        Ok(())
+    }
+
     async fn runner_failure(&self, detail: &str) -> ProviderError {
         ProviderError::Unavailable {
             details: self.runtime.diagnostic_detail(detail).await,
@@ -222,6 +259,11 @@ impl OllamaProvider {
 struct OllamaTagsResponse {
     #[serde(default)]
     models: Vec<OllamaTagEntry>,
+}
+
+#[derive(Debug, Serialize)]
+struct OllamaDeleteRequestBody {
+    model: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -679,6 +721,8 @@ pub(crate) fn silence_console(command: &mut Command) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
     #[test]
     fn test_tool_serialization() {
@@ -749,5 +793,70 @@ mod tests {
             .endpoint_with_runtime("/api/chat", Some(&runtime))
             .unwrap();
         assert_eq!(endpoint, "http://127.0.0.1:22445/api/chat");
+    }
+
+    #[tokio::test]
+    async fn delete_model_uses_ollama_delete_api_with_namespaced_id() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for _ in 0..2 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0_u8; 2048];
+                loop {
+                    let read = socket.read(&mut buffer).await.unwrap();
+                    if read == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&buffer[..read]);
+                    let Some(headers_end) = request.windows(4).position(|part| part == b"\r\n\r\n")
+                    else {
+                        continue;
+                    };
+                    let headers = String::from_utf8_lossy(&request[..headers_end]);
+                    let content_length = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.split_once(':').and_then(|(name, value)| {
+                                name.eq_ignore_ascii_case("content-length")
+                                    .then(|| value.trim().parse::<usize>().ok())
+                                    .flatten()
+                            })
+                        })
+                        .unwrap_or(0);
+                    if request.len() >= headers_end + 4 + content_length {
+                        break;
+                    }
+                }
+                requests.push(String::from_utf8_lossy(&request).to_string());
+                socket
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                    )
+                    .await
+                    .unwrap();
+            }
+            requests
+        });
+
+        let provider = OllamaProvider::new(OllamaProviderConfig {
+            base_url: format!("http://{address}"),
+            timeout: Duration::from_secs(2),
+            startup_timeout: Duration::from_secs(2),
+            auto_start: false,
+            auto_install: false,
+        });
+
+        provider
+            .delete_model("dfebrero/Llama-3.2:latest")
+            .await
+            .unwrap();
+
+        let requests = server.await.unwrap();
+        assert!(requests[0].starts_with("GET /api/version HTTP/1.1"));
+        assert!(requests[1].starts_with("DELETE /api/delete HTTP/1.1"));
+        assert!(requests[1].contains(r#"{"model":"dfebrero/Llama-3.2:latest"}"#));
     }
 }

@@ -519,12 +519,16 @@ impl SessionStore {
                 true
             })
             .filter_map(|candidate| {
+                // Só uma janela do transcript entra no scoring. Uma sessão pode guardar um
+                // documento colado inteiro; passar o transcript completo por
+                // `to_ascii_lowercase` e por um `contains` de cada termo tornava o recall
+                // O(corpus) e pendurava o run.
                 let haystack = format!(
                     "{} {} {} {}",
                     candidate.meta.name.to_ascii_lowercase(),
                     candidate.meta.model_id.to_ascii_lowercase(),
                     candidate.meta.summary.to_ascii_lowercase(),
-                    candidate.transcript.to_ascii_lowercase()
+                    scoring_window(&candidate.transcript)
                 );
                 let recency_bonus =
                     ((Utc::now() - candidate.meta.updated_at).num_days().max(0)).saturating_sub(30);
@@ -659,12 +663,30 @@ fn tokenize(value: &str) -> Vec<String> {
         .collect()
 }
 
+/// Máximo de caracteres do transcript considerados ao ranquear uma sessão.
+const SCORING_WINDOW_CHARS: usize = 4000;
+
+/// Recorte em minúsculas do transcript usado para pontuar relevância.
+fn scoring_window(transcript: &str) -> String {
+    let lowered = transcript.to_ascii_lowercase();
+    if lowered.chars().count() <= SCORING_WINDOW_CHARS {
+        return lowered;
+    }
+    lowered.chars().take(SCORING_WINDOW_CHARS).collect()
+}
+
 fn score_match(haystack: &str, query: &str, query_tokens: &[String]) -> i64 {
     let mut score = 0_i64;
     if haystack.contains(query) {
         score += 50;
     }
+    // Termos repetidos não somam de novo: uma consulta com "lorem" cem vezes não deve
+    // pontuar cem vezes mais que uma com um termo relevante uma vez.
+    let mut seen = std::collections::HashSet::new();
     for token in query_tokens {
+        if !seen.insert(token.as_str()) {
+            continue;
+        }
         if haystack.contains(token) {
             score += 10;
         }
