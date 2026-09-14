@@ -995,6 +995,16 @@ test("workflow editor cria nos e salva JSON compativel com n8n", async () => {
     assert.equal(fixture.document.querySelectorAll("#workflow-nodes .workflow-node").length, 2);
     assert.match(fixture.document.getElementById("workflow-inspector")?.textContent || "", /Code/);
 
+    const manualNode = fixture.document.querySelector('#workflow-nodes .workflow-node[data-node-id]:first-child');
+    manualNode?.querySelector('[data-port="output"]')?.click();
+    assert.ok(fixture.document.querySelector("#workflow-connections .workflow-connection-preview"));
+    assert.ok(fixture.document.querySelector('#workflow-nodes .workflow-node[data-node-id]:first-child [data-port="output"]')?.classList.contains("connecting"));
+
+    fixture.document.querySelector('#workflow-nodes .workflow-node[data-node-id]:last-child [data-port="input"]')?.click();
+    assert.equal(fixture.document.querySelectorAll("#workflow-connections .workflow-connection-group").length, 1);
+    assert.equal(fixture.document.querySelector("#workflow-connections .workflow-connection-line")?.getAttribute("marker-end"), "url(#workflow-arrow)");
+    assert.equal(fixture.document.querySelector("#workflow-connections .workflow-connection-preview"), null);
+
     fixture.document.getElementById("n8n-api-key").value = "test-api-key";
     fixture.document.getElementById("workflow-save-btn")?.click();
     await flush(5);
@@ -1003,8 +1013,55 @@ test("workflow editor cria nos e salva JSON compativel com n8n", async () => {
     assert.ok(saveCall);
     assert.equal(saveCall.body.api_key, "test-api-key");
     assert.equal(saveCall.body.workflow.nodes.length, 2);
+    assert.equal(saveCall.body.workflow.connections["Manual Trigger"].main[0][0].node, "Code");
     assert.equal(fixture.document.getElementById("workflow-save-state")?.textContent, "Salvo");
     assert.equal(fixture.document.getElementById("workflow-open-n8n-btn")?.hidden, false);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("workflow editor conecta nos ao arrastar entre as portas", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(3);
+    fixture.document.querySelector('[data-workflow-node-type="code"]')?.click();
+
+    const output = fixture.document.querySelector('#workflow-nodes .workflow-node:first-child [data-port="output"]');
+    const input = fixture.document.querySelector('#workflow-nodes .workflow-node:last-child [data-port="input"]');
+    Object.defineProperty(fixture.document, "elementFromPoint", {
+      configurable: true,
+      value: () => input,
+    });
+
+    output?.dispatchEvent(new fixture.window.MouseEvent("pointerdown", {
+      bubbles: true,
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+    }));
+    fixture.document.dispatchEvent(new fixture.window.MouseEvent("pointermove", {
+      bubbles: true,
+      buttons: 1,
+      clientX: 180,
+      clientY: 140,
+    }));
+
+    assert.ok(fixture.document.querySelector(".workflow-connection-preview"));
+    assert.ok(fixture.document.querySelector('.workflow-node-port.input.connect-target'));
+
+    fixture.document.dispatchEvent(new fixture.window.MouseEvent("pointerup", {
+      bubbles: true,
+      button: 0,
+      clientX: 180,
+      clientY: 140,
+    }));
+
+    assert.equal(fixture.document.querySelectorAll(".workflow-connection-group").length, 1);
+    assert.equal(fixture.document.querySelector(".workflow-connection-preview"), null);
   } finally {
     fixture.cleanup();
   }
