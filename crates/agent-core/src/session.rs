@@ -699,7 +699,7 @@ mod tests {
     #[tokio::test]
     async fn session_store_operations() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store = SessionStore::new(temp_dir.path().to_path_buf())
+        let store = SessionStore::new(temp_dir.path().join("sessions"))
             .await
             .unwrap();
 
