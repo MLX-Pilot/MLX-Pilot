@@ -3,6 +3,7 @@
 .DS_Store
 .env
 node_modules
+.cache/
 .npm-cache/
 apps/desktop-ui/src-tauri/target
 SourceCode_Legacy_Agents_And_Plan/
@@ -13,7 +14,10 @@ bench_agent_fixture.txt
 clippy.txt
 
 # Bundled llama.cpp engine binaries — fetched by scripts/fetch-llama-engine.ps1, not committed
-apps/desktop-ui/src-tauri/binaries/
+apps/desktop-ui/src-tauri/binaries/**
+!apps/desktop-ui/src-tauri/binaries/
+!apps/desktop-ui/src-tauri/binaries/llamacpp/
+!apps/desktop-ui/src-tauri/binaries/llamacpp/README.md
 
 # Local scratch: cloned reference repos and preview/static-server helpers
 temp/

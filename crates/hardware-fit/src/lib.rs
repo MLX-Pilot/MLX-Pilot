@@ -48,6 +48,17 @@ pub struct HardwareProfile {
     pub detected_at: String,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct HardwareSimulationOptions {
+    pub manual_gpu_count: Option<usize>,
+    pub manual_vram_gb: Option<f64>,
+    pub manual_ram_gb: Option<f64>,
+    pub manual_backend: Option<String>,
+    pub manual_gpu_name: Option<String>,
+    pub ignore_detected_gpu: bool,
+    pub ignore_detected_ram: bool,
+}
+
 // ── Cache ──────────────────────────────────────────────────────────────────
 
 static CACHE: Mutex<Option<(HardwareProfile, Instant)>> = Mutex::new(None);
@@ -653,49 +664,49 @@ pub fn group_gpus(gpus: &[GpuInfo]) -> Vec<GpuGroup> {
 
 pub fn simulate_hardware(
     base: &HardwareProfile,
-    manual_gpu_count: Option<usize>,
-    manual_vram_gb: Option<f64>,
-    manual_ram_gb: Option<f64>,
-    manual_backend: Option<String>,
-    ignore_detected_gpu: bool,
-    ignore_detected_ram: bool,
+    options: HardwareSimulationOptions,
 ) -> HardwareProfile {
     let mut profile = base.clone();
 
-    if ignore_detected_gpu {
+    if options.ignore_detected_gpu {
         profile.gpus.clear();
         profile.gpu_count = 0;
         profile.total_vram_gb = 0.0;
     }
 
-    if ignore_detected_ram {
+    if options.ignore_detected_ram {
         profile.ram_gb = 0.0;
         profile.available_ram_gb = 0.0;
     }
 
-    if let Some(ram) = manual_ram_gb {
+    if let Some(ram) = options.manual_ram_gb {
         profile.ram_gb = ram;
         profile.available_ram_gb = ram * 0.9;
     }
 
-    if let Some(backend) = manual_backend {
+    if let Some(backend) = options.manual_backend {
         profile.primary_backend = backend.clone();
-        if let Some(count) = manual_gpu_count {
-            if let Some(vram) = manual_vram_gb {
+        if let Some(count) = options.manual_gpu_count {
+            if count == 0 {
+                profile.gpus.clear();
+                profile.gpu_count = 0;
+                profile.total_vram_gb = 0.0;
+            } else if let Some(vram) = options.manual_vram_gb {
                 profile.gpus.clear();
                 for i in 0..count {
+                    let gpu_name = options
+                        .manual_gpu_name
+                        .as_ref()
+                        .filter(|name| !name.is_empty())
+                        .cloned()
+                        .unwrap_or_else(|| format!("Manual GPU {} ({})", i + 1, backend));
                     profile.gpus.push(GpuInfo {
-                        name: format!("Manual GPU {} ({})", i + 1, backend),
+                        name: gpu_name.clone(),
                         vram_gb: vram,
                         index: i as u32,
                         backend: backend.clone(),
                         compute_capability: None,
-                        bandwidth_gb_s: Some(match backend.as_str() {
-                            "cuda" => 400.0,
-                            "rocm" => 300.0,
-                            "metal" => 200.0,
-                            _ => 100.0,
-                        }),
+                        bandwidth_gb_s: Some(estimate_gpu_bandwidth(&gpu_name, &backend)),
                     });
                 }
                 profile.gpu_count = count;
@@ -826,12 +837,13 @@ mod tests {
 
         let simulated = simulate_hardware(
             &base,
-            Some(1),
-            Some(24.0),
-            Some(64.0),
-            Some("cuda".into()),
-            false,
-            false,
+            HardwareSimulationOptions {
+                manual_gpu_count: Some(1),
+                manual_vram_gb: Some(24.0),
+                manual_ram_gb: Some(64.0),
+                manual_backend: Some("cuda".into()),
+                ..Default::default()
+            },
         );
 
         assert_eq!(simulated.gpu_count, 1);
@@ -839,5 +851,142 @@ mod tests {
         assert_eq!(simulated.ram_gb, 64.0);
         assert_eq!(simulated.primary_backend, "cuda");
         assert!(!simulated.is_cpu_only);
+    }
+
+    #[test]
+    fn test_simulate_hardware_named_gpu() {
+        let base = HardwareProfile {
+            platform: "linux".into(),
+            cpu_name: "Test CPU".into(),
+            cpu_cores: 8,
+            ram_gb: 32.0,
+            available_ram_gb: 28.0,
+            gpus: vec![],
+            gpu_count: 0,
+            total_vram_gb: 0.0,
+            primary_backend: "cpu".into(),
+            is_cpu_only: true,
+            detected_at: Utc::now().to_rfc3339(),
+        };
+
+        let simulated = simulate_hardware(
+            &base,
+            HardwareSimulationOptions {
+                manual_gpu_count: Some(1),
+                manual_vram_gb: Some(12.0),
+                manual_backend: Some("cuda".into()),
+                manual_gpu_name: Some("NVIDIA GeForce RTX 5070".into()),
+                ignore_detected_gpu: true,
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(simulated.gpu_count, 1);
+        assert_eq!(simulated.total_vram_gb, 12.0);
+        assert_eq!(simulated.gpus[0].name, "NVIDIA GeForce RTX 5070");
+        assert_eq!(
+            simulated.gpus[0].bandwidth_gb_s,
+            Some(estimate_gpu_bandwidth("NVIDIA GeForce RTX 5070", "cuda"))
+        );
+        assert!(simulated.gpus[0].bandwidth_gb_s.unwrap() > estimate_gpu_bandwidth("CPU", "cpu"));
+    }
+
+    #[test]
+    fn test_simulate_hardware_dual_gpu() {
+        let base = HardwareProfile {
+            platform: "linux".into(),
+            cpu_name: "Test CPU".into(),
+            cpu_cores: 8,
+            ram_gb: 32.0,
+            available_ram_gb: 28.0,
+            gpus: vec![],
+            gpu_count: 0,
+            total_vram_gb: 0.0,
+            primary_backend: "cpu".into(),
+            is_cpu_only: true,
+            detected_at: Utc::now().to_rfc3339(),
+        };
+
+        let simulated = simulate_hardware(
+            &base,
+            HardwareSimulationOptions {
+                manual_gpu_count: Some(2),
+                manual_vram_gb: Some(12.0),
+                manual_backend: Some("cuda".into()),
+                manual_gpu_name: Some("NVIDIA GeForce RTX 5070".into()),
+                ignore_detected_gpu: true,
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(simulated.gpu_count, 2);
+        assert_eq!(simulated.total_vram_gb, 24.0);
+    }
+
+    #[test]
+    fn test_simulate_hardware_ram_override() {
+        let base = HardwareProfile {
+            platform: "linux".into(),
+            cpu_name: "Test CPU".into(),
+            cpu_cores: 8,
+            ram_gb: 32.0,
+            available_ram_gb: 28.0,
+            gpus: vec![],
+            gpu_count: 0,
+            total_vram_gb: 0.0,
+            primary_backend: "cpu".into(),
+            is_cpu_only: true,
+            detected_at: Utc::now().to_rfc3339(),
+        };
+
+        let simulated = simulate_hardware(
+            &base,
+            HardwareSimulationOptions {
+                manual_ram_gb: Some(64.0),
+                ignore_detected_ram: true,
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(simulated.ram_gb, 64.0);
+        assert!((simulated.available_ram_gb - 57.6).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_simulate_hardware_cpu_only() {
+        let base = HardwareProfile {
+            platform: "linux".into(),
+            cpu_name: "Test CPU".into(),
+            cpu_cores: 8,
+            ram_gb: 32.0,
+            available_ram_gb: 28.0,
+            gpus: vec![GpuInfo {
+                name: "RTX 4090".into(),
+                vram_gb: 24.0,
+                index: 0,
+                backend: "cuda".into(),
+                compute_capability: None,
+                bandwidth_gb_s: None,
+            }],
+            gpu_count: 1,
+            total_vram_gb: 24.0,
+            primary_backend: "cuda".into(),
+            is_cpu_only: false,
+            detected_at: Utc::now().to_rfc3339(),
+        };
+
+        let simulated = simulate_hardware(
+            &base,
+            HardwareSimulationOptions {
+                manual_gpu_count: Some(0),
+                manual_backend: Some("cpu".into()),
+                ignore_detected_gpu: true,
+                ..Default::default()
+            },
+        );
+
+        assert!(simulated.gpus.is_empty());
+        assert!(simulated.is_cpu_only);
+        assert_eq!(simulated.primary_backend, "cpu");
     }
 }

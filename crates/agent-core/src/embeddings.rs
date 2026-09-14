@@ -94,8 +94,8 @@ pub fn serialize_embedding(embedding: &[f32]) -> Vec<u8> {
 pub fn deserialize_embedding(bytes: &[u8]) -> Vec<f32> {
     let len = bytes.len() / 4;
     let mut embedding = Vec::with_capacity(len);
-    for chunk in bytes.chunks_exact(4) {
-        let value = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+    for chunk in bytes.as_chunks::<4>().0 {
+        let value = f32::from_le_bytes(*chunk);
         embedding.push(value);
     }
     embedding

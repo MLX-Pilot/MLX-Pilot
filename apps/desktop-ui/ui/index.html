@@ -118,6 +118,15 @@
               </span>
               Agent
             </button>
+            <button class="tab" data-panel="workflows" role="tab">
+              <span class="tab-icon">
+                <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M4 5h4v4H4zM12 3h4v4h-4zM12 13h4v4h-4z" />
+                  <path d="M8 7h2a2 2 0 0 0 2-2M8 7h2a2 2 0 0 1 2 2v4" />
+                </svg>
+              </span>
+              Workflows
+            </button>
             <button class="tab" data-panel="ai-interaction" role="tab">
               <span class="tab-icon">
                 <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -573,6 +582,145 @@
           </div>
         </section>
 
+        <!-- WORKFLOWS PANEL -->
+        <section class="panel" id="panel-workflows">
+          <div class="panel-scroll">
+            <div class="section-header">
+              <h2 class="section-title">Workflows</h2>
+              <p class="section-subtitle">n8n local controlado diretamente pelo MLX Pilot.</p>
+            </div>
+
+            <section class="workflow-builder n8n-editor-primary" id="workflow-builder">
+              <header class="workflow-builder-toolbar">
+                <div class="workflow-title-group">
+                  <input class="workflow-title-input" id="workflow-editor-name" value="Novo workflow" aria-label="Nome do workflow" />
+                  <span class="workflow-save-state" id="workflow-save-state">Novo</span>
+                  <span class="n8n-editor-url" id="n8n-editor-url">http://127.0.0.1:5678</span>
+                </div>
+                <div class="workflow-toolbar-actions">
+                  <button class="workflow-icon-btn" id="workflow-undo-btn" type="button" title="Desfazer" aria-label="Desfazer">&#8630;</button>
+                  <button class="workflow-icon-btn" id="workflow-redo-btn" type="button" title="Refazer" aria-label="Refazer">&#8631;</button>
+                  <span class="workflow-toolbar-divider"></span>
+                  <button class="action-btn" id="workflow-new-btn" type="button">Novo</button>
+                  <button class="action-btn" id="workflow-import-btn" type="button">Importar JSON</button>
+                  <button class="action-btn" id="workflow-export-btn" type="button">Exportar JSON</button>
+                  <button class="primary-btn" id="workflow-save-btn" type="button">Salvar no n8n</button>
+                  <button class="action-btn" id="workflow-open-n8n-btn" type="button" hidden>Abrir no n8n</button>
+                  <input id="workflow-import-file" type="file" accept="application/json,.json" hidden />
+                </div>
+              </header>
+
+              <div class="workflow-builder-body">
+                <aside class="workflow-node-browser">
+                  <div class="workflow-pane-title">Nos</div>
+                  <input class="input workflow-node-search" id="workflow-node-search" type="search" placeholder="Buscar no" />
+                  <div class="workflow-node-palette" id="workflow-node-palette"></div>
+                </aside>
+
+                <main class="workflow-canvas-viewport" id="workflow-canvas-viewport" tabindex="0" aria-label="Canvas do workflow">
+                  <div class="workflow-canvas-scene" id="workflow-canvas-scene">
+                    <svg class="workflow-connections" id="workflow-connections" width="4000" height="2400" viewBox="0 0 4000 2400" aria-hidden="true"></svg>
+                    <div class="workflow-nodes" id="workflow-nodes"></div>
+                  </div>
+                  <div class="workflow-canvas-empty" id="workflow-canvas-empty" hidden>
+                    <strong>Workflow vazio</strong>
+                    <span>Adicione um no pela paleta.</span>
+                  </div>
+                  <div class="workflow-canvas-controls">
+                    <button class="workflow-icon-btn" id="workflow-zoom-out-btn" type="button" title="Diminuir zoom" aria-label="Diminuir zoom">-</button>
+                    <span id="workflow-zoom-label">100%</span>
+                    <button class="workflow-icon-btn" id="workflow-zoom-in-btn" type="button" title="Aumentar zoom" aria-label="Aumentar zoom">+</button>
+                    <button class="action-btn" id="workflow-fit-btn" type="button">Ajustar</button>
+                  </div>
+                </main>
+
+                <aside class="workflow-inspector" id="workflow-inspector">
+                  <div class="workflow-inspector-empty">
+                    <div class="workflow-pane-title">Propriedades</div>
+                    <span>Nenhum no selecionado</span>
+                  </div>
+                </aside>
+              </div>
+            </section>
+
+            <div class="settings-grid workflow-grid">
+              <div class="settings-card">
+                <h3>n8n</h3>
+                <div class="settings-field">
+                  <label for="n8n-base-url">Base URL</label>
+                  <input type="text" id="n8n-base-url" class="input" placeholder="http://127.0.0.1:5678" />
+                </div>
+                <div class="settings-field">
+                  <label for="n8n-api-key">API Key</label>
+                  <input type="password" id="n8n-api-key" class="input" placeholder="Cole a chave do n8n" />
+                </div>
+                <div class="workflow-actions">
+                  <button class="primary-btn" id="n8n-status-btn" type="button">Status</button>
+                  <button class="action-btn" id="n8n-open-editor-btn" type="button">Abrir editor</button>
+                </div>
+                <div class="n8n-status" id="n8n-status">
+                  <span class="status-dot offline"></span>
+                  <span>Aguardando verificacao</span>
+                </div>
+                <div class="n8n-source" id="n8n-source-status">
+                  <span>Fonte local</span>
+                  <strong>Aguardando status</strong>
+                  <code>vendor/n8n</code>
+                </div>
+              </div>
+
+              <div class="settings-card">
+                <h3>Gerador de workflow</h3>
+                <div class="settings-field">
+                  <label for="n8n-workflow-name">Nome</label>
+                  <input type="text" id="n8n-workflow-name" class="input" placeholder="Workflow gerado pelo MLX Pilot" />
+                </div>
+                <div class="settings-field">
+                  <label for="n8n-workflow-model">Modelo no workflow</label>
+                  <input type="text" id="n8n-workflow-model" class="input" placeholder="qwen3.5:9b" />
+                </div>
+                <div class="settings-field">
+                  <label for="n8n-workflow-prompt">Prompt</label>
+                  <textarea id="n8n-workflow-prompt" class="input workflow-textarea workflow-generator-prompt" rows="5" placeholder="Crie um workflow manual que mande um texto para o MLX Pilot, resuma em uma frase e deixe a resposta disponivel no output."></textarea>
+                </div>
+                <div class="workflow-actions">
+                  <button class="primary-btn" id="n8n-generate-workflow-btn" type="button">Gerar workflow</button>
+                  <a class="action-btn workflow-link" id="n8n-created-link" href="#" target="_blank" rel="noreferrer" hidden>Abrir workflow criado</a>
+                </div>
+                <details class="n8n-generated-json" id="n8n-generated-json" hidden>
+                  <summary>JSON gerado</summary>
+                  <pre id="n8n-generated-json-body">{}</pre>
+                </details>
+              </div>
+
+              <div class="settings-card full-width">
+                <h3>Conexoes locais</h3>
+                <div class="workflow-inline-fields">
+                  <div class="settings-field">
+                    <label for="n8n-mlx-url">MLX Pilot URL</label>
+                    <input type="text" id="n8n-mlx-url" class="input" placeholder="http://127.0.0.1:11435" />
+                  </div>
+                  <div class="settings-field">
+                    <label for="n8n-ollama-url">Ollama URL</label>
+                    <input type="text" id="n8n-ollama-url" class="input" placeholder="http://127.0.0.1:11434" />
+                  </div>
+                </div>
+              </div>
+
+              <div class="settings-card full-width">
+                <div class="workflow-card-head">
+                  <h3>Workflows no n8n</h3>
+                  <button class="action-btn" id="n8n-list-btn" type="button">Atualizar</button>
+                </div>
+                <div class="n8n-workflow-list" id="n8n-workflow-list">
+                  <div class="n8n-empty">Nenhum workflow carregado</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </section>
+
         <!-- AI INTERACTION PANEL -->
         <section class="panel" id="panel-ai-interaction">
           <div class="ai-interaction-layout">
@@ -715,30 +863,94 @@
                 <h2>Hardware &amp; Model Fit</h2>
                 <p class="sub">Detecte seu hardware e descubra quais modelos rodam bem</p>
               </div>
-              <button class="wave1-btn" id="btn-hw-scan">
-                <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7"/><path d="M10 6v8M6 10h8"/></svg>
-                Escanear Hardware
-              </button>
+              <div style="display:flex;gap:10px;align-items:center">
+                <span id="hw-mode-badge" class="wave5-badge" style="font-size:11px;padding:3px 8px;font-weight:600;letter-spacing:0.04em">Modo: Detectado</span>
+                <button class="wave1-btn" id="btn-hw-scan">
+                  <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7"/><path d="M10 6v8M6 10h8"/></svg>
+                  Escanear Hardware
+                </button>
+              </div>
             </div>
             <!-- Hardware cards -->
             <div class="wave1-grid" id="hw-cards">
               <div class="wave1-empty">Clique em "Escanear Hardware" para detectar seu sistema</div>
             </div>
             <!-- Manual simulator -->
-            <details style="margin-top:14px;font-size:12px;color:var(--text-secondary)">
-              <summary style="cursor:pointer">Simulador de Hardware Manual</summary>
-              <div class="wave1-toolbar" style="margin-top:8px">
-                <input type="number" id="hw-sim-gpu-count" class="wave1-input" placeholder="GPUs" min="0" style="width:80px" />
-                <input type="number" id="hw-sim-vram" class="wave1-input" placeholder="VRAM (GB)" min="0" step="0.5" style="width:100px" />
-                <input type="number" id="hw-sim-ram" class="wave1-input" placeholder="RAM (GB)" min="0" step="1" style="width:100px" />
-                <select id="hw-sim-backend" class="wave1-select">
-                  <option value="">Backend: Auto</option>
-                  <option value="cuda">CUDA</option>
-                  <option value="rocm">ROCm</option>
-                  <option value="metal">Metal</option>
-                  <option value="cpu">CPU-only</option>
-                </select>
-                <button class="wave1-btn ghost sm" id="btn-hw-sim-apply">Aplicar</button>
+            <details id="hw-sim-details" style="margin-top:14px;font-size:12px;color:var(--text-secondary);background:var(--bg-elevated,#16162a);border:1px solid var(--border,#2a2a44);border-radius:8px;padding:12px 14px">
+              <summary style="cursor:pointer;font-weight:600;color:var(--text-primary,#fff);user-select:none">
+                Simulador de Hardware Manual
+              </summary>
+              <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px">
+                <!-- GPU Row -->
+                <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+                  <div style="flex:2;min-width:200px">
+                    <label class="wave5-label" for="hw-sim-gpu-preset">GPU</label>
+                    <select id="hw-sim-gpu-preset" class="wave1-select" style="width:100%">
+                      <option value="current">Hardware detectado / usar atual</option>
+                      <option value="rtx-5090">NVIDIA GeForce RTX 5090 (32 GB)</option>
+                      <option value="rtx-5080">NVIDIA GeForce RTX 5080 (16 GB)</option>
+                      <option value="rtx-5070">NVIDIA GeForce RTX 5070 (12 GB)</option>
+                      <option value="rtx-4090">NVIDIA GeForce RTX 4090 (24 GB)</option>
+                      <option value="rtx-4080">NVIDIA GeForce RTX 4080 (16 GB)</option>
+                      <option value="rtx-4070">NVIDIA GeForce RTX 4070 (12 GB)</option>
+                      <option value="rtx-3090">NVIDIA GeForce RTX 3090 (24 GB)</option>
+                      <option value="rtx-3080">NVIDIA GeForce RTX 3080 (10 GB)</option>
+                      <option value="rtx-3060">NVIDIA GeForce RTX 3060 (12 GB)</option>
+                      <option value="rx-9070-xt">AMD Radeon RX 9070 XT (16 GB)</option>
+                      <option value="rx-7900-xtx">AMD Radeon RX 7900 XTX (24 GB)</option>
+                      <option value="rx-7900-xt">AMD Radeon RX 7900 XT (20 GB)</option>
+                      <option value="rx-7800-xt">AMD Radeon RX 7800 XT (16 GB)</option>
+                      <option value="rx-7700-xt">AMD Radeon RX 7700 XT (12 GB)</option>
+                      <option value="custom">Personalizada</option>
+                    </select>
+                  </div>
+                  <div id="hw-sim-gpu-custom-box" style="flex:2;min-width:180px;display:none">
+                    <label class="wave5-label" for="hw-sim-gpu-custom-name">Nome da GPU</label>
+                    <input type="text" id="hw-sim-gpu-custom-name" class="wave1-input" placeholder="Ex: RTX 4070 Ti Super" style="width:100%" />
+                  </div>
+                  <div style="flex:1;min-width:90px">
+                    <label class="wave5-label" for="hw-sim-gpu-count">Quantidade</label>
+                    <input type="number" id="hw-sim-gpu-count" class="wave1-input" placeholder="Qtd" min="0" max="8" value="1" style="width:100%" />
+                  </div>
+                  <div style="flex:1.2;min-width:130px">
+                    <label class="wave5-label" for="hw-sim-vram">VRAM por GPU (GB)</label>
+                    <input type="number" id="hw-sim-vram" class="wave1-input" placeholder="VRAM (GB)" min="0" step="0.5" style="width:100%" />
+                  </div>
+                </div>
+
+                <!-- RAM & Backend Row -->
+                <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+                  <div style="flex:1.5;min-width:160px">
+                    <label class="wave5-label" for="hw-sim-ram-preset">RAM do Sistema</label>
+                    <select id="hw-sim-ram-preset" class="wave1-select" style="width:100%">
+                      <option value="current">Manter detectada</option>
+                      <option value="8">8 GB</option>
+                      <option value="16">16 GB</option>
+                      <option value="32">32 GB</option>
+                      <option value="64">64 GB</option>
+                      <option value="128">128 GB</option>
+                      <option value="custom">Personalizada</option>
+                    </select>
+                  </div>
+                  <div id="hw-sim-ram-custom-box" style="flex:1;min-width:110px;display:none">
+                    <label class="wave5-label" for="hw-sim-ram-custom">RAM (GB)</label>
+                    <input type="number" id="hw-sim-ram-custom" class="wave1-input" placeholder="RAM (GB)" min="4" step="1" style="width:100%" />
+                  </div>
+                  <div style="flex:1.5;min-width:150px">
+                    <label class="wave5-label" for="hw-sim-backend">Backend (Override)</label>
+                    <select id="hw-sim-backend" class="wave1-select" style="width:100%">
+                      <option value="">Auto (pelo preset/sistema)</option>
+                      <option value="cuda">CUDA (NVIDIA)</option>
+                      <option value="rocm">ROCm (AMD)</option>
+                      <option value="metal">Metal (Apple)</option>
+                      <option value="cpu">CPU-only</option>
+                    </select>
+                  </div>
+                  <div style="display:flex;gap:8px;margin-left:auto;align-items:flex-end">
+                    <button class="wave1-btn ghost sm" id="btn-hw-sim-reset" type="button" title="Restaurar valores para o hardware real detectado">Restaurar hardware real</button>
+                    <button class="wave1-btn sm" id="btn-hw-sim-apply" type="button">Aplicar simula&ccedil;&atilde;o</button>
+                  </div>
+                </div>
               </div>
             </details>
             <!-- Model table -->

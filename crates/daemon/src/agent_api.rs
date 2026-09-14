@@ -149,6 +149,99 @@ pub struct AgentRunRequest {
     pub workspace_root: Option<String>,
 }
 
+/// POST /agent/gateway/events request body.
+#[derive(Debug, Deserialize)]
+pub struct AgentGatewayEventRequest {
+    /// Optional source channel label. Defaults to `automation`.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Optional event type/name from the automation system.
+    #[serde(default)]
+    pub event: Option<String>,
+    /// External event id.
+    #[serde(default)]
+    pub event_id: Option<String>,
+    /// External workflow id/name when available.
+    #[serde(default)]
+    pub workflow_id: Option<String>,
+    /// External execution id when available.
+    #[serde(default)]
+    pub execution_id: Option<String>,
+    /// Optional MLX-Pilot session id to continue.
+    #[serde(default)]
+    pub session_id: Option<String>,
+    /// Gateway thread/conversation id.
+    #[serde(default)]
+    pub thread_id: Option<String>,
+    /// Gateway sender/user id.
+    #[serde(default)]
+    pub sender_id: Option<String>,
+    /// External correlation id.
+    #[serde(default)]
+    pub correlation_id: Option<String>,
+    /// Message text. `text`, `prompt`, or `input` are accepted as aliases.
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub prompt: Option<String>,
+    #[serde(default)]
+    pub input: Option<String>,
+    /// String metadata persisted in the session context.
+    #[serde(default)]
+    pub metadata: BTreeMap<String, String>,
+    /// Optional `/agent/run` overrides.
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub model_id: Option<String>,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub custom_headers: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    pub provider_profile_id: Option<String>,
+    #[serde(default)]
+    pub runtime_variant: Option<String>,
+    #[serde(default)]
+    pub toolset_id: Option<String>,
+    #[serde(default)]
+    pub execution_mode: Option<String>,
+    #[serde(default)]
+    pub approval_mode: Option<String>,
+    #[serde(default)]
+    pub max_iterations: Option<usize>,
+    #[serde(default)]
+    pub enabled_tools: Option<Vec<String>>,
+    #[serde(default)]
+    pub enabled_skills: Option<Vec<String>>,
+    #[serde(default)]
+    pub persist_tool_events: Option<bool>,
+    #[serde(default)]
+    pub session_search_enabled: Option<bool>,
+    #[serde(default)]
+    pub memory_profile: Option<String>,
+    #[serde(default)]
+    pub memory_snapshot_mode: Option<String>,
+    #[serde(default)]
+    pub workspace_root: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AgentGatewayEventResponse {
+    pub accepted: bool,
+    pub source: String,
+    pub session_id: String,
+    pub audit_id: Option<String>,
+    pub correlation_id: String,
+    pub provider: String,
+    pub model_id: String,
+    pub final_response: String,
+}
+
 /// POST /agent/run response.
 #[derive(Debug, Serialize)]
 pub struct AgentRunResponse {
@@ -802,6 +895,11 @@ const COMPAT_ENDPOINTS: &[(&str, &str, &str)] = &[
         "budget telemetry endpoint preserved",
     ),
     ("POST", "/agent/run", "agent loop execution preserved"),
+    (
+        "POST",
+        "/agent/gateway/events",
+        "external gateway event execution available",
+    ),
 ];
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -958,16 +1056,27 @@ fn allowed_tool_subset(
         .cloned()
         .collect::<BTreeSet<_>>();
 
-    if let Some(requested) = request
-        .enabled_tools
-        .as_ref()
-        .filter(|items| !items.is_empty())
-    {
+    if let Some(requested) = request.enabled_tools.as_ref() {
         let requested = requested.iter().cloned().collect::<BTreeSet<_>>();
         allowed = allowed.intersection(&requested).cloned().collect();
     }
 
     allowed
+}
+
+fn enabled_skill_subset(
+    agent_cfg: &super::config::AgentUiConfig,
+    request: &AgentRunRequest,
+    available_skills: impl IntoIterator<Item = String>,
+) -> Vec<String> {
+    if let Some(enabled_skills) = request.enabled_skills.clone() {
+        return enabled_skills;
+    }
+
+    available_skills
+        .into_iter()
+        .filter(|name| effective_skill_enabled(agent_cfg, name))
+        .collect()
 }
 
 fn resolve_provider_profile<'a>(
@@ -3418,20 +3527,7 @@ async fn run_agent_once(
     let _ = evaluate_skill_integrity(&mut skill_runtime, policy.as_ref(), true).await;
     save_skill_integrity_state(collect_skill_hashes(&skill_runtime));
 
-    let enabled_skills = if request
-        .enabled_skills
-        .as_ref()
-        .map(|values| !values.is_empty())
-        .unwrap_or(false)
-    {
-        request.enabled_skills.clone().unwrap_or_default()
-    } else {
-        skill_runtime
-            .names()
-            .into_iter()
-            .filter(|name| effective_skill_enabled(agent_cfg, name))
-            .collect()
-    };
+    let enabled_skills = enabled_skill_subset(agent_cfg, request, skill_runtime.names());
 
     let loop_config = AgentLoopConfig {
         session_id: session_id.clone(),
@@ -3628,7 +3724,7 @@ async fn run_agent_once(
     })
 }
 
-async fn execute_agent_request(
+pub(crate) async fn execute_agent_request(
     state: &super::AppState,
     request: AgentRunRequest,
 ) -> Result<AgentRunResponse, AgentApiError> {
@@ -3844,6 +3940,145 @@ async fn execute_agent_request(
 // ── Handlers ─────────────────────────────────────────────────────
 
 /// POST /agent/run — run the agent loop and return the final response.
+fn gateway_event_message(request: &AgentGatewayEventRequest) -> Option<String> {
+    first_non_empty([
+        request.message.as_deref(),
+        request.text.as_deref(),
+        request.prompt.as_deref(),
+        request.input.as_deref(),
+    ])
+}
+
+fn first_non_empty<'a>(values: impl IntoIterator<Item = Option<&'a str>>) -> Option<String> {
+    values
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn trimmed_or(value: Option<&str>, fallback: &str) -> String {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+fn insert_gateway_metadata(
+    metadata: &mut BTreeMap<String, String>,
+    key: &str,
+    value: Option<&str>,
+) {
+    if metadata.contains_key(key) {
+        return;
+    }
+    if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+        metadata.insert(key.to_string(), value.to_string());
+    }
+}
+
+/// POST /agent/gateway/events - accept an external automation event and run the agent.
+pub async fn agent_gateway_event(
+    State(state): State<super::AppState>,
+    Json(request): Json<AgentGatewayEventRequest>,
+) -> Result<Json<AgentGatewayEventResponse>, AgentApiError> {
+    let message = gateway_event_message(&request)
+        .ok_or_else(|| AgentApiError::bad_request("message/text/prompt/input cannot be empty"))?;
+    let source = trimmed_or(request.source.as_deref(), "automation");
+    let thread_id = first_non_empty([
+        request.thread_id.as_deref(),
+        request.workflow_id.as_deref(),
+        request.execution_id.as_deref(),
+    ])
+    .unwrap_or_else(|| "default".to_string());
+    let sender_id = trimmed_or(request.sender_id.as_deref(), "automation");
+    let correlation_id = first_non_empty([
+        request.correlation_id.as_deref(),
+        request.event_id.as_deref(),
+        request.execution_id.as_deref(),
+        request.event.as_deref(),
+    ])
+    .unwrap_or_else(mlx_agent_core::SessionStore::new_session_id);
+
+    let mut metadata = request.metadata.clone();
+    insert_gateway_metadata(&mut metadata, "event", request.event.as_deref());
+    insert_gateway_metadata(&mut metadata, "event_id", request.event_id.as_deref());
+    insert_gateway_metadata(&mut metadata, "workflow_id", request.workflow_id.as_deref());
+    insert_gateway_metadata(
+        &mut metadata,
+        "execution_id",
+        request.execution_id.as_deref(),
+    );
+
+    let gateway_context = mlx_agent_core::GatewayContext {
+        source_channel: source.clone(),
+        thread_id: thread_id.clone(),
+        sender_id: sender_id.clone(),
+        correlation_id: correlation_id.clone(),
+    };
+
+    let session_context = mlx_agent_core::SessionContextEnvelope {
+        origin_kind: "gateway".to_string(),
+        parent_session_id: None,
+        source_channel: source.clone(),
+        thread_id,
+        sender_id,
+        correlation_id: correlation_id.clone(),
+        metadata,
+    };
+
+    let run_request = AgentRunRequest {
+        session_id: request.session_id.clone(),
+        message,
+        provider: request.provider.clone(),
+        model_id: request.model_id.clone(),
+        api_key: request.api_key.clone(),
+        base_url: request.base_url.clone(),
+        custom_headers: request.custom_headers.clone(),
+        streaming: None,
+        fallback_enabled: None,
+        fallback_provider: None,
+        fallback_model_id: None,
+        execution_mode: request.execution_mode.clone(),
+        approval_mode: request.approval_mode.clone(),
+        system_prompt: None,
+        max_iterations: request.max_iterations,
+        max_prompt_tokens: None,
+        max_history_messages: None,
+        max_tools_in_prompt: None,
+        temperature: None,
+        aggressive_tool_filtering: None,
+        enable_tool_call_fallback: None,
+        runtime_variant: request.runtime_variant.clone(),
+        persist_tool_events: request.persist_tool_events,
+        session_search_enabled: request.session_search_enabled,
+        memory_profile: request.memory_profile.clone(),
+        memory_snapshot_mode: request.memory_snapshot_mode.clone(),
+        session_context: Some(session_context),
+        gateway_context: Some(gateway_context),
+        delegate_depth: None,
+        enabled_skills: request.enabled_skills.clone(),
+        enabled_tools: request.enabled_tools.clone(),
+        toolset_id: request.toolset_id.clone(),
+        provider_profile_id: request.provider_profile_id.clone(),
+        workspace_root: request.workspace_root.clone(),
+    };
+
+    let response = execute_agent_request(&state, run_request).await?;
+    Ok(Json(AgentGatewayEventResponse {
+        accepted: true,
+        source,
+        session_id: response.session_id,
+        audit_id: response.audit_id,
+        correlation_id,
+        provider: response.provider,
+        model_id: response.model_id,
+        final_response: response.content,
+    }))
+}
+
 pub async fn agent_run(
     State(state): State<super::AppState>,
     Json(request): Json<AgentRunRequest>,
@@ -5490,6 +5725,67 @@ mod tests {
 
         assert!(!exec.allowed);
         assert_eq!(exec.final_rule, "session:session-a:deny:exec");
+    }
+
+    fn test_agent_request() -> AgentRunRequest {
+        AgentRunRequest {
+            session_id: None,
+            message: "hello".to_string(),
+            provider: None,
+            model_id: None,
+            api_key: None,
+            base_url: None,
+            custom_headers: None,
+            streaming: None,
+            fallback_enabled: None,
+            fallback_provider: None,
+            fallback_model_id: None,
+            execution_mode: None,
+            approval_mode: None,
+            system_prompt: None,
+            max_iterations: None,
+            max_prompt_tokens: None,
+            max_history_messages: None,
+            max_tools_in_prompt: None,
+            temperature: None,
+            aggressive_tool_filtering: None,
+            enable_tool_call_fallback: None,
+            runtime_variant: None,
+            persist_tool_events: None,
+            session_search_enabled: None,
+            memory_profile: None,
+            memory_snapshot_mode: None,
+            session_context: None,
+            gateway_context: None,
+            delegate_depth: None,
+            enabled_skills: None,
+            enabled_tools: None,
+            toolset_id: None,
+            provider_profile_id: None,
+            workspace_root: None,
+        }
+    }
+
+    #[test]
+    fn explicit_empty_tools_and_skills_disable_prompt_extras() {
+        let cfg = crate::config::AgentUiConfig {
+            enabled_skills: vec!["code-reviewer".to_string()],
+            ..Default::default()
+        };
+        let mut request = test_agent_request();
+        request.enabled_tools = Some(Vec::new());
+        request.enabled_skills = Some(Vec::new());
+
+        let toolset = resolve_toolset_profile(&cfg, &request);
+        let allowed_tools = allowed_tool_subset(&cfg, &request, &toolset);
+        let enabled_skills = enabled_skill_subset(
+            &cfg,
+            &request,
+            vec!["code-reviewer".to_string(), "test-fixer".to_string()],
+        );
+
+        assert!(allowed_tools.is_empty());
+        assert!(enabled_skills.is_empty());
     }
 
     #[test]

@@ -281,14 +281,201 @@
   // HARDWARE & MODEL FIT
   // ═════════════════════════════════════════════════════════════════════════
 
+  const GPU_PRESETS = [
+    { id: 'current', name: 'Hardware detectado / usar atual', vramGb: null, backend: null },
+    { id: 'rtx-5090', name: 'NVIDIA GeForce RTX 5090', vramGb: 32, backend: 'cuda' },
+    { id: 'rtx-5080', name: 'NVIDIA GeForce RTX 5080', vramGb: 16, backend: 'cuda' },
+    { id: 'rtx-5070', name: 'NVIDIA GeForce RTX 5070', vramGb: 12, backend: 'cuda' },
+    { id: 'rtx-4090', name: 'NVIDIA GeForce RTX 4090', vramGb: 24, backend: 'cuda' },
+    { id: 'rtx-4080', name: 'NVIDIA GeForce RTX 4080', vramGb: 16, backend: 'cuda' },
+    { id: 'rtx-4070', name: 'NVIDIA GeForce RTX 4070', vramGb: 12, backend: 'cuda' },
+    { id: 'rtx-3090', name: 'NVIDIA GeForce RTX 3090', vramGb: 24, backend: 'cuda' },
+    { id: 'rtx-3080', name: 'NVIDIA GeForce RTX 3080', vramGb: 10, backend: 'cuda' },
+    { id: 'rtx-3060', name: 'NVIDIA GeForce RTX 3060', vramGb: 12, backend: 'cuda' },
+    { id: 'rx-9070-xt', name: 'AMD Radeon RX 9070 XT', vramGb: 16, backend: 'rocm' },
+    { id: 'rx-7900-xtx', name: 'AMD Radeon RX 7900 XTX', vramGb: 24, backend: 'rocm' },
+    { id: 'rx-7900-xt', name: 'AMD Radeon RX 7900 XT', vramGb: 20, backend: 'rocm' },
+    { id: 'rx-7800-xt', name: 'AMD Radeon RX 7800 XT', vramGb: 16, backend: 'rocm' },
+    { id: 'rx-7700-xt', name: 'AMD Radeon RX 7700 XT', vramGb: 12, backend: 'rocm' },
+    { id: 'custom', name: 'Personalizada', vramGb: null, backend: null }
+  ];
+
   var hwProfile = null;
+  var hwSimulation = null;
+
+  function parseOptionalInt(raw) {
+    if (raw === '' || raw == null) return null;
+    var n = parseInt(raw, 10);
+    return Number.isNaN(n) ? null : n;
+  }
+
+  function parseOptionalFloat(raw) {
+    if (raw === '' || raw == null) return null;
+    var n = parseFloat(raw);
+    return Number.isNaN(n) ? null : n;
+  }
+
+  function updateModeBadge() {
+    var badge = $('hw-mode-badge');
+    if (!badge) return;
+    if (hwSimulation) {
+      badge.textContent = 'Modo: Simulado';
+      badge.style.background = 'rgba(57, 208, 216, 0.15)';
+      badge.style.borderColor = 'var(--cyan,#39d0d8)';
+      badge.style.color = 'var(--cyan,#39d0d8)';
+      badge.style.fontWeight = '700';
+    } else {
+      badge.textContent = 'Modo: Detectado';
+      badge.style.background = 'var(--bg-deep,#0c0c18)';
+      badge.style.borderColor = 'var(--border,#2a2a44)';
+      badge.style.color = 'var(--text-tertiary,#8a8aa0)';
+      badge.style.fontWeight = '600';
+    }
+  }
+
+  function onGpuPresetChange() {
+    var presetId = $('hw-sim-gpu-preset').value;
+    var customBox = $('hw-sim-gpu-custom-box');
+    var vramInput = $('hw-sim-vram');
+    var backendSelect = $('hw-sim-backend');
+    var countInput = $('hw-sim-gpu-count');
+
+    if (presetId === 'custom') {
+      customBox.style.display = 'block';
+      if (!countInput.value || countInput.value === '0') countInput.value = '1';
+    } else if (presetId === 'current') {
+      customBox.style.display = 'none';
+      $('hw-sim-gpu-custom-name').value = '';
+      vramInput.value = '';
+      backendSelect.value = '';
+    } else {
+      customBox.style.display = 'none';
+      $('hw-sim-gpu-custom-name').value = '';
+      var preset = GPU_PRESETS.find(function (p) { return p.id === presetId; });
+      if (preset) {
+        if (preset.vramGb != null) vramInput.value = preset.vramGb;
+        if (preset.backend) backendSelect.value = preset.backend;
+        if (!countInput.value || countInput.value === '0') countInput.value = '1';
+      }
+    }
+  }
+
+  function onRamPresetChange() {
+    var ramPreset = $('hw-sim-ram-preset').value;
+    var customBox = $('hw-sim-ram-custom-box');
+    if (ramPreset === 'custom') {
+      customBox.style.display = 'block';
+    } else {
+      customBox.style.display = 'none';
+      $('hw-sim-ram-custom').value = '';
+    }
+  }
+
+  function onBackendChange() {
+    var backend = $('hw-sim-backend').value;
+    var countInput = $('hw-sim-gpu-count');
+    var vramInput = $('hw-sim-vram');
+    if (backend === 'cpu') {
+      countInput.value = '0';
+      vramInput.value = '';
+    } else if (backend && (countInput.value === '0' || !countInput.value)) {
+      countInput.value = '1';
+    }
+  }
+
+  function buildHardwareOverrideParams() {
+    if (!hwSimulation) return '';
+    var p = '&manual_mode=true';
+    if (hwSimulation.gpuName) p += '&manual_gpu_name=' + encodeURIComponent(hwSimulation.gpuName);
+    if (hwSimulation.gpuCount != null) p += '&manual_gpu_count=' + hwSimulation.gpuCount;
+    if (hwSimulation.vramGb != null) p += '&manual_vram_gb=' + hwSimulation.vramGb;
+    if (hwSimulation.ramGb != null) p += '&manual_ram_gb=' + hwSimulation.ramGb;
+    if (hwSimulation.backend) p += '&manual_backend=' + encodeURIComponent(hwSimulation.backend);
+    if (hwSimulation.ignoreDetectedGpu) p += '&ignore_detected_gpu=true';
+    if (hwSimulation.ignoreDetectedRam) p += '&ignore_detected_ram=true';
+    return p;
+  }
+
+  function readSimulationFromForm() {
+    var presetId = $('hw-sim-gpu-preset').value;
+    var customName = $('hw-sim-gpu-custom-name').value.trim();
+    var gpuCount = parseOptionalInt($('hw-sim-gpu-count').value);
+    var vramGb = parseOptionalFloat($('hw-sim-vram').value);
+    var ramPreset = $('hw-sim-ram-preset').value;
+    var ramGb = null;
+    if (ramPreset === 'custom') {
+      ramGb = parseOptionalFloat($('hw-sim-ram-custom').value);
+    } else if (ramPreset !== 'current') {
+      ramGb = parseOptionalFloat(ramPreset);
+    }
+    var backend = $('hw-sim-backend').value || null;
+
+    var gpuName = null;
+    var isPreset = presetId !== 'current' && presetId !== 'custom';
+    if (isPreset) {
+      var preset = GPU_PRESETS.find(function (p) { return p.id === presetId; });
+      if (preset) {
+        gpuName = preset.name;
+        if (!backend && preset.backend) backend = preset.backend;
+        if (vramGb == null && preset.vramGb != null) vramGb = preset.vramGb;
+      }
+    } else if (presetId === 'custom') {
+      gpuName = customName || 'GPU Personalizada';
+    }
+
+    if (gpuCount == null) {
+      if (backend === 'cpu') gpuCount = 0;
+      else if (gpuName || vramGb != null) gpuCount = 1;
+    }
+
+    if (gpuCount != null && (gpuCount < 0 || gpuCount > 8)) {
+      throw new Error('Quantidade de GPUs deve estar entre 0 e 8.');
+    }
+    if (gpuCount != null && gpuCount > 0 && (vramGb == null || vramGb <= 0)) {
+      throw new Error('Informe VRAM por GPU maior que zero.');
+    }
+    if (ramPreset === 'custom' && (ramGb == null || ramGb < 4)) {
+      throw new Error('RAM simulada personalizada deve ser de pelo menos 4 GB.');
+    }
+    if (ramGb != null && ramGb < 4) {
+      throw new Error('RAM simulada deve ser de pelo menos 4 GB.');
+    }
+    if (backend === 'cpu' && gpuCount != null && gpuCount > 0) {
+      throw new Error('Backend CPU-only exige 0 GPUs.');
+    }
+    if (gpuCount != null && gpuCount > 0 && !backend) {
+      throw new Error('Selecione um backend para simular GPU.');
+    }
+
+    var isGpuSimulated = presetId !== 'current' || (gpuCount != null && gpuCount >= 0) || vramGb != null || backend != null;
+    var isRamSimulated = ramGb != null;
+
+    if (!isGpuSimulated && !isRamSimulated) {
+      return null;
+    }
+
+    return {
+      gpuName: gpuName,
+      gpuCount: gpuCount,
+      vramGb: vramGb,
+      ramGb: ramGb,
+      backend: backend,
+      ignoreDetectedGpu: isGpuSimulated,
+      ignoreDetectedRam: isRamSimulated
+    };
+  }
 
   // ── Scan hardware ──────────────────────────────────────────────────────
   async function scanHardware(fresh) {
+    if (fresh) {
+      hwSimulation = null;
+      updateModeBadge();
+    }
     $('hw-cards').innerHTML = '<div class="wave1-empty">Escaneando hardware...</div>';
     try {
       var r = await fetch(daemonUrl() + '/api/hwfit/system?fresh=' + (fresh ? 'true' : 'false'));
       hwProfile = await r.json();
+      updateModeBadge();
       renderHardwareCards();
       loadModelRanking();
       $('hw-models-section').style.display = 'block';
@@ -301,7 +488,7 @@
   function renderHardwareCards() {
     if (!hwProfile) return;
     var gpuDetail = (hwProfile.gpus && hwProfile.gpus.length)
-      ? hwProfile.gpus.map(function (g) { return g.name + ' (' + g.vram_gb.toFixed(1) + ' GB ' + esc(g.backend) + ')'; }).join('<br>')
+      ? hwProfile.gpus.map(function (g) { return esc(g.name) + ' (' + g.vram_gb.toFixed(1) + ' GB ' + esc(g.backend) + ')'; }).join('<br>')
       : 'Nenhuma GPU detectada (CPU-only)';
 
     $('hw-cards').innerHTML =
@@ -319,10 +506,16 @@
     tbody.innerHTML = '<tr><td colspan="8" class="wave1-empty">Ranqueando modelos...</td></tr>';
 
     try {
-      var params = '?sort=' + sort + '&use_case=' + useCase + '&fit_only=false';
+      var params = '?sort=' + encodeURIComponent(sort) + '&use_case=' + encodeURIComponent(useCase) + '&fit_only=false' + buildHardwareOverrideParams();
       var r = await fetch(daemonUrl() + '/api/hwfit/models' + params);
       var data = await r.json();
       if (!data || !data.models) return;
+
+      if (data.hardware) {
+        hwProfile = data.hardware;
+        renderHardwareCards();
+      }
+      updateModeBadge();
 
       tbody.innerHTML = data.models.map(function (m) {
         var fitColor = m.fit_level === 'excellent' ? 'var(--green,#3fb950)' :
@@ -353,7 +546,7 @@
     list.innerHTML = '<div class="wave1-empty">Carregando perfis...</div>';
 
     try {
-      var q = '?model_id=' + encodeURIComponent(modelId) + '&params_b=' + paramsB + '&architecture=' + encodeURIComponent(arch) + '&is_moe=' + isMoe + '&context_length=' + ctxLen;
+      var q = '?model_id=' + encodeURIComponent(modelId) + '&params_b=' + paramsB + '&architecture=' + encodeURIComponent(arch) + '&is_moe=' + isMoe + '&context_length=' + ctxLen + buildHardwareOverrideParams();
       var r = await fetch(daemonUrl() + '/api/hwfit/profiles' + q);
       var profiles = await r.json();
 
@@ -378,21 +571,35 @@
 
   // ── Simulate hardware ──────────────────────────────────────────────────
   async function applySimulatedHardware() {
-    var body = {
-      manual_gpu_count: parseInt($('hw-sim-gpu-count').value) || null,
-      manual_vram_gb: parseFloat($('hw-sim-vram').value) || null,
-      manual_ram_gb: parseFloat($('hw-sim-ram').value) || null,
-      manual_backend: $('hw-sim-backend').value || null,
-      ignore_detected_gpu: !!$('hw-sim-gpu-count').value,
-      ignore_detected_ram: !!$('hw-sim-ram').value
-    };
     try {
-      var r = await fetch(daemonUrl() + '/api/hwfit/simulate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      hwProfile = await r.json();
-      renderHardwareCards();
-      loadModelRanking();
+      var sim = readSimulationFromForm();
+      if (!sim) {
+        await resetHardwareSimulation();
+        return;
+      }
+      hwSimulation = sim;
+      updateModeBadge();
       $('hw-models-section').style.display = 'block';
-    } catch (e) { console.error(e); }
+      await loadModelRanking();
+    } catch (e) {
+      console.error('wave5: simulation failed', e);
+      alert(e.message || 'Erro ao aplicar simulação');
+    }
+  }
+
+  async function resetHardwareSimulation() {
+    hwSimulation = null;
+    $('hw-sim-gpu-preset').value = 'current';
+    $('hw-sim-gpu-custom-box').style.display = 'none';
+    $('hw-sim-gpu-custom-name').value = '';
+    $('hw-sim-gpu-count').value = '1';
+    $('hw-sim-vram').value = '';
+    $('hw-sim-ram-preset').value = 'current';
+    $('hw-sim-ram-custom-box').style.display = 'none';
+    $('hw-sim-ram-custom').value = '';
+    $('hw-sim-backend').value = '';
+    updateModeBadge();
+    await scanHardware(false);
   }
 
   // ── Download model via catalog ─────────────────────────────────────────
@@ -432,6 +639,10 @@
 
   $('btn-hw-scan').addEventListener('click', function () { scanHardware(true); });
   $('btn-hw-sim-apply').addEventListener('click', applySimulatedHardware);
+  $('btn-hw-sim-reset').addEventListener('click', resetHardwareSimulation);
+  $('hw-sim-gpu-preset').addEventListener('change', onGpuPresetChange);
+  $('hw-sim-ram-preset').addEventListener('change', onRamPresetChange);
+  $('hw-sim-backend').addEventListener('change', onBackendChange);
   $('hw-sort').addEventListener('change', loadModelRanking);
   $('hw-use-case').addEventListener('change', loadModelRanking);
 
@@ -448,7 +659,7 @@
       }
       if (panel === 'hardware') {
         if (!hwProfile) scanHardware(false);
-        else { renderHardwareCards(); loadModelRanking(); }
+        else { updateModeBadge(); renderHardwareCards(); loadModelRanking(); }
       }
     });
   });
