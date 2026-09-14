@@ -22,6 +22,8 @@ pub enum RuntimeVariant {
     #[default]
     Classic,
     HermesInspired,
+    /// Ciclo Observe-Orient-Decide-Act para tarefas multi-etapa (ver `crate::ooda`).
+    Ooda,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -116,6 +118,9 @@ pub struct AgentRuntimeConfig {
     pub toolset_id: String,
     #[serde(default)]
     pub memory_snapshot_mode: MemorySnapshotMode,
+    /// Tetos do ciclo OODA. Ignorado nas outras variantes.
+    #[serde(default)]
+    pub ooda_limits: crate::ooda::OodaLimits,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,6 +139,8 @@ pub struct AgentRuntimeResponse {
     pub response: AgentResponse,
     pub stop_reason: StopReason,
     pub memory_context: MemoryContextBlock,
+    /// Plano, ciclos e motivo de parada — preenchido apenas na variante `Ooda`.
+    pub ooda: Option<crate::ooda::OodaOutcome>,
 }
 
 #[derive(Clone)]
@@ -180,7 +187,10 @@ impl AgentRuntime {
         };
         loop_config.session_id = session_id.clone();
 
-        let memory_context = if self.config.variant == RuntimeVariant::HermesInspired {
+        let memory_context = if matches!(
+            self.config.variant,
+            RuntimeVariant::HermesInspired | RuntimeVariant::Ooda
+        ) {
             memory_manager
                 .hydrate_context(
                     user_message,
@@ -239,6 +249,10 @@ impl AgentRuntime {
 
         let listener = self.spawn_persistence_listener(&session_id);
 
+        // `loop_config` é movido para dentro do `AgentLoop`; o modelo é o único campo que
+        // a resposta sintética do OODA precisa depois.
+        let model_id_snapshot = loop_config.model_id.clone();
+
         let mut loop_runner = AgentLoop::new(
             loop_config,
             provider,
@@ -250,7 +264,25 @@ impl AgentRuntime {
             audit,
         );
 
-        let result = loop_runner.run(user_message).await;
+        // Na variante OODA o controlador dirige o `AgentLoop` passo a passo, em vez de
+        // entregar a mensagem inteira de uma vez. O resto do fluxo (persistência de
+        // sessão, memória, eventos) é o mesmo.
+        let mut ooda_outcome = None;
+        let result = if self.config.variant == RuntimeVariant::Ooda {
+            let controller = crate::ooda::OodaController::new(self.config.ooda_limits.clone());
+            let mut executor = crate::ooda::AgentLoopExecutor::new(&mut loop_runner);
+            match controller.run(&mut executor, user_message).await {
+                Ok(outcome) => {
+                    let response = ooda_response(&session_id, &model_id_snapshot, &outcome);
+                    ooda_outcome = Some(outcome);
+                    Ok(response)
+                }
+                Err(error) => Err(error),
+            }
+        } else {
+            loop_runner.run(user_message).await
+        };
+
         if let Some(task) = listener {
             let _ = task.await;
         }
@@ -284,10 +316,15 @@ impl AgentRuntime {
                     .await
                     .unwrap_or_default();
                 self.persist_lifecycle(&session_id, lifecycle).await;
+                let stop_reason = ooda_outcome
+                    .as_ref()
+                    .map(|outcome| map_ooda_stop_reason(outcome.stop_reason))
+                    .unwrap_or(StopReason::Completed);
                 Ok(AgentRuntimeResponse {
                     response,
-                    stop_reason: StopReason::Completed,
+                    stop_reason,
                     memory_context,
+                    ooda: ooda_outcome,
                 })
             }
             Err(error) => Err(error),
@@ -427,6 +464,60 @@ impl AgentRuntime {
                 }
             }
         }))
+    }
+}
+
+/// Converte o desfecho do ciclo OODA na `AgentResponse` que a API já devolve.
+///
+/// O contador de iterações vira o número de ciclos: é o que significa "uma rodada de
+/// trabalho" nessa variante. O uso de tokens fica zerado porque foi contabilizado nos
+/// passos individuais, cada um com seu próprio run.
+fn ooda_response(
+    session_id: &str,
+    model_id: &str,
+    outcome: &crate::ooda::OodaOutcome,
+) -> AgentResponse {
+    AgentResponse {
+        session_id: session_id.to_string(),
+        content: outcome.final_response.clone(),
+        iterations: outcome.cycles.len(),
+        tool_calls_made: outcome.tool_calls_made,
+        usage: mlx_ollama_core::TokenUsage {
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+        },
+        latency_ms: outcome.elapsed_ms,
+        budget: crate::ContextBudgetTelemetry {
+            session_id: session_id.to_string(),
+            provider_id: String::new(),
+            model_id: model_id.to_string(),
+            model_profile: "ooda".to_string(),
+            tool_profile: String::new(),
+            max_prompt_tokens: 0,
+            prompt_tokens_estimate: 0,
+            prompt_tokens_before_compression: 0,
+            history_messages_total: 0,
+            history_messages_used: 0,
+            summarized_messages: 0,
+            summary_entries: 0,
+            tools_considered: 0,
+            tools_in_prompt: 0,
+            critical: false,
+            response_style: crate::context_budget::ResponseStyle::Normal,
+            last_updated: Utc::now(),
+        },
+        summary_artifacts: Vec::new(),
+    }
+}
+
+/// Traduz o motivo de parada do OODA para o `StopReason` da API.
+fn map_ooda_stop_reason(reason: crate::ooda::OodaStopReason) -> StopReason {
+    use crate::ooda::OodaStopReason as Ooda;
+    match reason {
+        Ooda::Completed | Ooda::CompletedWithFailures => StopReason::Completed,
+        Ooda::MaxCycles | Ooda::MaxToolCalls | Ooda::Deadline => StopReason::MaxIterations,
+        Ooda::EmptyPlan | Ooda::Failed => StopReason::Failed,
     }
 }
 
@@ -660,6 +751,7 @@ mod tests {
                 session_name: Some("Test".to_string()),
                 toolset_id: "general".to_string(),
                 memory_snapshot_mode: MemorySnapshotMode::Session,
+                ooda_limits: crate::ooda::OodaLimits::default(),
             },
             sessions.clone(),
             memory,

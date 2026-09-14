@@ -161,6 +161,11 @@ pub struct AgentLoop {
     context_budget: ContextBudgetManager,
     /// In-memory conversation history for the current run.
     history: Vec<ChatMessage>,
+    /// Tool calls executed across every `run` on this instance.
+    ///
+    /// `AgentResponse::tool_calls_made` counts a single run; the OODA controller needs a
+    /// running total to enforce a budget across the whole plan.
+    tool_calls_total: usize,
 }
 
 impl AgentLoop {
@@ -188,7 +193,30 @@ impl AgentLoop {
             audit,
             history,
             context_budget: ContextBudgetManager,
+            tool_calls_total: 0,
         }
+    }
+
+    /// Total acumulado de tool calls em todas as execuções desta instância.
+    pub fn tool_calls_total(&self) -> usize {
+        self.tool_calls_total
+    }
+
+    /// Executa uma consulta ao modelo sem oferecer ferramentas.
+    ///
+    /// Usado pelas fases de planejamento do OODA: planejar não deve alterar o workspace,
+    /// e um modelo pequeno com ferramentas à mão tende a executar o passo em vez de
+    /// listá-lo. `ExecutionMode::Locked` já faz `filter_tools` devolver vazio, então o
+    /// caminho é o mesmo do run normal, só que sem tools.
+    pub async fn run_without_tools(
+        &mut self,
+        user_message: &str,
+    ) -> Result<AgentResponse, AgentError> {
+        let previous_mode = self.config.mode;
+        self.config.mode = ExecutionMode::Locked;
+        let result = self.run(user_message).await;
+        self.config.mode = previous_mode;
+        result
     }
 
     /// Run the agent loop with a user message.
@@ -477,6 +505,7 @@ impl AgentLoop {
 
             for tool_call in &assistant_msg.tool_calls {
                 total_tool_calls += 1;
+                self.tool_calls_total += 1;
 
                 debug!(
                     session = %session_id,

@@ -455,6 +455,10 @@ fn workflow_generator_agent_request(
         provider_profile_id: request.agent_provider_profile_id.clone(),
         workspace_root: None,
         provider_timeout_secs: None,
+        ooda_max_cycles: None,
+        ooda_max_steps: None,
+        ooda_max_tool_calls: None,
+        ooda_deadline_secs: None,
     }
 }
 
