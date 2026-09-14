@@ -881,10 +881,7 @@ mod tests {
             simulated.gpus[0].bandwidth_gb_s,
             Some(estimate_gpu_bandwidth("NVIDIA GeForce RTX 5070", "cuda"))
         );
-        assert!(
-            simulated.gpus[0].bandwidth_gb_s.unwrap()
-                > estimate_gpu_bandwidth("CPU", "cpu")
-        );
+        assert!(simulated.gpus[0].bandwidth_gb_s.unwrap() > estimate_gpu_bandwidth("CPU", "cpu"));
     }
 
     #[test]
@@ -934,16 +931,7 @@ mod tests {
             detected_at: Utc::now().to_rfc3339(),
         };
 
-        let simulated = simulate_hardware(
-            &base,
-            None,
-            None,
-            Some(64.0),
-            None,
-            None,
-            false,
-            true,
-        );
+        let simulated = simulate_hardware(&base, None, None, Some(64.0), None, None, false, true);
 
         assert_eq!(simulated.ram_gb, 64.0);
         assert!((simulated.available_ram_gb - 57.6).abs() < 0.01);
