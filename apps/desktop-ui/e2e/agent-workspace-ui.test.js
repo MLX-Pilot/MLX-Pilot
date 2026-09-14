@@ -380,6 +380,36 @@ function createFixture({
       return jsonResponse(hiddenEnvironment);
     }
 
+    if (path === "/integrations/n8n/workflows/list" && method === "POST") {
+      return jsonResponse({
+        workflows: {
+          data: [{ id: "workflow-1", name: "Workflow salvo", active: false }],
+        },
+      });
+    }
+
+    if (path === "/integrations/n8n/workflows/save" && method === "POST") {
+      return jsonResponse({
+        created: !body?.workflow_id,
+        workflow_id: body?.workflow_id || "workflow-1",
+        editor_url: "http://127.0.0.1:5678/workflow/workflow-1",
+        workflow: { id: body?.workflow_id || "workflow-1", ...body?.workflow },
+      });
+    }
+
+    if (path === "/integrations/n8n/workflows/get" && method === "POST") {
+      return jsonResponse({
+        workflow_id: body?.workflow_id,
+        workflow: {
+          id: body?.workflow_id,
+          name: "Workflow salvo",
+          nodes: [{ id: "manual-1", name: "Manual Trigger", type: "n8n-nodes-base.manualTrigger", typeVersion: 1, position: [400, 300], parameters: {} }],
+          connections: {},
+          settings: { executionOrder: "v1" },
+        },
+      });
+    }
+
     if (path === "/web/brave/search" && method === "POST") {
       return jsonResponse({
         query: body?.query || "",
@@ -947,6 +977,34 @@ test("sidebar global aparece apenas no chat e some nas outras abas", async () =>
     fixture.document.querySelector('.tab[data-panel="chat"]')?.click();
     await flush(2);
     assert.equal(fixture.document.getElementById("app")?.classList.contains("chat-sidebar-visible"), true);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("workflow editor cria nos e salva JSON compativel com n8n", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(3);
+
+    assert.equal(fixture.document.querySelectorAll("#workflow-nodes .workflow-node").length, 1);
+    fixture.document.querySelector('[data-workflow-node-type="code"]')?.click();
+    assert.equal(fixture.document.querySelectorAll("#workflow-nodes .workflow-node").length, 2);
+    assert.match(fixture.document.getElementById("workflow-inspector")?.textContent || "", /Code/);
+
+    fixture.document.getElementById("n8n-api-key").value = "test-api-key";
+    fixture.document.getElementById("workflow-save-btn")?.click();
+    await flush(5);
+
+    const saveCall = fixture.fetchCalls.find((entry) => entry.path === "/integrations/n8n/workflows/save");
+    assert.ok(saveCall);
+    assert.equal(saveCall.body.api_key, "test-api-key");
+    assert.equal(saveCall.body.workflow.nodes.length, 2);
+    assert.equal(fixture.document.getElementById("workflow-save-state")?.textContent, "Salvo");
+    assert.equal(fixture.document.getElementById("workflow-open-n8n-btn")?.hidden, false);
   } finally {
     fixture.cleanup();
   }
