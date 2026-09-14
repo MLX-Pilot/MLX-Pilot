@@ -148,6 +148,34 @@ fn logical_normalize(path: &Path) -> PathBuf {
     components.iter().collect()
 }
 
+/// Diretorios que as buscas recursivas nunca percorrem.
+///
+/// Sao ruido previsivel: artefatos de build, dependencias baixadas, metadados de VCS e o
+/// proprio estado do agente. Sem isso, um grep num projeto Rust real gasta o limite de
+/// matches dentro de `target/`, e os payloads de checkpoint — que sao copias dos
+/// arquivos do usuario — aparecem como ocorrencias duplicadas do que se procura.
+const IGNORED_DIR_NAMES: &[&str] = &[
+    ".mlx-pilot",
+    ".git",
+    ".hg",
+    ".svn",
+    "node_modules",
+    "target",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".next",
+    "dist",
+    ".cache",
+];
+
+/// Se uma busca recursiva deve pular este diretorio.
+pub fn is_ignored_dir(path: &std::path::Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| IGNORED_DIR_NAMES.contains(&name))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

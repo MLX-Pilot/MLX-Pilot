@@ -139,6 +139,9 @@ fn collect_matches(
             })?;
 
         if metadata.is_dir() {
+            if crate::sandbox::is_ignored_dir(&path) {
+                continue;
+            }
             collect_matches(workspace_root, &path, pattern, matches, limit)?;
             continue;
         }

@@ -1,5 +1,8 @@
 # Relatório de Teste do Agente — MLX Pilot
 
+> **Atualização 2026-09-14** — todas as correções deste relatório foram aplicadas na `main`, e a bateria foi repetida com `qwen3.5:9b`. Resultados atuais em [§8](#8-rodada-com-qwen359b-2026-09-14).
+
+
 Data: 2026-09-13 · Autor: sessão de teste automatizada · Endpoint: `POST /agent/run` (daemon debug em `127.0.0.1:11435`)
 
 ## 1. Ambiente
@@ -85,3 +88,47 @@ node runner.mjs "qwen2.5:7b-instruct-q4_K_M" hermes_inspired report-qwen25-herme
 node analyze.mjs report-qwen25-hermes.json
 node probe.mjs   # sondas de segurança/contexto
 ```
+
+---
+
+## 8. Rodada com qwen3.5:9b (2026-09-14)
+
+### Escolha do modelo
+
+Pedido: Qwen acima da 3.0, ~7–9B, Q4, que rode bem na RTX 5070 (12 GB).
+
+- **`qwen3.5:9b`** — 9,7B, Q4_K_M, 262k de contexto, `tools` + `vision` + `thinking`. ~6,6 GB. **Escolhido.**
+- **`qwen3.6`** — existe na biblioteca do Ollama, mas só em dois builds: `latest` (22,6 GB) e `27b` (17,8 GB). Não há variante 7–9B. Mesmo o menor passa 46% do limite de VRAM, então ~1/3 das camadas rodaria na CPU — inviável para uma bateria com dezenas de chamadas por run. **Descartado por não caber**, não por qualidade.
+
+### Placar
+
+| | qwen2.5:7b | qwen3.5:9b |
+|---|---|---|
+| Checks PASS / FAIL | 32 / 1 | **32 / 1** |
+| Respostas vazias | 0 | 0 |
+| Latência típica (1 tool) | ~1,2 s | ~3,5 s |
+| VRAM | 4,7 GB | 6,6 GB |
+
+O placar empata, mas a **qualidade do conteúdo** não: ver a comparação de OODA abaixo. O único FAIL nos dois é o T19, onde o modelo resolve a tarefa com `glob` em vez de delegar — escolha defensável numa contagem de 2 arquivos.
+
+### Dois defeitos que só um modelo com raciocínio separado revelou
+
+**Resposta final vazia (4 de 24 casos).** O Ollama devolve `thinking` em campo separado de `content`. Em casos onde uma ferramenta já respondera a pergunta, a qwen3.5 gastava o turno inteiro raciocinando e emitia `content: ""` — e o loop entregava string vazia ao usuário. A qwen2.5, que não separa raciocínio, só fez isso 1 vez. Corrigido: um turno final sem conteúdo dispara **um** pedido de conclusão antes de desistir (`EMPTY_ANSWER_REPROMPT`). Depois do fix: **0 respostas vazias**.
+
+**Buscas percorriam estado interno e artefatos de build.** O `grep` retornou `.mlx-pilot/checkpoints/payloads/*.bin` — cópias que o próprio sistema de rollback faz dos arquivos do usuário — e o agente respondeu citando um `.bin` em vez do arquivo fonte. Nenhuma ferramenta de busca ignorava nada: nem `.git`, nem `target/`, nem `node_modules/`. Num projeto Rust real, `target/` sozinho consome o limite de matches. Corrigido com uma lista compartilhada (`sandbox::is_ignored_dir`) usada por `grep` e `glob`.
+
+Os dois fixes beneficiaram também a qwen2.5, que subiu de 31/2 para 32/1.
+
+### OODA: onde o modelo melhor aparece
+
+Mesma tarefa multi-etapa (*contar arquivos .rs, ler cada um, escrever `docs/analise.md` com as funções públicas*):
+
+| | qwen2.5:7b | qwen3.5:9b |
+|---|---|---|
+| Ciclos / tool calls | 6 / 7 | 5 / 12 |
+| Replanejamentos | 0 | 1 |
+| Artefato | `parse_config` solto, sem assinatura; ignorou `main.rs` | assinatura completa, constante pública, e **identificou corretamente que `main.rs` não tem função `pub`** |
+
+O conteúdo da qwen3.5 foi conferido contra os arquivos: `MAX_RETRIES = 5` (estado real após o T08 editar), e `main`/`compute` são de fato privadas. Análise factualmente correta.
+
+O ciclo também exercitou o replanejamento pela primeira vez num run real: um passo falhou, o plano foi revisado, e o run concluiu.
