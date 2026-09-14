@@ -454,6 +454,7 @@ fn workflow_generator_agent_request(
         toolset_id: None,
         provider_profile_id: request.agent_provider_profile_id.clone(),
         workspace_root: None,
+        provider_timeout_secs: None,
     }
 }
 

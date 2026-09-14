@@ -147,6 +147,9 @@ pub struct AgentRunRequest {
     /// Workspace root override.
     #[serde(default)]
     pub workspace_root: Option<String>,
+    /// Teto de tempo, em segundos, para cada chamada ao provider (0 = sem teto).
+    #[serde(default)]
+    pub provider_timeout_secs: Option<u64>,
 }
 
 /// POST /agent/gateway/events request body.
@@ -923,6 +926,7 @@ fn parse_approval_mode(s: Option<&str>) -> ApprovalMode {
     match s.map(str::to_ascii_lowercase).as_deref() {
         Some("auto") => ApprovalMode::Auto,
         Some("deny") => ApprovalMode::Deny,
+        Some("risk_based") | Some("risk-based") => ApprovalMode::RiskBased,
         _ => ApprovalMode::Ask,
     }
 }
@@ -2942,6 +2946,7 @@ impl crate::agent_runtime_tools::DelegateSessionExecutor for DelegateExecutor {
             ),
             provider_profile_id: None,
             workspace_root: Some(self.workspace.display().to_string()),
+            provider_timeout_secs: None,
         };
 
         let response = run_agent_once(
@@ -3561,6 +3566,11 @@ async fn run_agent_once(
         mode,
         tool_profile: parse_tool_profile(Some(agent_cfg.tool_policy.profile.as_str())),
         skill_filter: Some(enabled_skills),
+        provider_timeout: request
+            .provider_timeout_secs
+            .filter(|secs| *secs > 0)
+            .map(std::time::Duration::from_secs)
+            .unwrap_or(mlx_agent_core::DEFAULT_PROVIDER_TIMEOUT),
     };
 
     info!(
@@ -4064,6 +4074,7 @@ pub async fn agent_gateway_event(
         toolset_id: request.toolset_id.clone(),
         provider_profile_id: request.provider_profile_id.clone(),
         workspace_root: request.workspace_root.clone(),
+        provider_timeout_secs: None,
     };
 
     let response = execute_agent_request(&state, run_request).await?;
@@ -5763,6 +5774,7 @@ mod tests {
             toolset_id: None,
             provider_profile_id: None,
             workspace_root: None,
+            provider_timeout_secs: None,
         }
     }
 
@@ -5839,6 +5851,7 @@ mod tests {
             toolset_id: None,
             provider_profile_id: None,
             workspace_root: None,
+            provider_timeout_secs: None,
         };
         let default_profile = resolve_provider_profile(&cfg, &default_request).unwrap();
         assert_eq!(default_profile.id, "ollama-local");
@@ -5878,6 +5891,7 @@ mod tests {
             toolset_id: None,
             provider_profile_id: Some("mlx-local".to_string()),
             workspace_root: None,
+            provider_timeout_secs: None,
         };
         let explicit_profile = resolve_provider_profile(&cfg, &explicit_request).unwrap();
         assert_eq!(explicit_profile.id, "mlx-local");

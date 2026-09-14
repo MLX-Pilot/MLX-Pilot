@@ -13,8 +13,8 @@ use crate::registry::ToolRegistry;
 use crate::tool_catalog::ToolProfileName;
 use mlx_agent_tools::ExecutionMode;
 use mlx_ollama_core::{
-    ChatMessage, ChatRequest, ChatToolsRequest, FunctionDef, GenerationOptions, MessageRole,
-    ModelProvider, ProviderError, RuntimeProviderConfig, TokenUsage, ToolCallRequest,
+    ChatMessage, ChatRequest, ChatResponse, ChatToolsRequest, FunctionDef, GenerationOptions,
+    MessageRole, ModelProvider, ProviderError, RuntimeProviderConfig, TokenUsage, ToolCallRequest,
 };
 use sha2::{Digest, Sha256};
 use std::borrow::Cow;
@@ -42,6 +42,11 @@ pub struct AgentLoopConfig {
     pub mode: ExecutionMode,
     pub tool_profile: ToolProfileName,
     pub skill_filter: Option<Vec<String>>,
+    /// Teto de tempo para uma única chamada ao provider.
+    ///
+    /// Sem isso, um modelo local que engasga num prompt grande pendura a requisição HTTP
+    /// inteira até o cliente desistir, sem nenhuma mensagem de erro.
+    pub provider_timeout: std::time::Duration,
 }
 
 impl Default for AgentLoopConfig {
@@ -64,7 +69,35 @@ impl Default for AgentLoopConfig {
             mode: ExecutionMode::Full,
             tool_profile: ToolProfileName::default(),
             skill_filter: None,
+            provider_timeout: DEFAULT_PROVIDER_TIMEOUT,
         }
+    }
+}
+
+/// Teto padrão por chamada ao provider.
+///
+/// Generoso o bastante para um modelo local grande gerar uma resposta longa, curto o
+/// bastante para virar erro acionável em vez de uma requisição pendurada.
+pub const DEFAULT_PROVIDER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
+
+/// Aplica o teto de tempo a uma chamada de provider, convertendo o estouro em
+/// `ProviderError::Timeout` para o loop tratar como qualquer outra falha de provider.
+async fn with_provider_timeout<F>(
+    timeout: std::time::Duration,
+    future: F,
+) -> Result<ChatResponse, ProviderError>
+where
+    F: std::future::Future<Output = Result<ChatResponse, ProviderError>>,
+{
+    if timeout.is_zero() {
+        return future.await;
+    }
+
+    match tokio::time::timeout(timeout, future).await {
+        Ok(result) => result,
+        Err(_) => Err(ProviderError::Timeout {
+            seconds: timeout.as_secs(),
+        }),
     }
 }
 
@@ -311,11 +344,16 @@ impl AgentLoop {
                 options,
             };
 
-            let (response, used_direct_fallback) = match self
-                .provider
-                .chat_with_tools_with_runtime(tool_request, self.config.provider_runtime.clone())
-                .await
-            {
+            let tool_call_result = with_provider_timeout(
+                self.config.provider_timeout,
+                self.provider.chat_with_tools_with_runtime(
+                    tool_request,
+                    self.config.provider_runtime.clone(),
+                ),
+            )
+            .await;
+
+            let (response, used_direct_fallback) = match tool_call_result {
                 Ok(response) => (response, false),
                 Err(error)
                     if self.config.enable_tool_call_fallback
@@ -328,10 +366,14 @@ impl AgentLoop {
                                 .to_string(),
                     });
 
-                    match self
-                        .provider
-                        .chat_with_runtime(direct_request, self.config.provider_runtime.clone())
-                        .await
+                    match with_provider_timeout(
+                        self.config.provider_timeout,
+                        self.provider.chat_with_runtime(
+                            direct_request,
+                            self.config.provider_runtime.clone(),
+                        ),
+                    )
+                    .await
                     {
                         Ok(response) => (response, true),
                         Err(fallback_error) => {
@@ -531,6 +573,7 @@ impl AgentLoop {
             params_summary: params_summary.clone(),
             created_at: chrono::Utc::now(),
             expires_at: chrono::Utc::now() + std::time::Duration::from_secs(300),
+            risk: tool_risk.clone(),
         };
 
         self.event_bus
@@ -1191,6 +1234,7 @@ mod tests {
                 mode: ExecutionMode::Full,
                 tool_profile: ToolProfileName::Coding,
                 skill_filter: None,
+                provider_timeout: DEFAULT_PROVIDER_TIMEOUT,
             },
             provider,
             ToolRegistry::with_builtins(),

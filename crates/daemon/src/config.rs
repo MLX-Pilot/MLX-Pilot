@@ -81,6 +81,11 @@ impl Default for AgentSecurityConfig {
             block_direct_ip_egress: true,
             tool_allowlist: Vec::new(),
             tool_denylist: Vec::new(),
+            // Binarios de inspecao, que nao alteram o sistema nem executam codigo do
+            // projeto. Ferramentas de build (`cargo`, `npm`, `make`) ficam de fora de
+            // proposito: elas rodam build scripts arbitrarios, entao continuam passando
+            // pelo fluxo de aprovacao. Quem quiser pode adiciona-las em
+            // `security.exec_safe_bins`.
             exec_safe_bins: vec![
                 "ls".to_string(),
                 "cat".to_string(),
@@ -88,12 +93,30 @@ impl Default for AgentSecurityConfig {
                 "git".to_string(),
                 "find".to_string(),
                 "rg".to_string(),
+                "echo".to_string(),
+                "pwd".to_string(),
+                "head".to_string(),
+                "tail".to_string(),
+                "wc".to_string(),
+                "which".to_string(),
             ],
             exec_deny_patterns: vec![
-                "rm -rf *".to_string(),
+                "rm -rf*".to_string(),
+                "rm -fr*".to_string(),
                 "sudo *".to_string(),
                 "chmod 777 *".to_string(),
                 "mkfs*".to_string(),
+                "dd if=*".to_string(),
+                // Formas destrutivas do Windows — a ordem das flags varia, entao o
+                // casamento e por substring do verbo mais uma barra de opcao.
+                "del /".to_string(),
+                "erase /".to_string(),
+                "rd /s".to_string(),
+                "rmdir /s".to_string(),
+                "format ".to_string(),
+                "diskpart".to_string(),
+                "vssadmin delete".to_string(),
+                "reg delete".to_string(),
             ],
             sensitive_paths: vec![
                 "~/.ssh/*".to_string(),

@@ -21,7 +21,7 @@ impl GlobTool {
                 "properties": {
                     "pattern": {
                         "type": "string",
-                        "description": "Glob relativo ao workspace, por exemplo `src/**/*.ts`"
+                        "description": "Glob relativo ao workspace. Use `**/` para descer em subpastas (`src/**/*.ts`). Um padrao sem barra (`*.rs`) busca pelo nome do arquivo em toda a arvore."
                     },
                     "base_path": {
                         "type": "string",
@@ -51,7 +51,7 @@ impl crate::Tool for GlobTool {
     }
 
     fn description(&self) -> &str {
-        "Encontra arquivos por padrao glob dentro do workspace, como `src/**/*.ts`."
+        "Encontra arquivos por padrao glob dentro do workspace, como `src/**/*.ts`. Um padrao sem barra, como `*.rs`, busca pelo nome em toda a arvore."
     }
 
     fn parameters(&self) -> &ParamSchema {
@@ -157,7 +157,7 @@ fn collect_matches(
 }
 
 fn matches_glob_pattern(pattern: &str, path: &str) -> bool {
-    glob_match(pattern, path)
+    if glob_match(pattern, path)
         || pattern
             .contains("/**/")
             .then(|| pattern.replace("/**/", "/"))
@@ -165,6 +165,19 @@ fn matches_glob_pattern(pattern: &str, path: &str) -> bool {
         || pattern
             .strip_prefix("**/")
             .is_some_and(|alternate| glob_match(alternate, path))
+    {
+        return true;
+    }
+
+    // Um padrão sem barra ("*.rs") é uma busca por nome de arquivo, não por um arquivo na
+    // raiz. Tratar como estritamente não-recursivo devolvia "nenhum resultado" para o
+    // pedido mais comum e o modelo concluía que o projeto não tinha arquivos .rs.
+    if !pattern.contains('/') {
+        let file_name = path.rsplit('/').next().unwrap_or(path);
+        return glob_match(pattern, file_name);
+    }
+
+    false
 }
 
 fn relative_path(workspace_root: &Path, path: &Path) -> String {
@@ -219,5 +232,14 @@ mod tests {
     fn glob_helper_matches_shallow_and_nested() {
         assert!(matches_glob_pattern("src/**/*.ts", "src/main.ts"));
         assert!(matches_glob_pattern("src/**/*.ts", "src/nested/util.ts"));
+
+        // Padrao sem barra busca pelo nome do arquivo em qualquer profundidade.
+        assert!(matches_glob_pattern("*.rs", "src/main.rs"));
+        assert!(matches_glob_pattern("*.rs", "src/nested/util.rs"));
+        assert!(matches_glob_pattern("*.rs", "main.rs"));
+        assert!(!matches_glob_pattern("*.rs", "src/main.ts"));
+
+        // Um padrao com barra continua ancorado no caminho.
+        assert!(!matches_glob_pattern("src/*.rs", "outro/main.rs"));
     }
 }

@@ -686,6 +686,7 @@ mod tests {
                     mode: ExecutionMode::Full,
                     tool_profile: ToolProfileName::Coding,
                     skill_filter: None,
+                    provider_timeout: crate::DEFAULT_PROVIDER_TIMEOUT,
                 },
                 "mock",
                 Arc::new(MockProvider::new()),

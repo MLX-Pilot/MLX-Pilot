@@ -87,7 +87,24 @@ impl Default for PolicyConfig {
                 "git".into(),
                 "curl".into(),
             ],
-            exec_deny_patterns: vec!["rm -rf /".into(), "sudo".into(), "chmod 777".into()],
+            exec_deny_patterns: vec![
+                "rm -rf".into(),
+                "rm -fr".into(),
+                "sudo".into(),
+                "chmod 777".into(),
+                "mkfs".into(),
+                "dd if=".into(),
+                // Formas destrutivas do Windows; a ordem das flags varia, entao o
+                // casamento e pelo verbo mais uma barra de opcao.
+                "del /".into(),
+                "erase /".into(),
+                "rd /s".into(),
+                "rmdir /s".into(),
+                "format ".into(),
+                "diskpart".into(),
+                "vssadmin delete".into(),
+                "reg delete".into(),
+            ],
             file_deny_paths: vec!["~/.ssh/".into(), "~/.aws/".into(), "~/.gnupg/".into()],
             network_allow_domains: Vec::new(),
             block_direct_ip_egress: true,
@@ -339,10 +356,13 @@ impl PolicyEngine for DefaultPolicyEngine {
         }
 
         if tool_name == "exec" {
-            let cmd = params.get("command").and_then(|v| v.as_str()).unwrap_or("");
+            // The exec tool runs `argv` whenever it is present and only falls back to
+            // `command`. Policy therefore has to inspect the *effective* invocation, or a
+            // destructive argv slips past both the deny patterns and the safe-bin allowlist.
+            let effective = EffectiveExecCommand::from_params(params);
 
             for deny in &self.config.exec_deny_patterns {
-                if glob_match::glob_match(deny, cmd) || cmd.contains(deny) {
+                if effective.matches_deny_pattern(deny) {
                     trace.push(policy_trace("exec_pattern", "deny", deny));
                     return deny_inspection(
                         format!("Command matches deny pattern: {}", deny),
@@ -353,11 +373,7 @@ impl PolicyEngine for DefaultPolicyEngine {
                 }
             }
 
-            let is_safe = self
-                .config
-                .exec_safe_bins
-                .iter()
-                .any(|bin| cmd == bin || cmd.starts_with(&format!("{} ", bin)));
+            let is_safe = effective.is_safe_bin(&self.config.exec_safe_bins);
 
             if !is_safe {
                 trace.push(policy_trace("exec_risk", "ask", "unsafe_command"));
@@ -365,7 +381,7 @@ impl PolicyEngine for DefaultPolicyEngine {
                     decision: PolicyDecision::Ask {
                         prompt: format!(
                             "The agent wants to run a potentially unsafe command: `{}`",
-                            cmd
+                            effective.display()
                         ),
                         approval_id: uuid::Uuid::new_v4().to_string(),
                     },
@@ -580,6 +596,103 @@ fn matches_glob_any(patterns: &[String], value: &str) -> bool {
         .iter()
         .filter(|pattern| !pattern.trim().is_empty())
         .any(|pattern| glob_match::glob_match(pattern, value))
+}
+
+/// The invocation `exec` will actually run, reconciled from both parameter forms.
+///
+/// `ExecTool::resolve_argv` prefers `argv` and only falls back to `command`, so policy
+/// checks must cover the same surface. Both forms are kept because a caller may send a
+/// harmless `command` alongside a destructive `argv` (or vice versa) — every candidate
+/// string is screened.
+#[derive(Debug, Default)]
+pub(crate) struct EffectiveExecCommand {
+    /// Command lines to screen against deny patterns (argv joined, and the raw `command`).
+    candidates: Vec<String>,
+    /// The program that will be launched, used for the safe-bin allowlist.
+    program: String,
+}
+
+impl EffectiveExecCommand {
+    pub(crate) fn from_params(params: &serde_json::Value) -> Self {
+        let mut candidates = Vec::new();
+        let mut program = String::new();
+
+        if let Some(argv) = params.get("argv").and_then(|v| v.as_array()) {
+            let parts = argv
+                .iter()
+                .filter_map(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+            if let Some(first) = parts.first() {
+                program = first.clone();
+            }
+            if !parts.is_empty() {
+                candidates.push(parts.join(" "));
+            }
+        }
+
+        if let Some(command) = params.get("command").and_then(|v| v.as_str()) {
+            let command = command.trim();
+            if !command.is_empty() {
+                candidates.push(command.to_string());
+                // `argv` wins at execution time; only trust `command` for the program name
+                // when no argv was supplied.
+                if program.is_empty() {
+                    if let Some(first) = command.split_whitespace().next() {
+                        program = first.to_string();
+                    }
+                }
+            }
+        }
+
+        Self {
+            candidates,
+            program,
+        }
+    }
+
+    /// Human-readable form for approval prompts and audit entries.
+    pub(crate) fn display(&self) -> String {
+        self.candidates.first().cloned().unwrap_or_default()
+    }
+
+    pub(crate) fn matches_deny_pattern(&self, deny: &str) -> bool {
+        if deny.trim().is_empty() {
+            return false;
+        }
+        let deny_lower = deny.to_lowercase();
+        self.candidates.iter().any(|candidate| {
+            let lower = candidate.to_lowercase();
+            glob_match::glob_match(&deny_lower, &lower) || lower.contains(&deny_lower)
+        })
+    }
+
+    /// True only when the program being launched is on the allowlist.
+    ///
+    /// Matching is done on the executable's file stem so that `/usr/bin/git`,
+    /// `git.exe` and `git` are treated alike.
+    pub(crate) fn is_safe_bin(&self, safe_bins: &[String]) -> bool {
+        if self.program.is_empty() {
+            return false;
+        }
+        let stem = program_stem(&self.program);
+        safe_bins
+            .iter()
+            .map(|bin| program_stem(bin))
+            .any(|bin| !bin.is_empty() && bin == stem)
+    }
+}
+
+/// Lowercased file stem of a program path (`C:\Windows\cmd.exe` -> `cmd`).
+fn program_stem(program: &str) -> String {
+    let normalized = program.trim().replace('\\', "/");
+    let file = normalized.rsplit('/').next().unwrap_or(&normalized);
+    let stem = file.strip_suffix(".exe").unwrap_or(file);
+    let stem = stem.strip_suffix(".cmd").unwrap_or(stem);
+    let stem = stem.strip_suffix(".bat").unwrap_or(stem);
+    stem.to_lowercase()
 }
 
 fn is_mutating_tool(tool_name: &str) -> bool {
@@ -801,6 +914,67 @@ mod tests {
         let config = PolicyConfig::default();
         assert!(config.exec_safe_bins.contains(&"git".to_string()));
         assert!(config.exec_safe_bins.contains(&"cat".to_string()));
+    }
+
+    #[test]
+    fn deny_patterns_reach_the_argv_form() {
+        // Regressão: a política lia só `command`, mas o ExecTool executa `argv`. Um argv
+        // destrutivo passava tanto pelos deny patterns quanto pela allowlist.
+        let effective = EffectiveExecCommand::from_params(&serde_json::json!({
+            "argv": ["sudo", "rm", "-rf", "/"]
+        }));
+        assert!(effective.matches_deny_pattern("sudo"));
+        assert!(effective.matches_deny_pattern("rm -rf /"));
+    }
+
+    #[test]
+    fn benign_command_field_does_not_launder_a_destructive_argv() {
+        // O que o modelo mandou no teste real: `command` inofensivo + `argv` perigoso.
+        let effective = EffectiveExecCommand::from_params(&serde_json::json!({
+            "command": "ls",
+            "argv": ["cmd", "/c", "del", "/q", "src/main.rs"]
+        }));
+
+        // O programa efetivo é `cmd`, não o `ls` declarado, então não é safe-bin.
+        assert!(!effective.is_safe_bin(&["ls".to_string(), "cat".to_string()]));
+        assert!(effective.matches_deny_pattern("del /"));
+    }
+
+    #[test]
+    fn safe_bin_matching_ignores_path_and_extension() {
+        let safe_bins = vec!["git".to_string()];
+
+        for program in [
+            "git",
+            "git.exe",
+            "/usr/bin/git",
+            "C:\\Program Files\\git.exe",
+        ] {
+            let effective = EffectiveExecCommand::from_params(
+                &serde_json::json!({ "argv": [program, "status"] }),
+            );
+            assert!(
+                effective.is_safe_bin(&safe_bins),
+                "deveria aceitar {program}"
+            );
+        }
+    }
+
+    #[test]
+    fn safe_bin_requires_the_program_not_a_substring() {
+        // `git` na allowlist não pode liberar um binário que apenas comece com "git".
+        let effective = EffectiveExecCommand::from_params(&serde_json::json!({
+            "argv": ["github-cli-uninstall", "--all"]
+        }));
+        assert!(!effective.is_safe_bin(&["git".to_string()]));
+    }
+
+    #[test]
+    fn command_only_form_still_works() {
+        let effective =
+            EffectiveExecCommand::from_params(&serde_json::json!({ "command": "git status" }));
+        assert!(effective.is_safe_bin(&["git".to_string()]));
+        assert_eq!(effective.display(), "git status");
     }
 
     #[test]
