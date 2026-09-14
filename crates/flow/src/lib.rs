@@ -12,6 +12,7 @@
 //! - [`host`]: a ponte para o agente e as ferramentas do MLX Pilot.
 //! - [`store`]: persistencia em disco de fluxos e execucoes.
 //! - [`import`]: conversor offline de workflows exportados do n8n.
+//! - [`mcp`]: cliente do Model Context Protocol, usado pelo no `mcp.call`.
 //!
 //! ```no_run
 //! use std::sync::Arc;
@@ -33,6 +34,7 @@ pub mod expr;
 pub mod graph;
 pub mod host;
 pub mod import;
+pub mod mcp;
 pub mod model;
 pub mod nodes;
 pub mod registry;
@@ -43,7 +45,11 @@ use serde::{Deserialize, Serialize};
 
 pub use engine::{EngineError, FlowEngine, RunOptions};
 pub use graph::{FlowGraph, Severity, ValidationIssue, ValidationReport};
-pub use host::{AgentNodeRequest, AgentNodeResult, FlowHost, ToolNodeRequest, ToolNodeResult};
+pub use host::{
+    AgentNodeRequest, AgentNodeResult, FlowHost, McpNodeRequest, McpNodeResult, ToolNodeRequest,
+    ToolNodeResult,
+};
+pub use mcp::{McpClient, McpServerConfig, McpTool, McpTransport};
 pub use model::{Edge, Flow, FlowSettings, FlowSummary, Node, OnError, Position, RetryPolicy};
 pub use registry::{NodeDescriptor, NodeError, NodeExecutor, NodeOutput, NodeRegistry};
 pub use run::{NodeRun, NodeStatus, RunRecord, RunStatus, RunSummary, TriggerSource};

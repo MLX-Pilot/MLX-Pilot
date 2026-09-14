@@ -23,6 +23,7 @@ O crate fica em `crates/flow` e nao conhece o daemon:
 | `host` | Trait `FlowHost`: ponte para o agente e as ferramentas. |
 | `store` | Persistencia em disco de fluxos e execucoes. |
 | `import` | Conversor offline de workflows exportados do n8n. |
+| `mcp` | Cliente do Model Context Protocol (JSON-RPC sobre stdio). |
 
 O daemon implementa `FlowHost` em `crates/daemon/src/flows.rs`, o que permite
 testar o motor inteiro sem subir provedor de modelo nenhum.
@@ -103,6 +104,7 @@ expressao falhar silenciosamente em tempo de execucao.
 | `debug.log` | Registra uma mensagem no historico e repassa os itens. |
 | `agent.run` | Chama o agente do MLX Pilot **no mesmo processo**. |
 | `tool.call` | Roda uma ferramenta do agente dentro do sandbox existente. |
+| `mcp.call` | Roda uma ferramenta de um servidor Model Context Protocol. |
 
 `agent.run` e `tool.call` sao o motivo de o motor ser embutido: nao ha viagem de
 ida e volta por HTTP, nao ha credencial para configurar, e `tool.call` reaproveita
@@ -123,6 +125,8 @@ fonte; quem resolve e a UI, que ja mantem essas listas para as outras abas:
 | `agent_providers` | Provedores em dois grupos: **Local (MLX Pilot)** e **Cloud**. |
 | `agent_models` | Modelos nos mesmos grupos: os instalados localmente, em ordem, e os das nuvens configuradas. |
 | `flow_tools` | Ferramentas registradas, para o `tool.call`. |
+| `mcp_servers` | Servidores MCP configurados e habilitados. |
+| `mcp_tools` | Ferramentas do servidor MCP escolhido no proprio no. |
 
 Um no `agent.run` recem-criado ja nasce apontando para o mesmo provedor e modelo
 que estao ativos no resto do MLX Pilot. Escolher um modelo ajusta o provedor
@@ -235,6 +239,60 @@ O `trigger.webhook` aceita `response_mode`:
 
 - `last_node` (padrao): responde com a saida do fluxo.
 - `immediate`: responde `202` na hora e executa em segundo plano.
+
+## Servidores MCP
+
+O no `mcp.call` fala Model Context Protocol com servidores que voce configura na
+aba **Workflows**, no card *Servidores MCP*. A implementacao vive em
+`crates/flow/src/mcp.rs` e cobre o subconjunto que um workflow precisa:
+`initialize`, `notifications/initialized`, `tools/list` e `tools/call`.
+
+O transporte e stdio: o daemon sobe o processo do servidor, conversa por
+stdin/stdout em JSON-RPC 2.0 linha a linha e encerra ao terminar. Uma conexao
+por chamada e mais lenta que manter o processo vivo, mas nao deixa processo
+orfao se o daemon cair — e um no de workflow nao e caminho quente.
+
+O protocolo esta separado do transporte pelo trait `McpTransport`, o que
+permite testar o cliente inteiro sem subir processo nenhum.
+
+### Configurar
+
+| Campo | Exemplo |
+| --- | --- |
+| Nome | `arquivos` |
+| Comando | `npx` |
+| Argumentos (um por linha) | `-y` / `@modelcontextprotocol/server-filesystem` / `G:/TCC` |
+| Ambiente (`CHAVE=valor`, um por linha) | `GITHUB_TOKEN=...` |
+
+Depois de salvar, clique em **Testar**: e essa sondagem que sobe o servidor, le
+`tools/list` e popula o seletor de ferramentas do no. Sem sondar, o no fica sem
+lista.
+
+A configuracao vai para `<config>/mcp-servers.json`. Um servidor desativado nao
+aparece no seletor e recusa chamadas antes mesmo de subir o processo.
+
+### Rotas
+
+| Rota | Efeito |
+| --- | --- |
+| `GET /flows/mcp/servers` | Servidores configurados e as ferramentas em cache. |
+| `POST /flows/mcp/servers` | Cria ou substitui um servidor pelo nome. |
+| `DELETE /flows/mcp/servers/{nome}` | Remove. |
+| `POST /flows/mcp/servers/{nome}/probe` | Conecta, lista as ferramentas e atualiza o cache. |
+
+### Verificar sem depender da rede
+
+`scripts/mcp-echo-server.mjs` e um servidor MCP minimo por stdio com duas
+ferramentas (`eco` e `somar`). Serve para conferir a integracao ponta a ponta
+sem baixar pacote nenhum:
+
+```bash
+curl -s -X POST http://127.0.0.1:11435/flows/mcp/servers -H 'content-type: application/json' -d '{"name":"eco-teste","command":"node","args":["./scripts/mcp-echo-server.mjs"],"enabled":true}'
+```
+
+```bash
+curl -s -X POST http://127.0.0.1:11435/flows/mcp/servers/eco-teste/probe
+```
 
 ## Armazenamento
 

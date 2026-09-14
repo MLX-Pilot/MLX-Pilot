@@ -18,7 +18,8 @@ use mlx_agent_core::ToolRegistry;
 use mlx_agent_tools::{ExecutionMode, ToolContext};
 use mlx_flow::engine::{EngineError, FlowEngine, RunOptions};
 use mlx_flow::host::{
-    AgentNodeRequest, AgentNodeResult, FlowHost, ToolNodeRequest, ToolNodeResult,
+    AgentNodeRequest, AgentNodeResult, FlowHost, McpNodeRequest, McpNodeResult, ToolNodeRequest,
+    ToolNodeResult,
 };
 use mlx_flow::model::Flow;
 use mlx_flow::nodes;
@@ -42,6 +43,8 @@ const DEFAULT_RUN_LIMIT: usize = 50;
 #[derive(Clone)]
 pub struct FlowService {
     pub store: Arc<FlowStore>,
+    /// Servidores MCP configurados, usados pelo no `mcp.call`.
+    pub mcp: crate::mcp_servers::McpRegistry,
     registry: Arc<NodeRegistry>,
     tools: Arc<ToolRegistry>,
     default_workspace: std::path::PathBuf,
@@ -58,8 +61,10 @@ impl std::fmt::Debug for FlowService {
 
 impl FlowService {
     pub fn new(root: impl AsRef<std::path::Path>, default_workspace: std::path::PathBuf) -> Self {
+        let root = root.as_ref();
         Self {
             store: Arc::new(FlowStore::new(root)),
+            mcp: crate::mcp_servers::McpRegistry::new(root),
             registry: Arc::new(nodes::builtin_registry()),
             tools: Arc::new(ToolRegistry::with_builtins()),
             default_workspace,
@@ -73,6 +78,7 @@ impl FlowService {
             Arc::new(DaemonFlowHost {
                 state: state.clone(),
                 tools: self.tools.clone(),
+                mcp: self.mcp.clone(),
                 default_workspace: self.default_workspace.clone(),
             }),
         )
@@ -100,6 +106,7 @@ impl FlowService {
 struct DaemonFlowHost {
     state: crate::AppState,
     tools: Arc<ToolRegistry>,
+    mcp: crate::mcp_servers::McpRegistry,
     default_workspace: std::path::PathBuf,
 }
 
@@ -194,6 +201,18 @@ impl FlowHost for DaemonFlowHost {
         }
     }
 
+    async fn call_mcp(&self, request: McpNodeRequest) -> Result<McpNodeResult, String> {
+        let result = self
+            .mcp
+            .call_tool(&request.server, &request.tool, request.arguments)
+            .await?;
+        Ok(McpNodeResult {
+            text: result.text,
+            is_error: result.is_error,
+            raw: result.raw,
+        })
+    }
+
     fn available_tools(&self) -> Vec<String> {
         self.tools
             .definitions()
@@ -270,13 +289,82 @@ pub async fn list_flows(State(state): State<crate::AppState>) -> Response {
     }
 }
 
-/// `GET /flows/node-types` — catalogo de nos e ferramentas para a UI.
+/// `GET /flows/node-types` — catalogo de nos, ferramentas e servidores MCP.
 pub async fn node_types(State(state): State<crate::AppState>) -> Response {
+    // Os servidores MCP entram aqui para a UI montar o seletor do `mcp.call`
+    // na mesma ida que ja busca a paleta.
+    let mcp_servers = state
+        .flows
+        .mcp
+        .list_with_tools()
+        .await
+        .unwrap_or_else(|error| {
+            warn!(%error, "nao foi possivel ler os servidores MCP");
+            Vec::new()
+        });
+
     Json(json!({
         "nodes": state.flows.catalog(),
         "tools": state.flows.tool_names(),
+        "mcp_servers": mcp_servers,
     }))
     .into_response()
+}
+
+/// `GET /flows/mcp/servers` — servidores MCP configurados e suas ferramentas.
+pub async fn list_mcp_servers(State(state): State<crate::AppState>) -> Response {
+    match state.flows.mcp.list_with_tools().await {
+        Ok(servers) => Json(json!({ "servers": servers })).into_response(),
+        Err(error) => storage_error(error),
+    }
+}
+
+/// `POST /flows/mcp/servers` — cria ou substitui um servidor.
+pub async fn save_mcp_server(
+    State(state): State<crate::AppState>,
+    Json(server): Json<mlx_flow::mcp::McpServerConfig>,
+) -> Response {
+    match state.flows.mcp.save(server).await {
+        Ok(servers) => Json(json!({ "servers": servers })).into_response(),
+        Err(message) => flow_error(
+            StatusCode::BAD_REQUEST,
+            "mcp_server_invalid",
+            Some(message),
+        ),
+    }
+}
+
+/// `DELETE /flows/mcp/servers/{name}` — remove um servidor.
+pub async fn delete_mcp_server(
+    State(state): State<crate::AppState>,
+    AxumPath(name): AxumPath<String>,
+) -> Response {
+    match state.flows.mcp.delete(&name).await {
+        Ok(true) => Json(json!({ "deleted": true, "name": name })).into_response(),
+        Ok(false) => flow_error(
+            StatusCode::NOT_FOUND,
+            "mcp_server_not_found",
+            Some(format!("nao existe servidor MCP chamado `{name}`")),
+        ),
+        Err(error) => storage_error(error),
+    }
+}
+
+/// `POST /flows/mcp/servers/{name}/probe` — conecta e lista as ferramentas.
+///
+/// E como o usuario descobre se a configuracao esta correta sem precisar
+/// montar um fluxo inteiro para testar.
+pub async fn probe_mcp_server(
+    State(state): State<crate::AppState>,
+    AxumPath(name): AxumPath<String>,
+) -> Response {
+    let status = state.flows.mcp.probe(&name).await;
+    let code = if status.reachable == Some(true) {
+        StatusCode::OK
+    } else {
+        StatusCode::BAD_GATEWAY
+    };
+    (code, Json(status)).into_response()
 }
 
 /// `GET /flows/{id}` — um fluxo completo.
@@ -379,6 +467,7 @@ pub async fn run_flow(
         start_node: request.start_node,
         payload: request.payload,
         env: request.env,
+        run_id: None,
     };
 
     match execute_and_store(&state, &flow, options).await {
@@ -523,17 +612,20 @@ pub async fn webhook(
         "received_at": Utc::now().to_rfc3339(),
     });
 
+    // Reserva o id antes de executar: assim a resposta `immediate` devolve uma
+    // referencia que ja e consultavel em /flows/runs/{id}.
+    let run_id = uuid::Uuid::new_v4().to_string();
     let options = RunOptions {
         trigger: TriggerSource::Webhook,
         start_node: Some(binding.node_id.clone()),
         payload,
         env: Map::new(),
+        run_id: Some(run_id.clone()),
     };
 
     if binding.response_mode == "immediate" {
         // Responde na hora e executa em segundo plano.
         let background_state = state.clone();
-        let run_id = uuid::Uuid::new_v4().to_string();
         tokio::spawn(async move {
             if let Err(error) = execute_and_store(&background_state, &flow, options).await {
                 warn!(%error, flow = %flow.name, "execucao de webhook falhou");
@@ -541,7 +633,7 @@ pub async fn webhook(
         });
         return (
             StatusCode::ACCEPTED,
-            Json(json!({ "accepted": true, "reference": run_id })),
+            Json(json!({ "accepted": true, "run_id": run_id })),
         )
             .into_response();
     }
@@ -661,6 +753,7 @@ impl FlowScheduler {
                 start_node: Some(binding.node_id.clone()),
                 payload: json!({ "triggered_at": now.to_rfc3339(), "cron": binding.cron }),
                 env: Map::new(),
+                run_id: None,
             };
             tokio::spawn(async move {
                 if let Err(error) = execute_and_store(&state, &flow, options).await {
