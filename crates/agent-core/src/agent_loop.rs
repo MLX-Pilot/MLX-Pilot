@@ -22,6 +22,11 @@ use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
+/// Pedido de conclusão quando o modelo devolve um turno final sem conteúdo.
+const EMPTY_ANSWER_REPROMPT: &str = "Sua ultima mensagem veio vazia. \
+Responda agora ao pedido do usuario em texto, usando o que ja foi apurado pelas \
+ferramentas. Nao chame mais ferramentas e nao descreva seu raciocinio.";
+
 /// Configuration for an `AgentLoop` instance.
 #[derive(Debug, Clone)]
 pub struct AgentLoopConfig {
@@ -282,6 +287,8 @@ impl AgentLoop {
         let mut conversation: Vec<ChatMessage> = self.history.clone();
         conversation.push(ChatMessage::text(MessageRole::User, user_message));
         let mut fallback_attempted = false;
+        // Só uma tentativa: se o modelo insistir em não responder, devolve o que veio.
+        let mut empty_answer_reprompted = false;
 
         let mut iterations = 0;
         let mut total_tool_calls = 0;
@@ -441,6 +448,20 @@ impl AgentLoop {
                         ));
                         continue;
                     }
+                }
+
+                // Modelos com raciocínio separado (`thinking` no Ollama) às vezes gastam o
+                // turno inteiro pensando e emitem `content` vazio, tipicamente depois de
+                // uma tool ter respondido a pergunta. Entregar "" ao usuário é pior do que
+                // gastar mais um turno pedindo a conclusão.
+                if assistant_msg.content.trim().is_empty() && !empty_answer_reprompted {
+                    empty_answer_reprompted = true;
+                    conversation.push(assistant_msg.clone());
+                    conversation.push(ChatMessage::text(
+                        MessageRole::User,
+                        EMPTY_ANSWER_REPROMPT.to_string(),
+                    ));
+                    continue;
                 }
 
                 // Final response — no more tool calls.
@@ -1362,6 +1383,103 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("exceeded maximum iterations"), "got: {err}");
+    }
+
+    /// Regressão observada com `qwen3.5:9b`, que separa raciocínio (`thinking`) do
+    /// conteúdo: em 4 de 24 casos da bateria o turno final vinha com `content` vazio,
+    /// depois de uma ferramenta já ter respondido a pergunta, e o usuário recebia "".
+    #[tokio::test]
+    async fn empty_final_answer_is_reprompted_once() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct EmptyThenAnswerProvider {
+            calls: AtomicUsize,
+        }
+
+        #[async_trait::async_trait]
+        impl ModelProvider for EmptyThenAnswerProvider {
+            fn provider_id(&self) -> &'static str {
+                "empty-then-answer"
+            }
+            async fn list_models(&self) -> Result<Vec<ModelDescriptor>, ProviderError> {
+                Ok(vec![])
+            }
+            async fn chat(&self, _r: ChatRequest) -> Result<ChatResponse, ProviderError> {
+                unreachable!()
+            }
+            async fn chat_with_tools(
+                &self,
+                req: ChatToolsRequest,
+            ) -> Result<ChatResponse, ProviderError> {
+                let nth = self.calls.fetch_add(1, Ordering::SeqCst);
+                // Primeiro turno: só raciocinou, não escreveu nada.
+                let content = if nth == 0 { "" } else { "A resposta e 42." };
+                Ok(ChatResponse {
+                    model_id: req.model_id,
+                    provider: "empty-then-answer".into(),
+                    message: ChatMessage::text(MessageRole::Assistant, content),
+                    usage: TokenUsage {
+                        prompt_tokens: 10,
+                        completion_tokens: 5,
+                        total_tokens: 15,
+                    },
+                    latency_ms: 10,
+                    raw_output: None,
+                })
+            }
+        }
+
+        let provider = Arc::new(EmptyThenAnswerProvider {
+            calls: AtomicUsize::new(0),
+        });
+        let mut agent = create_test_loop(provider);
+
+        let response = agent.run("quanto e 17 + 25?").await.unwrap();
+
+        assert_eq!(response.content, "A resposta e 42.");
+        assert_eq!(response.iterations, 2, "deveria ter pedido a conclusao");
+    }
+
+    #[tokio::test]
+    async fn persistently_empty_answer_does_not_loop() {
+        struct AlwaysEmptyProvider;
+
+        #[async_trait::async_trait]
+        impl ModelProvider for AlwaysEmptyProvider {
+            fn provider_id(&self) -> &'static str {
+                "always-empty"
+            }
+            async fn list_models(&self) -> Result<Vec<ModelDescriptor>, ProviderError> {
+                Ok(vec![])
+            }
+            async fn chat(&self, _r: ChatRequest) -> Result<ChatResponse, ProviderError> {
+                unreachable!()
+            }
+            async fn chat_with_tools(
+                &self,
+                req: ChatToolsRequest,
+            ) -> Result<ChatResponse, ProviderError> {
+                Ok(ChatResponse {
+                    model_id: req.model_id,
+                    provider: "always-empty".into(),
+                    message: ChatMessage::text(MessageRole::Assistant, "   "),
+                    usage: TokenUsage {
+                        prompt_tokens: 10,
+                        completion_tokens: 0,
+                        total_tokens: 10,
+                    },
+                    latency_ms: 10,
+                    raw_output: None,
+                })
+            }
+        }
+
+        let mut agent = create_test_loop(Arc::new(AlwaysEmptyProvider));
+        agent.config.max_iterations = 6;
+
+        // Uma tentativa extra, e só: nada de consumir todas as iterações.
+        let response = agent.run("responda algo").await.unwrap();
+        assert_eq!(response.iterations, 2);
     }
 
     #[tokio::test]

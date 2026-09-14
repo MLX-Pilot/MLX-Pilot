@@ -175,6 +175,9 @@ fn collect_matches(
             })?;
 
         if metadata.is_dir() {
+            if crate::sandbox::is_ignored_dir(&path) {
+                continue;
+            }
             collect_matches(workspace_root, &path, path_glob, regex, matches, limit)?;
             continue;
         }
@@ -284,6 +287,53 @@ mod tests {
         // Filtro sem barra busca pelo nome do arquivo em qualquer profundidade.
         assert!(matches_glob_pattern("*.rs", "src/nested/lib.rs"));
         assert!(!matches_glob_pattern("*.rs", "src/main.ts"));
+    }
+
+    /// Regressão observada com qwen3.5:9b: o grep devolvia os payloads de checkpoint de
+    /// `.mlx-pilot/` — cópias dos próprios arquivos do usuário — como ocorrências, e o
+    /// agente respondia citando um `.bin` em vez do arquivo fonte.
+    #[tokio::test]
+    async fn grep_skips_internal_and_build_directories() {
+        let tmp = std::env::temp_dir().join(format!("mlx-grep-ignore-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(tmp.join("src")).unwrap();
+        fs::create_dir_all(tmp.join(".mlx-pilot/checkpoints/payloads")).unwrap();
+        fs::create_dir_all(tmp.join("target/debug")).unwrap();
+        fs::write(
+            tmp.join("src/config.rs"),
+            "pub const MAX_RETRIES: u32 = 3;\n",
+        )
+        .unwrap();
+        fs::write(
+            tmp.join(".mlx-pilot/checkpoints/payloads/a.bin"),
+            "pub const MAX_RETRIES: u32 = 3;\n",
+        )
+        .unwrap();
+        fs::write(tmp.join("target/debug/b.rs"), "MAX_RETRIES copiado\n").unwrap();
+
+        let ctx = ToolContext {
+            workspace_root: tmp.clone(),
+            mode: ExecutionMode::Full,
+            session_id: "test".to_string(),
+            active_skill: None,
+        };
+        let result = GrepTool::new()
+            .execute(&serde_json::json!({"pattern": "MAX_RETRIES"}), &ctx)
+            .await
+            .unwrap();
+
+        assert!(result.output.contains("src/config.rs"));
+        assert!(
+            !result.output.contains(".mlx-pilot"),
+            "vazou estado interno: {}",
+            result.output
+        );
+        assert!(
+            !result.output.contains("target/"),
+            "vazou artefato de build: {}",
+            result.output
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     /// Regressão: o modelo manda `"path": ""` querendo dizer "sem filtro". Tratar a
