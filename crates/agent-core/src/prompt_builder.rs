@@ -1,6 +1,7 @@
 //! Prompt engineering utilities:
 //! model-aware profiles, context budgeting, and tool filtering.
 
+use crate::tool_index::ToolIndex;
 use mlx_agent_tools::ExecutionMode;
 use mlx_ollama_core::{ChatMessage, FunctionDef, MessageRole};
 use serde_json::{Map, Value};
@@ -45,9 +46,12 @@ impl ModelPromptProfile {
         match kind {
             ModelPromptProfileKind::SmallLocal => Self {
                 kind,
-                max_tokens_prompt: 1200,
+                // Modelos 7-8B atuais têm janela de 32k+; 1200 tokens sobrava do tempo em
+                // que só 3 tools cabiam no prompt, e estourava o budget assim que o
+                // ranking passou a oferecer um conjunto útil.
+                max_tokens_prompt: 2000,
                 max_history_messages: 8,
-                max_tools_in_prompt: 3,
+                max_tools_in_prompt: 6,
                 max_tool_description_chars: 120,
                 max_skill_summaries: 6,
                 max_skill_summary_chars: 120,
@@ -56,9 +60,9 @@ impl ModelPromptProfile {
             },
             ModelPromptProfileKind::MidLocal => Self {
                 kind,
-                max_tokens_prompt: 2200,
+                max_tokens_prompt: 3000,
                 max_history_messages: 14,
-                max_tools_in_prompt: 5,
+                max_tools_in_prompt: 8,
                 max_tool_description_chars: 160,
                 max_skill_summaries: 10,
                 max_skill_summary_chars: 140,
@@ -252,9 +256,14 @@ pub fn estimate_prompt_tokens(messages: &[ChatMessage], tools: &[FunctionDef]) -
         .iter()
         .map(estimate_message_tokens)
         .sum::<usize>()
-        .saturating_add(messages.len() * 6);
+        .saturating_add(messages.len() * PER_MESSAGE_ENVELOPE_TOKENS);
 
-    let tool_tokens = tools
+    msg_tokens.saturating_add(estimate_tools_tokens(tools))
+}
+
+/// Custo estimado do bloco de tools, incluindo o schema JSON de cada uma.
+fn estimate_tools_tokens(tools: &[FunctionDef]) -> usize {
+    tools
         .iter()
         .map(|tool| {
             estimate_text_tokens(&tool.name)
@@ -262,13 +271,16 @@ pub fn estimate_prompt_tokens(messages: &[ChatMessage], tools: &[FunctionDef]) -
                 + estimate_json_tokens(&tool.parameters)
                 + 8
         })
-        .sum::<usize>();
-
-    msg_tokens.saturating_add(tool_tokens)
+        .sum()
 }
 
+/// Overhead por mensagem que `estimate_prompt_tokens` cobra além do conteúdo.
+const PER_MESSAGE_ENVELOPE_TOKENS: usize = 6;
+/// Tokens atribuídos ao papel (role) de cada mensagem.
+const PER_MESSAGE_ROLE_TOKENS: usize = 3;
+
 fn estimate_message_tokens(message: &ChatMessage) -> usize {
-    let role_tokens: usize = 3;
+    let role_tokens: usize = PER_MESSAGE_ROLE_TOKENS;
     let content_tokens = estimate_text_tokens(&message.content);
     let tool_calls_tokens = message
         .tool_calls
@@ -427,16 +439,36 @@ fn enforce_prompt_budget(
     truncate_messages_in_place(messages, max_tokens, tools);
 }
 
+/// Descarta a mensagem não-system mais antiga para liberar budget.
+///
+/// A mensagem mais recente nunca é descartada: é ela que carrega o pedido atual. Antes,
+/// um único turno grande demais era removido inteiro e o modelo respondia sem ter visto a
+/// pergunta. Quando só resta o turno atual, cabe ao truncamento encolhê-lo.
 fn drop_oldest_non_system(messages: &mut Vec<ChatMessage>) -> bool {
+    let last_idx = match messages.len().checked_sub(1) {
+        Some(idx) => idx,
+        None => return false,
+    };
+
     if let Some(idx) = messages
         .iter()
         .position(|m| !matches!(m.role, MessageRole::System))
     {
+        if idx >= last_idx {
+            return false;
+        }
         messages.remove(idx);
         return true;
     }
     false
 }
+
+/// Fatia do budget de mensagens reservada para a mensagem mais nova.
+///
+/// É o último turno que carrega a instrução de verdade. Dividir o budget em partes iguais
+/// encolhia essa mensagem ao tamanho de histórico velho e descartava o próprio pedido.
+const LAST_MESSAGE_BUDGET_NUMERATOR: usize = 3;
+const LAST_MESSAGE_BUDGET_DENOMINATOR: usize = 5;
 
 fn truncate_messages_in_place(
     messages: &mut [ChatMessage],
@@ -447,22 +479,38 @@ fn truncate_messages_in_place(
         return;
     }
 
-    let mut remaining = max_tokens.saturating_sub(
-        tools
-            .iter()
-            .map(|t| estimate_text_tokens(&t.name) + estimate_text_tokens(&t.description))
-            .sum::<usize>(),
-    );
+    // O budget disponível para *conteúdo* é o teto menos o bloco de tools e menos o
+    // envelope fixo de cada mensagem. Contabilizar só nome+descrição das tools subestimava
+    // o custo (o schema JSON costuma ser maior que os dois juntos) e o truncamento não
+    // convergia.
+    let overhead = estimate_tools_tokens(tools)
+        .saturating_add(messages.len() * (PER_MESSAGE_ENVELOPE_TOKENS + PER_MESSAGE_ROLE_TOKENS));
+    let mut remaining = max_tokens.saturating_sub(overhead);
     if remaining == 0 {
         remaining = 1;
     }
 
-    let per_message_budget = (remaining / messages.len()).max(12);
-    for message in messages.iter_mut() {
+    let last_idx = messages.len() - 1;
+    let last_budget = if messages.len() == 1 {
+        remaining
+    } else {
+        (remaining * LAST_MESSAGE_BUDGET_NUMERATOR / LAST_MESSAGE_BUDGET_DENOMINATOR).max(12)
+    };
+    let others_budget = if messages.len() > 1 {
+        (remaining.saturating_sub(last_budget) / last_idx).max(12)
+    } else {
+        remaining
+    };
+
+    for (idx, message) in messages.iter_mut().enumerate() {
+        let budget = if idx == last_idx {
+            last_budget
+        } else {
+            others_budget
+        };
         let current = estimate_message_tokens(message);
-        if current > per_message_budget {
-            message.content =
-                truncate_to_token_budget(&message.content, per_message_budget.saturating_sub(6));
+        if current > budget {
+            message.content = truncate_to_token_budget(&message.content, budget.saturating_sub(6));
             message.tool_calls.clear();
         }
     }
@@ -480,24 +528,34 @@ pub(crate) fn filter_tools(
         return Vec::new();
     }
 
-    let query = user_text.to_lowercase();
-    let selected_names = if aggressive {
-        Some(select_relevant_tool_names(&query))
+    // Só as tools válidas para o modo de execução entram no ranking — não adianta
+    // oferecer `write_file` em read_only e gastar uma vaga.
+    let eligible = tools
+        .iter()
+        .filter(|tool| is_tool_enabled_for_mode(&tool.name, mode))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    if eligible.is_empty() {
+        return Vec::new();
+    }
+
+    // Ranqueia o pedido contra o catálogo inteiro, em vez de casar palavras-chave contra
+    // uma lista de nomes fixa no código. Ver `tool_index` para o porquê.
+    let ordered: Vec<FunctionDef> = if aggressive {
+        let index = ToolIndex::build(&eligible);
+        index
+            .top_names(user_text, max_tools)
+            .iter()
+            .filter_map(|name| eligible.iter().find(|tool| tool.name == *name))
+            .cloned()
+            .collect()
     } else {
-        None
+        eligible
     };
 
     let mut filtered = Vec::new();
-    for tool in tools {
-        if !is_tool_enabled_for_mode(&tool.name, mode) {
-            continue;
-        }
-        if let Some(selected) = selected_names.as_ref() {
-            if !selected.is_empty() && !selected.contains(tool.name.as_str()) {
-                continue;
-            }
-        }
-
+    for tool in &ordered {
         filtered.push(FunctionDef {
             name: tool.name.clone(),
             description: compact_description(&tool.description, max_desc_chars),
@@ -510,133 +568,6 @@ pub(crate) fn filter_tools(
     }
 
     filtered
-}
-
-fn select_relevant_tool_names(query: &str) -> HashSet<&'static str> {
-    let mut selected = HashSet::new();
-
-    if query.is_empty() {
-        selected.insert("read_file");
-        selected.insert("list_dir");
-        return selected;
-    }
-
-    if contains_any(
-        query,
-        &[
-            "tool",
-            "tools",
-            "skill",
-            "skills",
-            "plugin",
-            "plugins",
-            "capability",
-            "capabilities",
-            "ferramenta",
-            "ferramentas",
-            "habilidade",
-            "habilidades",
-            "what can you do",
-            "o que voce pode",
-            "o que você pode",
-            "python",
-            "bash",
-            "powershell",
-            "web",
-            "pesquisa",
-            "internet",
-        ],
-    ) {
-        for name in [
-            "read_file",
-            "list_dir",
-            "glob",
-            "grep",
-            "write_file",
-            "edit_file",
-            "exec",
-            "sessions_list",
-            "sessions_history",
-            "sessions_spawn",
-            "sessions_send",
-            "sessions_status",
-            "memory_search",
-            "memory_get",
-        ] {
-            selected.insert(name);
-        }
-        return selected;
-    }
-
-    if contains_any(
-        query,
-        &["list", "show", "find", "folder", "directory", "tree"],
-    ) {
-        selected.insert("list_dir");
-        selected.insert("glob");
-        selected.insert("read_file");
-    }
-
-    if contains_any(
-        query,
-        &["read", "open", "inspect", "view", "cat", "file", "arquivo"],
-    ) {
-        selected.insert("read_file");
-        selected.insert("list_dir");
-    }
-
-    if contains_any(
-        query,
-        &[
-            "search",
-            "grep",
-            "regex",
-            "pattern",
-            "match",
-            "find text",
-            "buscar",
-            "procurar",
-            "pesquisar",
-        ],
-    ) {
-        selected.insert("grep");
-        selected.insert("glob");
-        selected.insert("read_file");
-    }
-
-    if contains_any(query, &["write", "create", "save", "new file", "append"]) {
-        selected.insert("write_file");
-        selected.insert("read_file");
-    }
-
-    if contains_any(
-        query,
-        &["edit", "replace", "patch", "modify", "refactor", "update"],
-    ) {
-        selected.insert("edit_file");
-        selected.insert("read_file");
-    }
-
-    if contains_any(
-        query,
-        &[
-            "run", "exec", "shell", "command", "test", "build", "cargo", "npm", "make",
-        ],
-    ) {
-        selected.insert("exec");
-        selected.insert("read_file");
-    }
-
-    if selected.is_empty() {
-        selected.insert("read_file");
-        selected.insert("list_dir");
-    }
-
-    selected
-}
-
-fn contains_any(text: &str, words: &[&str]) -> bool {
-    words.iter().any(|w| text.contains(w))
 }
 
 fn compact_description(description: &str, max_chars: usize) -> String {
@@ -720,7 +651,41 @@ fn is_tool_enabled_for_mode(name: &str, mode: ExecutionMode) -> bool {
 
 fn truncate_to_token_budget(text: &str, token_budget: usize) -> String {
     let max_chars = token_budget.saturating_mul(CHARS_PER_TOKEN_APPROX).max(8);
-    truncate_chars(text, max_chars)
+    truncate_middle_chars(text, max_chars)
+}
+
+/// Fração do budget sobrevivente destinada ao começo da mensagem; o resto vai para o fim.
+const HEAD_SHARE_NUMERATOR: usize = 2;
+const HEAD_SHARE_DENOMINATOR: usize = 5;
+
+/// Descarta o **meio** de uma mensagem longa demais, preservando as duas pontas.
+///
+/// Truncar só pela cabeça apagava silenciosamente o fim da mensagem — exatamente onde
+/// quem cola um documento longo escreve a pergunta.
+fn truncate_middle_chars(text: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let chars = text.chars().collect::<Vec<_>>();
+    if chars.len() <= max_chars {
+        return text.to_string();
+    }
+
+    const ELISION: &str = "\n[...trecho omitido por limite de contexto...]\n";
+    let elision_len = ELISION.chars().count();
+
+    // Sem espaço para as duas pontas mais o marcador: volta ao corte simples.
+    if max_chars <= elision_len + 8 {
+        return truncate_chars(text, max_chars);
+    }
+
+    let usable = max_chars - elision_len;
+    let head_len = (usable * HEAD_SHARE_NUMERATOR / HEAD_SHARE_DENOMINATOR).max(1);
+    let tail_len = usable - head_len;
+
+    let head = chars[..head_len].iter().collect::<String>();
+    let tail = chars[chars.len() - tail_len..].iter().collect::<String>();
+    format!("{head}{ELISION}{tail}")
 }
 
 fn truncate_chars(text: &str, max_chars: usize) -> String {
@@ -906,41 +871,114 @@ mod tests {
             aggressive_tool_filtering: true,
         });
 
-        let names = output
+        let mut names = output
             .tools
             .iter()
             .map(|t| t.name.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(names, vec!["read_file", "list_dir"]);
+        // O pedido cita as duas ações com o mesmo peso ("read the file and list the
+        // directory"), então a ordem entre elas é detalhe do ranking; o que importa é que
+        // as tools de escrita ficaram de fora e que as duas de leitura entraram.
+        names.sort_unstable();
+        assert_eq!(names, vec!["list_dir", "read_file"]);
         for tool in &output.tools {
             assert!(tool.description.len() <= 120);
             assert!(tool.parameters["properties"]["path"]["description"].is_null());
         }
     }
 
+    /// O ranking agora vem de `ToolIndex`, que pontua o pedido contra o catálogo real.
+    /// A cobertura de idioma e das tools antes inalcançáveis está em `tool_index::tests`.
     #[test]
-    fn capability_queries_expose_full_local_toolset() {
-        let selected = select_relevant_tool_names(
-            "quais tools, skills e plugins voce tem? pode rodar python?",
+    fn filtering_ranks_the_requested_tool_first() {
+        let tools = vec![
+            mk_tool("read_file", "Ler o conteudo de um arquivo do workspace."),
+            mk_tool("grep", "Pesquisar texto ou regex em arquivos do workspace."),
+            mk_tool(
+                "memory_write",
+                "Persistir memoria local duravel para reuso em sessoes futuras.",
+            ),
+        ];
+
+        let filtered = filter_tools(
+            &tools,
+            ExecutionMode::Full,
+            "grave na memoria duravel que o projeto usa Rust",
+            2,
+            120,
+            true,
         );
 
-        for name in [
-            "read_file",
-            "list_dir",
-            "glob",
-            "grep",
-            "write_file",
-            "edit_file",
-            "exec",
-            "sessions_list",
-            "sessions_history",
-            "sessions_spawn",
-            "sessions_send",
-            "sessions_status",
-            "memory_search",
-            "memory_get",
-        ] {
-            assert!(selected.contains(name), "missing tool hint: {name}");
-        }
+        assert_eq!(
+            filtered.first().map(|t| t.name.as_str()),
+            Some("memory_write"),
+            "obtido: {:?}",
+            filtered.iter().map(|t| &t.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn long_message_keeps_the_question_at_the_end() {
+        // Regressão: truncar pela cabeça apagava o fim da mensagem, que é onde fica a
+        // pergunta quando o usuário cola um documento longo antes dela.
+        let filler = "lorem ipsum dolor sit amet. ".repeat(600);
+        let message = format!("{filler}\nAgora responda: quanto e 17 + 25?");
+
+        let profile = ModelPromptProfile::for_kind(ModelPromptProfileKind::SmallLocal);
+        let builder = PromptBuilder;
+        let output = builder.build(PromptBuildInput {
+            system_prompt_override: None,
+            execution_mode: ExecutionMode::Full,
+            profile: &profile,
+            conversation: &[mk_msg(MessageRole::User, &message)],
+            skill_summaries: &[],
+            tools: &[],
+            aggressive_tool_filtering: true,
+        });
+
+        let user_content = output
+            .messages
+            .iter()
+            .find(|m| matches!(m.role, MessageRole::User))
+            .map(|m| m.content.clone())
+            .unwrap_or_default();
+
+        assert!(
+            user_content.contains("17 + 25"),
+            "a pergunta final foi descartada: {:?}",
+            &user_content[user_content.len().saturating_sub(200)..]
+        );
+    }
+
+    #[test]
+    fn middle_truncation_keeps_both_ends() {
+        let text = format!("INICIO{}FIM", "x".repeat(5000));
+        let truncated = truncate_middle_chars(&text, 200);
+
+        assert!(truncated.starts_with("INICIO"));
+        assert!(truncated.ends_with("FIM"));
+        assert!(truncated.chars().count() <= 200);
+    }
+
+    #[test]
+    fn read_only_mode_never_offers_write_tools() {
+        let tools = vec![
+            mk_tool(
+                "write_file",
+                "Criar ou sobrescrever um arquivo no workspace.",
+            ),
+            mk_tool("read_file", "Ler o conteudo de um arquivo do workspace."),
+        ];
+
+        let filtered = filter_tools(
+            &tools,
+            ExecutionMode::ReadOnly,
+            "crie um arquivo novo chamado resumo.md",
+            5,
+            120,
+            true,
+        );
+
+        assert!(filtered.iter().all(|tool| tool.name != "write_file"));
     }
 }

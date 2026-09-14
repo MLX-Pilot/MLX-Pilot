@@ -14,6 +14,11 @@ pub struct ApprovalRequest {
     pub params_summary: String,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
+    /// Risk classification from the policy engine (`low` | `medium` | `high` | `critical`).
+    ///
+    /// Carried so `ApprovalMode::RiskBased` can decide without re-running policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk: Option<String>,
 }
 
 /// The user's decision on an approval request.
@@ -50,6 +55,27 @@ pub enum ApprovalMode {
     Ask,
     /// Dangerous actions are denied immediately.
     Deny,
+    /// Low and medium risk run unattended; high and critical still wait for the user.
+    ///
+    /// This is the middle ground between `Auto` (which waves through file deletion just
+    /// as readily as a directory listing) and `Ask` (which prompts on every build
+    /// command). Requests with no risk classification are treated as high.
+    RiskBased,
+}
+
+impl ApprovalMode {
+    /// Whether a request at this risk level can proceed without asking the user.
+    fn auto_approves(self, risk: Option<&str>) -> bool {
+        match self {
+            Self::Auto => true,
+            Self::Deny | Self::Ask => false,
+            // Sem classificação, assume o pior caso e pergunta.
+            Self::RiskBased => matches!(
+                risk.map(str::trim).map(str::to_ascii_lowercase).as_deref(),
+                Some("low") | Some("medium")
+            ),
+        }
+    }
 }
 
 /// Trait for requesting and managing user approvals.
@@ -123,10 +149,12 @@ impl ApprovalService for DefaultApprovalService {
         request: ApprovalRequest,
         timeout: Duration,
     ) -> Result<ApprovalDecision, ApprovalError> {
-        match self.mode() {
-            ApprovalMode::Auto => return Ok(ApprovalDecision::AllowOnce),
-            ApprovalMode::Deny => return Ok(ApprovalDecision::Deny),
-            ApprovalMode::Ask => {}
+        let mode = self.mode();
+        if matches!(mode, ApprovalMode::Deny) {
+            return Ok(ApprovalDecision::Deny);
+        }
+        if mode.auto_approves(request.risk.as_deref()) {
+            return Ok(ApprovalDecision::AllowOnce);
         }
 
         let (tx, rx) = tokio::sync::oneshot::channel();
@@ -191,6 +219,8 @@ mod tests {
             params_summary: "curl wttr.in".into(),
             created_at: Utc::now(),
             expires_at: Utc::now(),
+
+            risk: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("test-123"));
@@ -216,6 +246,8 @@ mod tests {
                     params_summary: "{}".into(),
                     created_at: Utc::now(),
                     expires_at: Utc::now(),
+
+                    risk: None,
                 },
                 Duration::from_secs(1),
             )
@@ -223,6 +255,51 @@ mod tests {
             .unwrap();
 
         assert!(matches!(decision, ApprovalDecision::AllowOnce));
+    }
+
+    fn request_with_risk(risk: Option<&str>) -> ApprovalRequest {
+        ApprovalRequest {
+            id: "id".into(),
+            skill_name: None,
+            tool_name: "exec".into(),
+            description: "desc".into(),
+            params_summary: "{}".into(),
+            created_at: Utc::now(),
+            expires_at: Utc::now(),
+            risk: risk.map(ToString::to_string),
+        }
+    }
+
+    #[tokio::test]
+    async fn risk_based_mode_auto_approves_low_and_medium() {
+        let service = DefaultApprovalService::with_mode(ApprovalMode::RiskBased);
+
+        for risk in ["low", "medium", "LOW", " Medium "] {
+            let decision = service
+                .request_approval(request_with_risk(Some(risk)), Duration::from_millis(50))
+                .await
+                .unwrap();
+            assert!(
+                matches!(decision, ApprovalDecision::AllowOnce),
+                "risco {risk} deveria passar sem perguntar"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn risk_based_mode_still_asks_for_high_risk() {
+        let service = DefaultApprovalService::with_mode(ApprovalMode::RiskBased);
+
+        // Ninguém responde, então o pedido precisa expirar em vez de ser liberado.
+        for risk in [Some("high"), Some("critical"), None] {
+            let result = service
+                .request_approval(request_with_risk(risk), Duration::from_millis(50))
+                .await;
+            assert!(
+                matches!(result, Err(ApprovalError::Timeout(_))),
+                "risco {risk:?} nao deveria ser auto-aprovado"
+            );
+        }
     }
 
     #[tokio::test]
@@ -238,6 +315,8 @@ mod tests {
                     params_summary: "{}".into(),
                     created_at: Utc::now(),
                     expires_at: Utc::now(),
+
+                    risk: None,
                 },
                 Duration::from_secs(1),
             )

@@ -15,22 +15,66 @@ use tokio::io::AsyncReadExt;
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
 /// Commands that are always denied.
+///
+/// Matched against the *joined argv* (the invocation that actually runs), so the
+/// destructive form has to be caught regardless of which parameter shape the model used.
 const DENY_PATTERNS: &[&str] = &[
-    "rm -rf /",
-    "rm -rf /*",
+    // POSIX destructive
+    "rm -rf",
+    "rm -fr",
     "sudo ",
     "chmod 777",
     "mkfs",
     "dd if=",
     ":(){:|:&};:",
+    // Windows destructive — flag order varies, so match the verb plus a switch
     "format ",
-    "del /f /s /q",
-    "rd /s /q C:",
+    "del /",
+    "erase /",
+    "rd /s",
+    "rmdir /s",
+    "diskpart",
+    "vssadmin delete",
+    "cipher /w",
+    "reg delete",
+    // Shell-escape / remote-payload execution
     "powershell -ep bypass",
+    "powershell -enc",
+    "powershell -encodedcommand",
+    "invoke-expression",
+    "iex ",
 ];
 
 /// Shell metacharacters and chaining constructs that are not allowed.
 const SHELL_META_PATTERNS: &[&str] = &["&&", "||", "|", ";", ">", "<", "`", "$(", "\n", "\r"];
+
+/// Interpreters that would turn their arguments back into an unrestricted shell line.
+const SHELL_INTERPRETERS: &[&str] = &[
+    "cmd",
+    "powershell",
+    "pwsh",
+    "sh",
+    "bash",
+    "zsh",
+    "dash",
+    "ksh",
+    "fish",
+];
+
+/// Lowercased file stem of a program path (`C:\Windows\cmd.exe` -> `cmd`).
+fn program_stem(program: &str) -> String {
+    let normalized = program.trim().replace('\\', "/");
+    let file = normalized.rsplit('/').next().unwrap_or(&normalized);
+    let stem = file.strip_suffix(".exe").unwrap_or(file);
+    let stem = stem.strip_suffix(".cmd").unwrap_or(stem);
+    let stem = stem.strip_suffix(".bat").unwrap_or(stem);
+    stem.to_lowercase()
+}
+
+fn is_shell_interpreter(program: &str) -> bool {
+    let stem = program_stem(program);
+    SHELL_INTERPRETERS.iter().any(|name| *name == stem)
+}
 
 /// Maximum output size in bytes.
 const MAX_OUTPUT_BYTES: usize = 256 * 1024; // 256 KB
@@ -150,6 +194,22 @@ impl crate::Tool for ExecTool {
             return Err(ToolError::PermissionDenied {
                 reason: format!("command matches deny pattern: '{pattern}'"),
             });
+        }
+
+        // `resolve_argv` only screens shell metacharacters on the `command` fallback path.
+        // An explicit argv that re-enters a shell (`cmd /c "a && b"`) would otherwise get
+        // the chaining that direct invocations are denied, so screen those arguments too.
+        if let Some(program) = argv.first() {
+            if is_shell_interpreter(program) {
+                let shell_line = argv[1..].join(" ");
+                if let Some(pattern) = Self::contains_shell_metacharacters(&shell_line) {
+                    return Err(ToolError::PermissionDenied {
+                        reason: format!(
+                            "shell operator '{pattern}' is blocked; invoke the program directly via argv instead of through '{program}'"
+                        ),
+                    });
+                }
+            }
         }
 
         let workspace_root = ctx.workspace_root.clone();

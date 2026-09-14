@@ -24,9 +24,12 @@ pub mod session;
 pub mod session_recall;
 pub mod state_store;
 pub mod tool_catalog;
+pub mod tool_index;
 
 // Re-exports for convenience.
-pub use agent_loop::{AgentError, AgentLoop, AgentLoopConfig, AgentResponse};
+pub use agent_loop::{
+    AgentError, AgentLoop, AgentLoopConfig, AgentResponse, DEFAULT_PROVIDER_TIMEOUT,
+};
 pub use agent_runtime::{
     AgentRuntime, AgentRuntimeConfig, AgentRuntimeResponse, AgentTurnEvent, DelegateTaskRequest,
     GatewayContext, MemoryQuery, MemorySnapshotMode, RuntimeVariant, SessionContextEnvelope,
