@@ -348,6 +348,12 @@ struct OllamaChatResponseBody {
 struct OllamaChatResponseMessage {
     #[serde(default)]
     content: String,
+    /// Raciocinio separado, emitido por modelos como a familia Qwen3.
+    ///
+    /// Sem ler este campo, um turno em que o modelo so raciocinou chega ao agente como
+    /// conteudo vazio, e o usuario recebe "" como resposta.
+    #[serde(default)]
+    thinking: Option<String>,
     #[serde(default)]
     tool_calls: Option<Vec<OllamaToolCall>>,
 }
@@ -615,11 +621,19 @@ impl OllamaProvider {
 
         let raw_output = serde_json::to_string(&payload).ok();
 
+        let reasoning = payload
+            .message
+            .as_ref()
+            .and_then(|message| message.thinking.as_ref())
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+
         let chat_message = ChatMessage {
             role: MessageRole::Assistant,
             content,
             tool_calls,
             tool_call_id: None,
+            reasoning,
         };
 
         Ok(ChatResponse {

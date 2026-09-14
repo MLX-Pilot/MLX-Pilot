@@ -297,9 +297,29 @@ struct AgentStreamFrame {
     completion_tokens: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     total_tokens: Option<usize>,
+    /// Modelo que está produzindo a resposta.
+    ///
+    /// Vai em todo frame para a UI poder mostrar quem está respondendo desde o primeiro
+    /// evento, sem esperar o fim do run — e para ficar evidente quando um fallback trocou
+    /// o modelo no meio do caminho.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider: Option<String>,
 }
 
 impl AgentStreamFrame {
+    /// Carimba o frame com o provider e o modelo do run.
+    fn with_model(mut self, provider: &str, model_id: &str) -> Self {
+        if !provider.trim().is_empty() {
+            self.provider = Some(provider.to_string());
+        }
+        if !model_id.trim().is_empty() {
+            self.model_id = Some(model_id.to_string());
+        }
+        self
+    }
+
     fn status(value: &str, session_id: Option<String>) -> Self {
         Self {
             event: "status".to_string(),
@@ -312,6 +332,8 @@ impl AgentStreamFrame {
             prompt_tokens: None,
             completion_tokens: None,
             total_tokens: None,
+            model_id: None,
+            provider: None,
         }
     }
 
@@ -327,6 +349,8 @@ impl AgentStreamFrame {
             prompt_tokens: None,
             completion_tokens: None,
             total_tokens: None,
+            model_id: None,
+            provider: None,
         }
     }
 
@@ -342,6 +366,8 @@ impl AgentStreamFrame {
             prompt_tokens: None,
             completion_tokens: None,
             total_tokens: None,
+            model_id: None,
+            provider: None,
         }
     }
 
@@ -357,6 +383,8 @@ impl AgentStreamFrame {
             prompt_tokens: None,
             completion_tokens: None,
             total_tokens: None,
+            model_id: None,
+            provider: None,
         }
     }
 
@@ -372,6 +400,8 @@ impl AgentStreamFrame {
             prompt_tokens: Some(response.prompt_tokens),
             completion_tokens: Some(response.completion_tokens),
             total_tokens: Some(response.total_tokens),
+            model_id: None,
+            provider: None,
         }
     }
 
@@ -387,6 +417,8 @@ impl AgentStreamFrame {
             prompt_tokens: None,
             completion_tokens: None,
             total_tokens: None,
+            model_id: None,
+            provider: None,
         }
     }
 }
@@ -1218,6 +1250,7 @@ fn session_messages_to_chat_history(
                     content: String::new(),
                     tool_calls,
                     tool_call_id: None,
+                    reasoning: None,
                 };
             }
             let role = match message.role.trim().to_ascii_lowercase().as_str() {
@@ -4170,30 +4203,69 @@ pub async fn agent_stream(
     let (tx, rx) = mpsc::channel::<AgentStreamFrame>(128);
     let state_clone = state.clone();
 
+    // Provider e modelo efetivos do run, para carimbar cada frame. Resolvidos aqui porque
+    // a requisicao e movida para dentro da task logo abaixo.
+    let agent_cfg = super::config::AppConfig::load_settings().apply_env().agent;
+    let stream_provider = request
+        .provider
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| agent_cfg.provider.clone());
+    let stream_model = request
+        .model_id
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| agent_cfg.model_id.clone());
+
     tokio::spawn(async move {
         let mut run_task =
             tokio::spawn(async move { execute_agent_request(&state_clone, request).await });
         let mut emitted_answer = false;
+        let mut active_model = stream_model.clone();
+
+        // O primeiro frame ja identifica quem vai responder: a UI mostra o modelo antes
+        // do primeiro token, em vez de esperar o run terminar.
+        let _ = tx
+            .send(
+                AgentStreamFrame::status("started", Some(session_id.clone()))
+                    .with_model(&stream_provider, &stream_model),
+            )
+            .await;
 
         loop {
             tokio::select! {
                 result = &mut run_task => {
                     match result {
                         Ok(Ok(response)) => {
+                            // A resposta final conhece o modelo que realmente respondeu.
+                            let final_model = if response.model_id.trim().is_empty() {
+                                active_model.clone()
+                            } else {
+                                response.model_id.clone()
+                            };
                             if !emitted_answer && !response.content.trim().is_empty() {
                                 let _ = tx.send(AgentStreamFrame::answer(
                                     response.content.clone(),
                                     response.session_id.clone(),
-                                )).await;
+                                ).with_model(&response.provider, &final_model)).await;
                             }
-                            let _ = tx.send(AgentStreamFrame::done(&response)).await;
+                            let _ = tx.send(
+                                AgentStreamFrame::done(&response)
+                                    .with_model(&response.provider, &final_model),
+                            ).await;
                         }
                         Ok(Err(error)) => {
                             let message = error.details.clone().unwrap_or(error.error.clone());
-                            let _ = tx.send(AgentStreamFrame::error(message, Some(session_id.clone()))).await;
+                            let _ = tx.send(
+                                AgentStreamFrame::error(message, Some(session_id.clone()))
+                                    .with_model(&stream_provider, &active_model),
+                            ).await;
                         }
                         Err(error) => {
-                            let _ = tx.send(AgentStreamFrame::error(error.to_string(), Some(session_id.clone()))).await;
+                            let _ = tx.send(
+                                AgentStreamFrame::error(error.to_string(), Some(session_id.clone()))
+                                    .with_model(&stream_provider, &active_model),
+                            ).await;
                         }
                     }
                     break;
@@ -4205,7 +4277,12 @@ pub async fn agent_stream(
                 event = subscription.recv() => {
                     let Ok(event) = event else { continue; };
                     let frame = match event {
-                        AgentEvent::RunStarted { session_id: event_session_id, .. } if event_session_id == session_id => {
+                        // `RunStarted` traz o modelo que o loop de fato resolveu, que pode
+                        // diferir do pedido quando um fallback entrou no lugar.
+                        AgentEvent::RunStarted { session_id: event_session_id, model } if event_session_id == session_id => {
+                            if !model.trim().is_empty() {
+                                active_model = model;
+                            }
                             Some(AgentStreamFrame::status("thinking", Some(event_session_id)))
                         }
                         AgentEvent::ThinkingDelta { session_id: event_session_id, delta } if event_session_id == session_id => {
@@ -4231,7 +4308,7 @@ pub async fn agent_stream(
                     };
 
                     if let Some(frame) = frame {
-                        if tx.send(frame).await.is_err() {
+                        if tx.send(frame.with_model(&stream_provider, &active_model)).await.is_err() {
                             run_task.abort();
                             break;
                         }

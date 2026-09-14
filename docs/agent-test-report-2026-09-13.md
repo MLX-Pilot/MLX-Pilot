@@ -132,3 +132,44 @@ Mesma tarefa multi-etapa (*contar arquivos .rs, ler cada um, escrever `docs/anal
 O conteúdo da qwen3.5 foi conferido contra os arquivos: `MAX_RETRIES = 5` (estado real após o T08 editar), e `main`/`compute` são de fato privadas. Análise factualmente correta.
 
 O ciclo também exercitou o replanejamento pela primeira vez num run real: um passo falhou, o plano foi revisado, e o run concluiu.
+
+---
+
+## 9. Raciocínio e streaming (2026-09-14)
+
+### `thinking` deixou de ser tratado como conteúdo vazio
+
+O Ollama devolve o raciocínio no campo `thinking`, separado de `content`. O provider **descartava esse campo por completo**, então um turno em que a qwen3.5 só raciocinou chegava ao agente indistinguível de um turno vazio.
+
+O que mudou:
+
+- `ChatMessage` ganhou `reasoning: Option<String>`, preenchido pelo provider Ollama.
+- `is_blank()` e `is_reasoning_only()` distinguem os dois casos: **raciocínio é trabalho, não vazio**.
+- O pedido de conclusão agora é específico. Se o turno raciocinou, pede-se só a conclusão daquele raciocínio (`REASONING_ONLY_REPROMPT`); se veio em branco de verdade, reapresenta-se a tarefa (`EMPTY_ANSWER_REPROMPT`).
+- O raciocínio é emitido como `ThinkingDelta` assim que chega, em vez de ser jogado fora.
+
+### Modelo visível no streaming
+
+Todo frame de `/agent/stream` passou a carregar `model_id` e `provider`, e um frame `status: "started"` é emitido **antes** da primeira chamada ao provider — a UI identifica quem está respondendo sem esperar o run terminar. O modelo vem de `RunStarted`, que é o que o loop realmente resolveu, então um fallback que troque o modelo no meio fica visível.
+
+Frames de um run real:
+
+```json
+{"event":"status","status":"started","model_id":"qwen3.5:9b","provider":"ollama"}
+{"event":"thinking_delta","delta":"The user is asking me to read the file src/main.rs...","model_id":"qwen3.5:9b"}
+{"event":"tool_call_started","tool":"read_file","model_id":"qwen3.5:9b"}
+{"event":"thinking_delta","delta":"A função auxiliar é `compute`. Vou responder...","model_id":"qwen3.5:9b"}
+{"event":"answer_delta","delta":"A função auxiliar chama-se **`compute`**.","model_id":"qwen3.5:9b"}
+{"event":"done","status":"completed","latency_ms":10226,"model_id":"qwen3.5:9b"}
+```
+
+**Limitação conhecida:** o `answer_delta` ainda chega como um bloco único — o loop emite `TextDelta` uma vez, com o conteúdo completo do turno. O que passou a ser progressivo é o **raciocínio**, que é justamente onde o modelo gasta o tempo. Streaming token a token da resposta final exigiria um caminho de streaming do provider atravessando o agent loop, que não foi feito.
+
+### Placar final
+
+| | qwen2.5:7b | qwen3.5:9b |
+|---|---|---|
+| Checks PASS / FAIL | 32 / 1 | 32 / 1 |
+| Respostas vazias | 0 | 0 |
+
+O FAIL restante é diferente em cada um e, nos dois casos, escolha do modelo — não defeito do runtime: a qwen2.5 pede `list_dir` com `path: "/"` (barrado pelo sandbox, corretamente) e a qwen3.5 resolve o T19 com `glob` em vez de delegar.

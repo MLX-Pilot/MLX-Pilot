@@ -22,10 +22,17 @@ use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
-/// Pedido de conclusão quando o modelo devolve um turno final sem conteúdo.
+/// Pedido de conclusão quando o modelo devolve um turno final sem conteúdo algum.
 const EMPTY_ANSWER_REPROMPT: &str = "Sua ultima mensagem veio vazia. \
 Responda agora ao pedido do usuario em texto, usando o que ja foi apurado pelas \
 ferramentas. Nao chame mais ferramentas e nao descreva seu raciocinio.";
+
+/// Pedido de conclusão quando o turno teve raciocínio, mas nenhuma resposta escrita.
+///
+/// Aqui o modelo já fez o trabalho — só falta escrever a conclusão dele.
+const REASONING_ONLY_REPROMPT: &str = "Voce raciocinou mas nao escreveu a resposta. \
+Escreva agora a conclusao do seu raciocinio como resposta ao usuario, em texto direto. \
+Nao chame ferramentas e nao repita o raciocinio.";
 
 /// Configuration for an `AgentLoop` instance.
 #[derive(Debug, Clone)]
@@ -436,6 +443,21 @@ impl AgentLoop {
 
             let assistant_msg = response.message.clone();
 
+            // Transmite o raciocínio assim que ele chega. Para um modelo que separa
+            // `thinking` de `content`, é isso que o usuário vê enquanto a resposta ainda
+            // está sendo formada — sem ele, a UI fica parada até o turno inteiro terminar.
+            if let Some(reasoning) = assistant_msg
+                .reasoning
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                self.event_bus.emit(AgentEvent::ThinkingDelta {
+                    session_id: session_id.clone(),
+                    delta: format!("{reasoning}\n"),
+                });
+            }
+
             // Check if there are tool calls.
             if assistant_msg.tool_calls.is_empty() {
                 if !used_direct_fallback {
@@ -454,13 +476,19 @@ impl AgentLoop {
                 // turno inteiro pensando e emitem `content` vazio, tipicamente depois de
                 // uma tool ter respondido a pergunta. Entregar "" ao usuário é pior do que
                 // gastar mais um turno pedindo a conclusão.
+                //
+                // O pedido é diferente conforme o turno tenha raciocinado ou não: se
+                // raciocinou, basta pedir para escrever a conclusão daquele raciocínio;
+                // se veio totalmente em branco, é preciso reapresentar a tarefa.
                 if assistant_msg.content.trim().is_empty() && !empty_answer_reprompted {
                     empty_answer_reprompted = true;
+                    let reprompt = if assistant_msg.is_reasoning_only() {
+                        REASONING_ONLY_REPROMPT
+                    } else {
+                        EMPTY_ANSWER_REPROMPT
+                    };
                     conversation.push(assistant_msg.clone());
-                    conversation.push(ChatMessage::text(
-                        MessageRole::User,
-                        EMPTY_ANSWER_REPROMPT.to_string(),
-                    ));
+                    conversation.push(ChatMessage::text(MessageRole::User, reprompt.to_string()));
                     continue;
                 }
 
@@ -1168,6 +1196,7 @@ mod tests {
                             arguments: r#"{"path": "."}"#.into(),
                         }],
                         tool_call_id: None,
+                        reasoning: None,
                     },
                     usage: TokenUsage {
                         prompt_tokens: 50,
@@ -1363,6 +1392,7 @@ mod tests {
                             arguments: r#"{"path": "."}"#.into(),
                         }],
                         tool_call_id: None,
+                        reasoning: None,
                     },
                     usage: TokenUsage {
                         prompt_tokens: 10,
@@ -1438,6 +1468,78 @@ mod tests {
 
         assert_eq!(response.content, "A resposta e 42.");
         assert_eq!(response.iterations, 2, "deveria ter pedido a conclusao");
+    }
+
+    /// Um turno com `thinking` e `content` vazio é o caso da qwen3.5. O loop deve pedir a
+    /// conclusão do raciocínio (não reapresentar a tarefa) e emitir o raciocínio como
+    /// evento, para a UI mostrar algo enquanto a resposta se forma.
+    #[tokio::test]
+    async fn reasoning_only_turn_is_reprompted_for_its_conclusion() {
+        use crate::events::AgentEvent;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct ReasoningThenAnswerProvider {
+            calls: AtomicUsize,
+        }
+
+        #[async_trait::async_trait]
+        impl ModelProvider for ReasoningThenAnswerProvider {
+            fn provider_id(&self) -> &'static str {
+                "reasoning"
+            }
+            async fn list_models(&self) -> Result<Vec<ModelDescriptor>, ProviderError> {
+                Ok(vec![])
+            }
+            async fn chat(&self, _r: ChatRequest) -> Result<ChatResponse, ProviderError> {
+                unreachable!()
+            }
+            async fn chat_with_tools(
+                &self,
+                req: ChatToolsRequest,
+            ) -> Result<ChatResponse, ProviderError> {
+                let nth = self.calls.fetch_add(1, Ordering::SeqCst);
+                let mut message = ChatMessage::text(MessageRole::Assistant, "");
+                if nth == 0 {
+                    message.reasoning = Some("17 mais 25 da 42.".to_string());
+                } else {
+                    message.content = "42".to_string();
+                }
+                Ok(ChatResponse {
+                    model_id: req.model_id,
+                    provider: "reasoning".into(),
+                    message,
+                    usage: TokenUsage {
+                        prompt_tokens: 10,
+                        completion_tokens: 5,
+                        total_tokens: 15,
+                    },
+                    latency_ms: 10,
+                    raw_output: None,
+                })
+            }
+        }
+
+        let bus = Arc::new(EventBus::default());
+        let mut received = bus.subscribe();
+
+        let mut agent = create_test_loop(Arc::new(ReasoningThenAnswerProvider {
+            calls: AtomicUsize::new(0),
+        }));
+        agent.event_bus = bus;
+
+        let response = agent.run("quanto e 17 + 25?").await.unwrap();
+        assert_eq!(response.content, "42");
+
+        // O raciocínio precisa ter chegado ao barramento de eventos.
+        let mut saw_reasoning = false;
+        while let Ok(event) = received.try_recv() {
+            if let AgentEvent::ThinkingDelta { delta, .. } = event {
+                if delta.contains("17 mais 25") {
+                    saw_reasoning = true;
+                }
+            }
+        }
+        assert!(saw_reasoning, "raciocinio nao foi transmitido");
     }
 
     #[tokio::test]
@@ -1576,6 +1678,7 @@ mod tests {
                                 arguments: r#"{"path":"."}"#.into(),
                             }],
                             tool_call_id: None,
+                            reasoning: None,
                         },
                         usage: TokenUsage {
                             prompt_tokens: 20,
