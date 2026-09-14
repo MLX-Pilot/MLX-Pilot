@@ -134,6 +134,7 @@
       selectedNodeId: null,
       connectingFrom: null,
       validation: null,
+      advancedOpen: false,
       viewport: { x: 80, y: 80, zoom: 1 },
       drag: null,
       history: [],
@@ -3182,11 +3183,43 @@
     }];
   }
 
-  function flowFieldOptionGroups(field) {
+  function flowMcpServers() {
+    return state.flowCatalog.mcp_servers || [];
+  }
+
+  function flowMcpServerOptionGroups() {
+    return [{
+      label: '',
+      options: flowMcpServers()
+        .filter(server => server.enabled !== false)
+        .map(server => ({
+          value: server.name,
+          label: server.description ? `${server.name} - ${server.description}` : server.name,
+        })),
+    }];
+  }
+
+  /// Ferramentas do servidor escolhido no proprio no. A lista vem da ultima
+  /// sondagem; sem sondagem ainda, fica vazia e o usuario clica em Testar.
+  function flowMcpToolOptionGroups(node) {
+    const wanted = String(node?.parameters?.server || '').trim().toLowerCase();
+    const server = flowMcpServers().find(item => String(item.name || '').toLowerCase() === wanted);
+    return [{
+      label: '',
+      options: (server?.tools || []).map(tool => ({
+        value: tool.name,
+        label: tool.description ? `${tool.name} - ${tool.description}` : tool.name,
+      })),
+    }];
+  }
+
+  function flowFieldOptionGroups(field, node) {
     switch (field.options_source) {
       case 'agent_providers': return flowProviderOptionGroups();
       case 'agent_models': return flowModelOptionGroups();
       case 'flow_tools': return flowToolOptionGroups();
+      case 'mcp_servers': return flowMcpServerOptionGroups();
+      case 'mcp_tools': return flowMcpToolOptionGroups(node);
       default: return [{ label: '', options: field.options || [] }];
     }
   }
@@ -3212,8 +3245,16 @@
     };
   }
 
-  /// Mantem provedor, modelo e perfil coerentes depois de mexer num dos dois.
+  /// Mantem campos dependentes coerentes depois de uma alteracao.
   function flowSyncAgentSelection(node, changedKey) {
+    if (node.kind === 'mcp.call' && changedKey === 'server') {
+      // Trocar de servidor invalida a ferramenta escolhida no anterior.
+      const tools = flowMcpToolOptionGroups(node).flatMap(group => group.options);
+      if (!tools.some(option => option.value === node.parameters.tool)) {
+        node.parameters.tool = tools[0]?.value || '';
+      }
+      return;
+    }
     if (node.kind !== 'agent.run') return;
 
     if (changedKey === 'model_id') {
@@ -3534,6 +3575,9 @@
     const id = `flow-field-${field.key}`;
     const help = field.help ? `<span class="workflow-inspector-muted">${esc(field.help)}</span>` : '';
     const attrs = `id="${flowAttr(id)}" data-field-key="${flowAttr(field.key)}" data-field-kind="${flowAttr(field.kind)}"`;
+    // Cada campo tem seu proprio espaco de erro: um JSON invalido precisa ser
+    // reportado ao lado do campo, e nao numa caixa que pode estar recolhida.
+    const errorSlot = `<div class="workflow-parameter-error" data-field-error="${flowAttr(field.key)}"></div>`;
     let control;
     switch (field.kind) {
       case 'boolean':
@@ -3548,7 +3592,7 @@
         control = `<input class="input" type="number" ${attrs} value="${flowAttr(value ?? '')}" />`;
         break;
       case 'select': {
-        const groups = flowFieldOptionGroups(field);
+        const groups = flowFieldOptionGroups(field, node);
         const current = String(value ?? '');
         const known = groups.some(group => group.options.some(option => option.value === current));
         // Um valor vindo do JSON que nao esta na lista viraria selecao vazia e
@@ -3556,6 +3600,12 @@
         const orphan = current && !known
           ? `<option value="${flowAttr(current)}" selected>${esc(current)} (fora da lista)</option>`
           : '';
+        // Sem valor guardado, o navegador marcaria a primeira opcao e a tela
+        // mostraria uma escolha que o no nao tem. Um vazio explicito mantem a
+        // exibicao honesta ate alguem escolher.
+        const blank = current
+          ? ''
+          : '<option value="" selected>Selecione...</option>';
         const body = groups.map(group => {
           const items = group.options.map(option =>
             `<option value="${flowAttr(option.value)}" ${current === option.value ? 'selected' : ''}>${esc(option.label)}</option>`
@@ -3563,7 +3613,7 @@
           if (!items) return '';
           return group.label ? `<optgroup label="${flowAttr(group.label)}">${items}</optgroup>` : items;
         }).join('');
-        control = `<select class="input" ${attrs}>${orphan}${body || '<option value="">Nada disponivel</option>'}</select>`;
+        control = `<select class="input" ${attrs}>${blank}${orphan}${body || '<option value="">Nada disponivel</option>'}</select>`;
         break;
       }
       case 'textarea':
@@ -3580,6 +3630,7 @@
       <div class="settings-field">
         <label for="${flowAttr(id)}">${esc(field.label)}${field.required ? ' *' : ''}</label>
         ${control}
+        ${errorSlot}
         ${help}
       </div>
     `;
@@ -3612,7 +3663,7 @@
             <span class="workflow-inspector-muted">Usado por expressoes $node["${flowAttr(node.name)}"].</span>
           </div>
           ${descriptor.fields.filter(field => !field.advanced).map(field => flowFieldControl(node, field)).join('')}
-          <details class="workflow-inspector-advanced">
+          <details class="workflow-inspector-advanced" ${state.flowEditor.advancedOpen ? 'open' : ''}>
             <summary>Avancado</summary>
             ${descriptor.fields.filter(field => field.advanced).map(field => flowFieldControl(node, field)).join('')}
             <label class="workflow-inspector-toggle">
@@ -3733,6 +3784,13 @@
     }
     if (node.kind === 'tool.call' && !node.parameters.tool) {
       node.parameters.tool = (state.flowCatalog.tools || [])[0] || '';
+    }
+    // Um no MCP nasce apontando para o primeiro servidor habilitado e a
+    // primeira ferramenta que ele anunciou.
+    if (node.kind === 'mcp.call' && !node.parameters.server) {
+      const server = flowMcpServers().find(item => item.enabled !== false);
+      node.parameters.server = server?.name || '';
+      node.parameters.tool = (server?.tools || [])[0]?.name || '';
     }
 
     const flow = state.flowEditor.flow;
@@ -3855,8 +3913,10 @@
       state.flowCatalog = {
         nodes: Array.isArray(payload?.nodes) ? payload.nodes : [],
         tools: Array.isArray(payload?.tools) ? payload.tools : [],
+        mcp_servers: Array.isArray(payload?.mcp_servers) ? payload.mcp_servers : [],
       };
       renderFlowPalette(document.getElementById('flow-node-search')?.value || '');
+      renderMcpServers();
     } catch (error) {
       pushConsoleEntry('error', 'flows', `Catalogo de nos indisponivel: ${error.message}`);
     }
@@ -4110,6 +4170,121 @@
     }
   }
 
+  // -- Servidores MCP -----------------------------------------
+  // O no `mcp.call` so lista ferramentas de servidores que ja foram sondados:
+  // e a sondagem que sobe o processo, faz o handshake e le `tools/list`.
+
+  function renderMcpServers() {
+    const list = document.getElementById('mcp-server-list');
+    if (!list) return;
+    const servers = flowMcpServers();
+    if (!servers.length) {
+      list.innerHTML = '<div class="flow-empty">Nenhum servidor MCP configurado</div>';
+      return;
+    }
+    list.innerHTML = servers.map(server => {
+      const toolCount = (server.tools || []).length;
+      const state_ = server.enabled === false
+        ? { cls: '', text: 'Desativado' }
+        : toolCount
+          ? { cls: 'active', text: `${toolCount} ferramenta${toolCount === 1 ? '' : 's'}` }
+          : { cls: '', text: 'Nao sondado' };
+      return `
+        <div class="flow-list-row">
+          <div class="flow-list-summary">
+            <strong>${esc(server.name)}</strong>
+            <span>${esc([server.command, ...(server.args || [])].join(' '))}</span>
+          </div>
+          <span class="flow-list-state ${state_.cls}">${esc(state_.text)}</span>
+          <button class="action-btn" type="button" data-mcp-probe="${flowAttr(server.name)}">Testar</button>
+          <button class="action-btn danger" type="button" data-mcp-delete="${flowAttr(server.name)}">Remover</button>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function mcpFormValues() {
+    const read = id => String(document.getElementById(id)?.value || '').trim();
+    const name = read('mcp-server-name');
+    const command = read('mcp-server-command');
+    if (!name || !command) {
+      throw new Error('Informe ao menos o nome e o comando do servidor.');
+    }
+
+    // Argumentos um por linha: evita ter de lidar com aspas e espacos.
+    const args = read('mcp-server-args').split('\n').map(line => line.trim()).filter(Boolean);
+
+    // Ambiente no formato CHAVE=valor, um por linha.
+    const env = {};
+    read('mcp-server-env').split('\n').forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      const at = trimmed.indexOf('=');
+      if (at <= 0) return;
+      env[trimmed.slice(0, at).trim()] = trimmed.slice(at + 1).trim();
+    });
+
+    return { name, command, args, env, enabled: true };
+  }
+
+  async function saveMcpServer() {
+    const button = document.getElementById('mcp-server-save-btn');
+    if (button) button.disabled = true;
+    try {
+      const server = mcpFormValues();
+      await api('/flows/mcp/servers', { method: 'POST', body: JSON.stringify(server) });
+      ['mcp-server-name', 'mcp-server-command', 'mcp-server-args', 'mcp-server-env']
+        .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+      pushConsoleEntry('info', 'mcp', `Servidor MCP salvo: ${server.name}`);
+      await loadFlowCatalog();
+      // Sonda logo em seguida: sem as ferramentas o no `mcp.call` fica sem lista.
+      await probeMcpServer(server.name);
+    } catch (error) {
+      pushConsoleEntry('error', 'mcp', error.message);
+      alert('Erro ao salvar o servidor MCP: ' + error.message);
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  async function probeMcpServer(name) {
+    const box = document.getElementById('mcp-server-status');
+    if (box) {
+      box.hidden = false;
+      box.className = 'flow-validation';
+      box.textContent = `Conectando em ${name}...`;
+    }
+    try {
+      const status = await api(`/flows/mcp/servers/${encodeURIComponent(name)}/probe`, { method: 'POST' });
+      if (box) {
+        box.className = 'flow-validation ok';
+        box.innerHTML = `<span class="status-dot online"></span><span>${esc(name)}: ${(status.tools || []).length} ferramenta(s) — ${esc((status.tools || []).map(t => t.name).join(', ') || 'nenhuma')}</span>`;
+      }
+      pushConsoleEntry('info', 'mcp', `${name}: ${(status.tools || []).length} ferramenta(s)`);
+      await loadFlowCatalog();
+      renderFlowEditor();
+    } catch (error) {
+      const detail = error.payload?.error || error.message;
+      if (box) {
+        box.className = 'flow-validation error';
+        box.innerHTML = `<span class="status-dot offline"></span><span>${esc(name)}: ${esc(detail)}</span>`;
+      }
+      pushConsoleEntry('error', 'mcp', `${name}: ${detail}`);
+    }
+  }
+
+  async function deleteMcpServer(name) {
+    if (!confirm(`Remover o servidor MCP "${name}"?`)) return;
+    try {
+      await api(`/flows/mcp/servers/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      pushConsoleEntry('info', 'mcp', `Servidor MCP removido: ${name}`);
+      await loadFlowCatalog();
+    } catch (error) {
+      pushConsoleEntry('error', 'mcp', error.message);
+      alert('Erro ao remover o servidor MCP: ' + error.message);
+    }
+  }
+
   // -- Import / export ----------------------------------------
 
   function flowEditorExport() {
@@ -4239,7 +4414,8 @@
     }
     if (kind === 'json') {
       const raw = String(target.value || '').trim();
-      const errorBox = document.getElementById('flow-parameter-error');
+      const errorBox = [...document.querySelectorAll('[data-field-error]')]
+        .find(box => box.dataset.fieldError === key);
       if (!raw) {
         delete node.parameters[key];
         if (errorBox) errorBox.textContent = '';
@@ -4250,7 +4426,9 @@
         if (errorBox) errorBox.textContent = '';
         return true;
       } catch (error) {
-        if (errorBox) errorBox.textContent = `${key}: ${error.message}`;
+        // Nao aplica o valor invalido, mas deixa o texto digitado na tela para
+        // o usuario corrigir em vez de perder o que escreveu.
+        if (errorBox) errorBox.textContent = error.message;
         return false;
       }
     }
@@ -4375,6 +4553,14 @@
       const group = event.target.closest('[data-edge-id]');
       if (group) flowEditorRemoveEdge(group.dataset.edgeId);
     });
+    // O inspetor e re-renderizado a cada alteracao; sem isso a secao Avancado
+    // fecharia sozinha no meio da edicao.
+    inspector?.addEventListener('toggle', event => {
+      if (event.target.classList?.contains('workflow-inspector-advanced')) {
+        editor.advancedOpen = event.target.open;
+      }
+    }, true);
+
     inspector?.addEventListener('change', event => {
       const node = flowEditorNodeById(editor.selectedNodeId);
       if (!node) return;
@@ -4882,6 +5068,16 @@
   document.getElementById('flow-run-history')?.addEventListener('click', event => {
     const button = event.target.closest('[data-run-open]');
     if (button?.dataset.runOpen) void openFlowRun(button.dataset.runOpen);
+  });
+  document.getElementById('mcp-server-save-btn')?.addEventListener('click', saveMcpServer);
+  document.getElementById('mcp-server-list')?.addEventListener('click', event => {
+    const probe = event.target.closest('[data-mcp-probe]');
+    if (probe) {
+      void probeMcpServer(probe.dataset.mcpProbe);
+      return;
+    }
+    const remove = event.target.closest('[data-mcp-delete]');
+    if (remove) void deleteMcpServer(remove.dataset.mcpDelete);
   });
 
   // Range input live value

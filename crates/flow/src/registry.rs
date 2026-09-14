@@ -62,6 +62,10 @@ pub enum OptionsSource {
     AgentModels,
     /// Ferramentas registradas para o no `tool.call`.
     FlowTools,
+    /// Servidores MCP configurados e habilitados.
+    McpServers,
+    /// Ferramentas anunciadas pelo servidor MCP escolhido no proprio no.
+    McpTools,
 }
 
 /// Descricao de um parametro editavel.

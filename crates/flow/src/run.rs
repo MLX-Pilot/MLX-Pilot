@@ -71,10 +71,17 @@ pub struct NodeRun {
     pub attempts: u32,
     pub input_count: usize,
     pub output_count: usize,
-    /// Amostra da saida por porta, truncada.
+    /// Amostra do que saiu do no, sempre indexada por porta:
+    /// `{ "main": { "items": [...], "total": n, "truncated": bool } }`.
+    /// Vale inclusive para nos desativados e para os que falharam e seguiram,
+    /// porque o painel de execucao le sempre pela porta.
     pub output: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Contexto estruturado da falha. Fica separado de `output` para que
+    /// `output` continue significando "o que passou adiante".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_details: Option<Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub logs: Vec<String>,
 }
@@ -95,9 +102,15 @@ impl NodeRun {
             output_count: 0,
             output: json!({}),
             error: None,
+            error_details: None,
             logs: Vec::new(),
         }
     }
+}
+
+/// Amostra de uma saida de porta unica, no mesmo formato de `preview_output`.
+pub fn preview_main_port(items: &[Value]) -> Value {
+    json!({ crate::model::MAIN_PORT: preview_items(items) })
 }
 
 /// Execucao completa de um fluxo.

@@ -25,7 +25,9 @@ use crate::graph::{FlowGraph, ValidationReport};
 use crate::host::FlowHost;
 use crate::model::Flow;
 use crate::registry::{NodeContext, NodeError, NodeOutput, NodeRegistry};
-use crate::run::{preview_items, NodeRun, NodeStatus, RunRecord, RunStatus, TriggerSource};
+use crate::run::{
+    preview_items, preview_main_port, NodeRun, NodeStatus, RunRecord, RunStatus, TriggerSource,
+};
 
 /// Falha que impede a execucao de comecar.
 #[derive(Debug, Clone)]
@@ -64,6 +66,10 @@ pub struct RunOptions {
     /// Variaveis visiveis em `$env`.
     #[serde(default)]
     pub env: Map<String, Value>,
+    /// Id da execucao. Quem dispara pode reservar um id antes de executar para
+    /// devolve-lo de imediato ao chamador — e o que o webhook assincrono faz.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
 }
 
 impl Default for RunOptions {
@@ -73,6 +79,7 @@ impl Default for RunOptions {
             start_node: None,
             payload: Value::Null,
             env: Map::new(),
+            run_id: None,
         }
     }
 }
@@ -128,7 +135,11 @@ impl FlowEngine {
             .map_err(EngineError::Invalid)?;
         let entry = self.resolve_entry(flow, &graph, &options)?;
 
-        let run_id = uuid::Uuid::new_v4().to_string();
+        let run_id = options
+            .run_id
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let started_at = Utc::now();
         let deadline = started_at
             + chrono::Duration::seconds(flow.settings.effective_timeout_secs() as i64);
@@ -188,7 +199,7 @@ impl FlowEngine {
                     runs[index].status = NodeStatus::Disabled;
                     runs[index].input_count = items.len();
                     runs[index].output_count = items.len();
-                    runs[index].output = preview_items(&items);
+                    runs[index].output = preview_main_port(&items);
                     node_views.insert(
                         node.name.clone(),
                         NodeView {
@@ -257,9 +268,7 @@ impl FlowEngine {
                     Err(error) => {
                         record.status = NodeStatus::Failed;
                         record.error = Some(error.message.clone());
-                        if let Some(details) = error.details.clone() {
-                            record.output = json!({ "error": details });
-                        }
+                        record.error_details = error.details.clone();
 
                         match node.on_error {
                             crate::model::OnError::Continue => {
@@ -271,6 +280,7 @@ impl FlowEngine {
                                 );
                                 let passthrough = attempt.items.clone();
                                 record.output_count = passthrough.len();
+                                record.output = preview_main_port(&passthrough);
                                 node_views.insert(
                                     node.name.clone(),
                                     NodeView {
@@ -846,6 +856,89 @@ mod tests {
         assert_eq!(record.node("pulado").unwrap().status, NodeStatus::Disabled);
         // O `data.set` desligado nao aplicou nada: o item original passou.
         assert_eq!(record.output[0]["original"], json!(true));
+    }
+
+    #[tokio::test]
+    async fn every_node_reports_its_output_indexed_by_port() {
+        // O painel de execucao e o contador de itens nas arestas leem sempre
+        // `output[porta]`; um no desativado ou que falhou e seguiu tem de usar
+        // a mesma forma, senao a UI mostra a aresta sem itens.
+        let calls = Arc::new(AtomicUsize::new(0));
+        let engine = engine_with(Some(Arc::new(Flaky {
+            fail_times: 99,
+            calls,
+        })));
+
+        let mut flow = Flow::new("Formas de saida");
+        flow.nodes.push(node("start", "trigger.manual", json!({})));
+        let mut disabled = node("off", "debug.log", json!({}));
+        disabled.disabled = true;
+        flow.nodes.push(disabled);
+        let mut tolerant = node("boom", "test.flaky", json!({}));
+        tolerant.on_error = OnError::Continue;
+        flow.nodes.push(tolerant);
+        flow.edges.push(Edge::new("start", "off"));
+        flow.edges.push(Edge::new("off", "boom"));
+
+        let record = engine
+            .run(&flow, RunOptions::manual(json!({ "n": 1 })))
+            .await
+            .unwrap();
+
+        for id in ["start", "off", "boom"] {
+            let node_run = record.node(id).unwrap();
+            assert_eq!(
+                node_run.output["main"]["total"],
+                json!(1),
+                "no `{id}` ({:?}) nao reportou itens na porta main: {}",
+                node_run.status,
+                node_run.output
+            );
+        }
+
+        // O detalhe do erro sai de `output` e vai para o campo proprio.
+        let failed = record.node("boom").unwrap();
+        assert_eq!(failed.status, NodeStatus::Failed);
+        assert!(failed.error.is_some());
+        assert!(failed.output.get("error").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_reserved_run_id_is_used_instead_of_a_new_one() {
+        let mut flow = Flow::new("Id reservado");
+        flow.nodes.push(node("start", "trigger.manual", json!({})));
+
+        let record = engine_with(None)
+            .run(
+                &flow,
+                RunOptions {
+                    run_id: Some("reservado-123".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(record.id, "reservado-123");
+    }
+
+    #[tokio::test]
+    async fn a_blank_reserved_run_id_falls_back_to_a_generated_one() {
+        let mut flow = Flow::new("Id vazio");
+        flow.nodes.push(node("start", "trigger.manual", json!({})));
+
+        let record = engine_with(None)
+            .run(
+                &flow,
+                RunOptions {
+                    run_id: Some("   ".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(!record.id.trim().is_empty());
     }
 
     #[tokio::test]

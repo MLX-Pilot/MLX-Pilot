@@ -29,6 +29,7 @@ pub fn builtin_registry() -> NodeRegistry {
     registry.register(std::sync::Arc::new(control::MergeNode));
     registry.register(std::sync::Arc::new(mlx::AgentNode));
     registry.register(std::sync::Arc::new(mlx::ToolNode));
+    registry.register(std::sync::Arc::new(mlx::McpNode));
     registry
 }
 
@@ -113,6 +114,7 @@ mod tests {
             "flow.merge",
             "agent.run",
             "tool.call",
+            "mcp.call",
         ] {
             assert!(registry.contains(kind), "faltou o no {kind}");
         }
@@ -171,6 +173,10 @@ mod tests {
 
         let tool = registry.get("tool.call").unwrap().descriptor();
         assert_eq!(source_of(&tool, "tool"), Some(OptionsSource::FlowTools));
+
+        let mcp = registry.get("mcp.call").unwrap().descriptor();
+        assert_eq!(source_of(&mcp, "server"), Some(OptionsSource::McpServers));
+        assert_eq!(source_of(&mcp, "tool"), Some(OptionsSource::McpTools));
     }
 
     #[test]

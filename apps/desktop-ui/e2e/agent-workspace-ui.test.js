@@ -60,6 +60,7 @@ function createFixture({
   environmentResponseHidden,
   environmentResponseRevealed,
   catalogModelsResponse,
+  mcpServersResponse,
   initialDownloads,
   startupResponse,
   useRealTimers = false,
@@ -383,6 +384,19 @@ function createFixture({
     if (path === "/flows/node-types") {
       return jsonResponse({
         tools: ["read_file", "exec"],
+        mcp_servers: mcpServersResponse ?? [
+          {
+            name: "arquivos",
+            command: "npx",
+            args: ["-y", "@modelcontextprotocol/server-filesystem"],
+            enabled: true,
+            tools: [
+              { name: "read_text_file", description: "Le um arquivo", input_schema: {} },
+              { name: "write_file", description: "Escreve um arquivo", input_schema: {} },
+            ],
+          },
+          { name: "desligado", command: "node", args: [], enabled: false, tools: [] },
+        ],
         nodes: [
           {
             kind: "trigger.manual",
@@ -469,6 +483,24 @@ function createFixture({
             ],
           },
           {
+            kind: "mcp.call",
+            label: "Servidor MCP",
+            group: "MLX Pilot",
+            description: "Executa uma ferramenta de um servidor MCP.",
+            color: "#c77dff",
+            glyph: "MCP",
+            inputs: ["main"],
+            outputs: ["main"],
+            defaults: { server: "", tool: "", arguments: {}, output_key: "mcp_output", keep_input: true },
+            fields: [
+              { key: "server", label: "Servidor", kind: "select", options_source: "mcp_servers", required: true },
+              { key: "tool", label: "Ferramenta", kind: "select", options_source: "mcp_tools", required: true },
+              { key: "arguments", label: "Argumentos", kind: "json" },
+              { key: "output_key", label: "Campo de saida", kind: "text", advanced: true },
+              { key: "keep_input", label: "Manter os campos de entrada", kind: "boolean", advanced: true },
+            ],
+          },
+          {
             kind: "tool.call",
             label: "Ferramenta MLX Pilot",
             group: "MLX Pilot",
@@ -526,6 +558,24 @@ function createFixture({
 
     if (path.startsWith("/flows/flow-1/runs")) {
       return jsonResponse({ runs: [] });
+    }
+
+    if (path === "/flows/mcp/servers" && method === "POST") {
+      return jsonResponse({ servers: [body] });
+    }
+
+    if (/^\/flows\/mcp\/servers\/[^/]+\/probe$/.test(path)) {
+      return jsonResponse({
+        name: "arquivos",
+        command: "npx",
+        args: [],
+        enabled: true,
+        reachable: true,
+        tools: [
+          { name: "read_text_file", description: "Le um arquivo", input_schema: {} },
+          { name: "write_file", description: "Escreve um arquivo", input_schema: {} },
+        ],
+      });
     }
 
     if (path === "/flows/flow-1/run" && method === "POST") {
@@ -1284,6 +1334,149 @@ test("clicar na saida e depois na entrada tambem conecta", async () => {
     await flush(3);
 
     assert.equal(fixture.document.querySelectorAll("#flow-connections .workflow-connection-group").length, 1);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("no MCP lista os servidores habilitados e as ferramentas do escolhido", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(8);
+
+    fixture.document.querySelector('[data-flow-node-kind="mcp.call"]')?.click();
+    await flush(3);
+
+    const server = fixture.document.querySelector('[data-field-key="server"]');
+    const values = [...server.querySelectorAll("option")].map((option) => option.value);
+    // O servidor desativado nao aparece.
+    assert.deepEqual(values, ["arquivos"]);
+
+    // Ja nasce apontando para o primeiro servidor habilitado e sua primeira
+    // ferramenta: o que a tela mostra e o que o no guarda.
+    assert.equal(server.value, "arquivos");
+    const tool = fixture.document.querySelector('[data-field-key="tool"]');
+    assert.equal(tool.value, "read_text_file");
+    const raw = JSON.parse(fixture.document.getElementById("flow-node-parameters").value);
+    assert.equal(raw.server, "arquivos");
+    assert.equal(raw.tool, "read_text_file");
+
+    const toolValues = [...tool.querySelectorAll("option")].map((option) => option.value);
+    assert.ok(toolValues.includes("write_file"), `ferramentas: ${toolValues.join(",")}`);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("select dinamico sem valor guardado mostra Selecione em vez de mentir", async () => {
+  // Sem servidor MCP configurado, o campo nao pode exibir uma escolha que o no
+  // nao tem — era isso que fazia o fluxo falhar em tempo de execucao.
+  const fixture = createFixture({ mcpServersResponse: [] });
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(8);
+    fixture.document.querySelector('[data-flow-node-kind="mcp.call"]')?.click();
+    await flush(3);
+
+    const server = fixture.document.querySelector('[data-field-key="server"]');
+    assert.equal(server.value, "");
+    assert.equal(
+      JSON.parse(fixture.document.getElementById("flow-node-parameters").value).server,
+      "",
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("servidor MCP pode ser cadastrado e sondado pela aba", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(8);
+
+    // A lista mostra os servidores e quantas ferramentas cada um expos.
+    const list = fixture.document.getElementById("mcp-server-list");
+    assert.match(list.textContent, /arquivos/);
+    assert.match(list.textContent, /2 ferramentas/);
+    assert.match(list.textContent, /Desativado/);
+
+    fixture.document.getElementById("mcp-server-name").value = "github";
+    fixture.document.getElementById("mcp-server-command").value = "npx";
+    fixture.document.getElementById("mcp-server-args").value = "-y\n@modelcontextprotocol/server-github";
+    fixture.document.getElementById("mcp-server-env").value = "GITHUB_TOKEN=abc";
+    fixture.document.getElementById("mcp-server-save-btn").click();
+    await flush(8);
+
+    const saveCall = fixture.fetchCalls.find(
+      (entry) => entry.path === "/flows/mcp/servers" && entry.method === "POST",
+    );
+    assert.ok(saveCall, "deveria ter chamado POST /flows/mcp/servers");
+    assert.equal(saveCall.body.name, "github");
+    assert.deepEqual(saveCall.body.args, ["-y", "@modelcontextprotocol/server-github"]);
+    assert.deepEqual(saveCall.body.env, { GITHUB_TOKEN: "abc" });
+
+    // Salvar ja sonda, senao o no ficaria sem lista de ferramentas.
+    assert.ok(fixture.fetchCalls.some((entry) => entry.path.endsWith("/probe")));
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("erro de JSON aparece ao lado do proprio campo", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(8);
+    fixture.document.querySelector('[data-flow-node-kind="data.set"]')?.click();
+    await flush(3);
+
+    const field = fixture.document.querySelector('[data-field-key="assignments"]');
+    field.value = "{nao json";
+    field.dispatchEvent(new fixture.window.Event("change", { bubbles: true }));
+    await flush(3);
+
+    const errorBox = fixture.document.querySelector('[data-field-error="assignments"]');
+    assert.ok(errorBox, "o campo deveria ter seu proprio espaco de erro");
+    assert.ok(errorBox.textContent.trim().length > 0, "o erro deveria estar preenchido");
+    // E fora da secao recolhida de avancado, senao ninguem ve.
+    assert.equal(errorBox.closest(".workflow-inspector-advanced"), null);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("secao avancada continua aberta entre edicoes", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(8);
+    fixture.document.querySelector('[data-flow-node-kind="agent.run"]')?.click();
+    await flush(3);
+
+    const details = fixture.document.querySelector(".workflow-inspector-advanced");
+    details.open = true;
+    details.dispatchEvent(new fixture.window.Event("toggle", { bubbles: true }));
+    await flush(2);
+
+    // Uma alteracao qualquer re-renderiza o inspetor.
+    const message = fixture.document.querySelector('[data-field-key="message"]');
+    message.value = "novo texto";
+    message.dispatchEvent(new fixture.window.Event("change", { bubbles: true }));
+    await flush(3);
+
+    assert.equal(fixture.document.querySelector(".workflow-inspector-advanced")?.open, true);
   } finally {
     fixture.cleanup();
   }

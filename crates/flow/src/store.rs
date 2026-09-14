@@ -95,7 +95,10 @@ impl FlowStore {
         self.ensure_dirs().await?;
 
         flow.schema = FLOW_SCHEMA.to_string();
-        let existing = if flow.id.trim().is_empty() {
+        // Um id que nao vira nome de arquivo seguro (vindo de um import ou de
+        // uma chamada crua da API) rende um fluxo novo, em vez de derrubar o
+        // salvamento inteiro.
+        let existing = if sanitize_id(&flow.id).is_none() {
             flow.id = uuid::Uuid::new_v4().to_string();
             None
         } else {
@@ -175,16 +178,36 @@ impl FlowStore {
     }
 
     /// Apaga as execucoes mais antigas, mantendo `keep`.
+    ///
+    /// Ordena pela data de modificacao do arquivo em vez de desserializar cada
+    /// execucao: isso roda depois de toda execucao, e um fluxo agendado faria
+    /// centenas de leituras de JSON por disparo.
     pub async fn prune_runs(&self, keep: usize) -> io::Result<()> {
-        let mut runs = self.read_all_runs().await?;
-        if runs.len() <= keep {
+        if !self.runs_dir.exists() {
             return Ok(());
         }
-        runs.sort_by(|a, b| b.started_at.cmp(&a.started_at));
-        for run in runs.into_iter().skip(keep) {
-            if let Some(path) = self.run_path(&run.id) {
-                let _ = fs::remove_file(path).await;
+
+        let mut files: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
+        let mut entries = fs::read_dir(&self.runs_dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("json") {
+                continue;
             }
+            let modified = entry
+                .metadata()
+                .await
+                .and_then(|meta| meta.modified())
+                .unwrap_or(std::time::UNIX_EPOCH);
+            files.push((modified, path));
+        }
+
+        if files.len() <= keep {
+            return Ok(());
+        }
+        files.sort_by(|a, b| b.0.cmp(&a.0));
+        for (_, path) in files.into_iter().skip(keep) {
+            let _ = fs::remove_file(path).await;
         }
         Ok(())
     }
@@ -400,18 +423,23 @@ mod tests {
     #[tokio::test]
     async fn run_history_is_pruned_to_the_limit() {
         let (_dir, store) = store();
-        for index in 0..6 {
+        // Grava da mais antiga para a mais recente, como acontece de verdade:
+        // uma execucao e persistida assim que termina.
+        for minutes_ago in (0..6).rev() {
             store
-                .save_run(&run_for("f1", &format!("r{index}"), index))
+                .save_run(&run_for("f1", &format!("r{minutes_ago}"), minutes_ago))
                 .await
                 .unwrap();
+            // Garante que os arquivos tenham marcas de tempo distintas.
+            tokio::time::sleep(std::time::Duration::from_millis(12)).await;
         }
         store.prune_runs(3).await.unwrap();
 
         let remaining = store.list_runs(None, 100).await.unwrap();
         assert_eq!(remaining.len(), 3);
-        // Mantem as mais recentes, ou seja, as de menor "minutos atras".
-        assert_eq!(remaining[0].id, "r0");
+        // Sobram as tres mais recentes, ou seja, as de menor "minutos atras".
+        let ids: Vec<&str> = remaining.iter().map(|run| run.id.as_str()).collect();
+        assert_eq!(ids, vec!["r0", "r1", "r2"]);
     }
 
     #[tokio::test]

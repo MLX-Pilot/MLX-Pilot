@@ -7,6 +7,7 @@ mod config;
 mod flows;
 mod hwfit_routes;
 mod jobs;
+mod mcp_servers;
 mod model_catalog;
 mod plugins;
 mod provider_embedder;
@@ -672,6 +673,18 @@ pub async fn run() -> anyhow::Result<()> {
         // ── Workflows nativos (mlx-flow) ──
         .route("/flows", get(flows::list_flows).post(flows::save_flow))
         .route("/flows/node-types", get(flows::node_types))
+        .route(
+            "/flows/mcp/servers",
+            get(flows::list_mcp_servers).post(flows::save_mcp_server),
+        )
+        .route(
+            "/flows/mcp/servers/{name}",
+            delete(flows::delete_mcp_server),
+        )
+        .route(
+            "/flows/mcp/servers/{name}/probe",
+            post(flows::probe_mcp_server),
+        )
         .route("/flows/validate", post(flows::validate_flow))
         .route("/flows/import/n8n", post(flows::import_n8n))
         .route("/flows/runs", get(flows::list_all_runs))

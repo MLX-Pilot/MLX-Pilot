@@ -75,6 +75,29 @@ pub struct ToolNodeResult {
     pub metadata: Map<String, Value>,
 }
 
+/// Pedido de execucao de uma ferramenta de um servidor MCP.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct McpNodeRequest {
+    /// Nome do servidor configurado no MLX Pilot.
+    pub server: String,
+    /// Ferramenta anunciada por esse servidor.
+    pub tool: String,
+    #[serde(default)]
+    pub arguments: Value,
+}
+
+/// Resultado de uma ferramenta MCP.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct McpNodeResult {
+    /// Conteudo textual concatenado da resposta.
+    pub text: String,
+    #[serde(default)]
+    pub is_error: bool,
+    /// Resposta crua, para conteudo que nao seja texto.
+    #[serde(default)]
+    pub raw: Value,
+}
+
 /// Capacidades que o motor pede ao processo hospedeiro.
 #[async_trait]
 pub trait FlowHost: Send + Sync {
@@ -83,6 +106,18 @@ pub trait FlowHost: Send + Sync {
 
     /// Executa uma ferramenta do registro do agente.
     async fn call_tool(&self, request: ToolNodeRequest) -> Result<ToolNodeResult, String>;
+
+    /// Executa uma ferramenta de um servidor MCP configurado.
+    ///
+    /// O padrao recusa: um host que nao configurou MCP nao precisa
+    /// implementar nada, e o no `mcp.call` falha com uma mensagem clara em vez
+    /// de silenciosamente nao fazer nada.
+    async fn call_mcp(&self, request: McpNodeRequest) -> Result<McpNodeResult, String> {
+        Err(format!(
+            "nenhum servidor MCP configurado: `{}` nao esta disponivel",
+            request.server
+        ))
+    }
 
     /// Nomes de ferramentas disponiveis, usado pelo catalogo da UI.
     fn available_tools(&self) -> Vec<String> {

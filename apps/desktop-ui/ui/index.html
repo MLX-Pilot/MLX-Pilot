@@ -671,6 +671,40 @@
               </div>
 
               <div class="settings-card full-width">
+                <div class="workflow-card-head">
+                  <h3>Servidores MCP</h3>
+                  <span class="workflow-inspector-muted">Ficam disponiveis no no <code>mcp.call</code>. Clique em Testar para carregar as ferramentas.</span>
+                </div>
+                <div class="flow-list-box" id="mcp-server-list">
+                  <div class="flow-empty">Nenhum servidor MCP configurado</div>
+                </div>
+                <div class="flow-validation" id="mcp-server-status" hidden></div>
+                <div class="workflow-inline-fields">
+                  <div class="settings-field">
+                    <label for="mcp-server-name">Nome</label>
+                    <input type="text" id="mcp-server-name" class="input" placeholder="arquivos" />
+                  </div>
+                  <div class="settings-field">
+                    <label for="mcp-server-command">Comando</label>
+                    <input type="text" id="mcp-server-command" class="input" placeholder="npx" />
+                  </div>
+                </div>
+                <div class="workflow-inline-fields">
+                  <div class="settings-field">
+                    <label for="mcp-server-args">Argumentos (um por linha)</label>
+                    <textarea id="mcp-server-args" class="input workflow-expression-input" rows="4" spellcheck="false" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;G:/TCC"></textarea>
+                  </div>
+                  <div class="settings-field">
+                    <label for="mcp-server-env">Ambiente (CHAVE=valor, um por linha)</label>
+                    <textarea id="mcp-server-env" class="input workflow-expression-input" rows="4" spellcheck="false" placeholder="GITHUB_TOKEN=..."></textarea>
+                  </div>
+                </div>
+                <div class="workflow-actions">
+                  <button class="primary-btn" id="mcp-server-save-btn" type="button">Salvar servidor</button>
+                </div>
+              </div>
+
+              <div class="settings-card full-width">
                 <h3>Resultado da execucao</h3>
                 <div class="flow-run-result" id="flow-run-result" hidden></div>
                 <div class="workflow-card-head">
