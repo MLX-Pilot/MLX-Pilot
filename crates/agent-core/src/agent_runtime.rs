@@ -674,6 +674,7 @@ mod tests {
                             arguments: r#"{"path":"."}"#.to_string(),
                         }],
                         tool_call_id: None,
+                        reasoning: None,
                     },
                     usage: TokenUsage {
                         prompt_tokens: 10,

@@ -23,6 +23,14 @@ pub struct ChatMessage {
     /// The tool_call_id this message is responding to (only set when role=Tool).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    /// Raciocínio separado do conteúdo, quando o modelo produz os dois.
+    ///
+    /// O Ollama devolve isso no campo `thinking` para modelos como a família Qwen3.
+    /// Guardar separado importa por dois motivos: um turno com raciocínio e `content`
+    /// vazio **não** é um turno vazio, e o raciocínio pode ser transmitido à UI sem
+    /// virar a resposta final do usuário.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
 }
 
 impl ChatMessage {
@@ -33,6 +41,7 @@ impl ChatMessage {
             content: content.into(),
             tool_calls: Vec::new(),
             tool_call_id: None,
+            reasoning: None,
         }
     }
 
@@ -43,7 +52,31 @@ impl ChatMessage {
             content: content.into(),
             tool_calls: Vec::new(),
             tool_call_id: Some(tool_call_id.into()),
+            reasoning: None,
         }
+    }
+
+    /// Se o turno não produziu conteúdo nem raciocínio nem chamada de ferramenta.
+    ///
+    /// Um turno só de raciocínio **não** conta como vazio: o modelo produziu trabalho,
+    /// só não o escreveu como resposta.
+    pub fn is_blank(&self) -> bool {
+        self.content.trim().is_empty()
+            && self.tool_calls.is_empty()
+            && self
+                .reasoning
+                .as_deref()
+                .is_none_or(|value| value.trim().is_empty())
+    }
+
+    /// Se o turno raciocinou mas não escreveu resposta nem chamou ferramenta.
+    pub fn is_reasoning_only(&self) -> bool {
+        self.content.trim().is_empty()
+            && self.tool_calls.is_empty()
+            && self
+                .reasoning
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
     }
 }
 
@@ -210,5 +243,56 @@ pub trait ModelProvider: Send + Sync {
     ) -> Result<ChatResponse, ProviderError> {
         let _ = runtime;
         self.chat_with_tools(request).await
+    }
+}
+
+#[cfg(test)]
+mod chat_message_tests {
+    use super::*;
+
+    #[test]
+    fn reasoning_only_turn_is_not_blank() {
+        // Regressao: um turno em que o modelo so raciocinou chegava ao agente como
+        // conteudo vazio, e o usuario recebia "" como resposta.
+        let message = ChatMessage {
+            role: MessageRole::Assistant,
+            content: String::new(),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+            reasoning: Some("O usuario quer a soma de 17 e 25.".to_string()),
+        };
+
+        assert!(!message.is_blank(), "raciocinio e trabalho, nao vazio");
+        assert!(message.is_reasoning_only());
+    }
+
+    #[test]
+    fn truly_empty_turn_is_blank() {
+        let message = ChatMessage::text(MessageRole::Assistant, "   ");
+        assert!(message.is_blank());
+        assert!(!message.is_reasoning_only());
+    }
+
+    #[test]
+    fn turn_with_content_is_neither_blank_nor_reasoning_only() {
+        let mut message = ChatMessage::text(MessageRole::Assistant, "42");
+        message.reasoning = Some("pensei bastante".to_string());
+        assert!(!message.is_blank());
+        assert!(!message.is_reasoning_only());
+    }
+
+    #[test]
+    fn whitespace_reasoning_does_not_count() {
+        let mut message = ChatMessage::text(MessageRole::Assistant, "");
+        message.reasoning = Some("   \n ".to_string());
+        assert!(message.is_blank());
+        assert!(!message.is_reasoning_only());
+    }
+
+    #[test]
+    fn reasoning_is_omitted_from_the_wire_when_absent() {
+        let message = ChatMessage::text(MessageRole::User, "oi");
+        let json = serde_json::to_string(&message).unwrap();
+        assert!(!json.contains("reasoning"), "json: {json}");
     }
 }
