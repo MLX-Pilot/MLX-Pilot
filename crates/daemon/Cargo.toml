@@ -31,6 +31,7 @@ mlx-ollama-core = { path = "../core" }
 mlx-agent-core = { path = "../agent-core" }
 mlx-agent-tools = { path = "../agent-tools" }
 mlx-agent-skills = { path = "../agent-skills" }
+mlx-flow = { path = "../flow" }
 mlx-provider = { path = "../providers/mlx" }
 llamacpp-provider = { path = "../providers/llamacpp" }
 ollama-provider = { path = "../providers/ollama" }

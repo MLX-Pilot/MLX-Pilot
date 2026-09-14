@@ -380,33 +380,117 @@ function createFixture({
       return jsonResponse(hiddenEnvironment);
     }
 
-    if (path === "/integrations/n8n/workflows/list" && method === "POST") {
+    if (path === "/flows/node-types") {
       return jsonResponse({
-        workflows: {
-          data: [{ id: "workflow-1", name: "Workflow salvo", active: false }],
-        },
+        tools: ["read_file", "exec"],
+        nodes: [
+          {
+            kind: "trigger.manual",
+            label: "Gatilho manual",
+            group: "Gatilhos",
+            description: "Inicia o fluxo sob demanda.",
+            color: "#f2b84b",
+            glyph: "GO",
+            inputs: [],
+            outputs: ["main"],
+            defaults: { sample: "" },
+            fields: [{ key: "sample", label: "Payload de teste", kind: "json" }],
+          },
+          {
+            kind: "data.set",
+            label: "Editar campos",
+            group: "Dados",
+            description: "Define campos em cada item.",
+            color: "#2ec4b6",
+            glyph: "SET",
+            inputs: ["main"],
+            outputs: ["main"],
+            defaults: { assignments: [], keep_only_set: false },
+            fields: [
+              { key: "assignments", label: "Campos", kind: "json", required: true },
+              { key: "keep_only_set", label: "Descartar os outros campos", kind: "boolean" },
+            ],
+          },
+          {
+            kind: "flow.if",
+            label: "Condicional",
+            group: "Fluxo",
+            description: "Divide os itens em duas saidas.",
+            color: "#b38cff",
+            glyph: "IF",
+            inputs: ["main"],
+            outputs: ["true", "false"],
+            defaults: { condition: "{{ $json.ok }}" },
+            fields: [{ key: "condition", label: "Condicao", kind: "expression", required: true }],
+          },
+        ],
       });
     }
 
-    if (path === "/integrations/n8n/workflows/save" && method === "POST") {
+    if (path === "/flows" && method === "GET") {
       return jsonResponse({
-        created: !body?.workflow_id,
-        workflow_id: body?.workflow_id || "workflow-1",
-        editor_url: "http://127.0.0.1:5678/workflow/workflow-1",
-        workflow: { id: body?.workflow_id || "workflow-1", ...body?.workflow },
+        flows: [
+          {
+            id: "flow-1",
+            name: "Fluxo salvo",
+            active: false,
+            node_count: 2,
+            edge_count: 1,
+            trigger_kinds: ["trigger.manual"],
+          },
+        ],
       });
     }
 
-    if (path === "/integrations/n8n/workflows/get" && method === "POST") {
+    if (path === "/flows" && method === "POST") {
       return jsonResponse({
-        workflow_id: body?.workflow_id,
-        workflow: {
-          id: body?.workflow_id,
-          name: "Workflow salvo",
-          nodes: [{ id: "manual-1", name: "Manual Trigger", type: "n8n-nodes-base.manualTrigger", typeVersion: 1, position: [400, 300], parameters: {} }],
-          connections: {},
-          settings: { executionOrder: "v1" },
-        },
+        flow: { ...body, id: body?.id || "flow-1" },
+        validation: { valid: true, issues: [] },
+      });
+    }
+
+    if (path === "/flows/flow-1" && method === "GET") {
+      return jsonResponse({
+        schema: "mlxflow.v1",
+        id: "flow-1",
+        name: "Fluxo salvo",
+        active: false,
+        nodes: [
+          { id: "manual-1", name: "Gatilho manual", kind: "trigger.manual", parameters: {}, position: { x: 280, y: 240 } },
+        ],
+        edges: [],
+        settings: { timeout_secs: 300, max_parallel: 8, save_runs: true },
+      });
+    }
+
+    if (path.startsWith("/flows/flow-1/runs")) {
+      return jsonResponse({ runs: [] });
+    }
+
+    if (path === "/flows/flow-1/run" && method === "POST") {
+      return jsonResponse({
+        id: "run-1",
+        flow_id: "flow-1",
+        flow_name: "Fluxo salvo",
+        status: "success",
+        trigger: "manual",
+        started_at: new Date().toISOString(),
+        duration_ms: 12,
+        output: [{ ok: true }],
+        nodes: [
+          {
+            node_id: "manual-1",
+            node_name: "Gatilho manual",
+            kind: "trigger.manual",
+            status: "success",
+            duration_ms: 3,
+            attempts: 1,
+            input_count: 1,
+            output_count: 1,
+            output: {},
+            logs: [],
+          },
+        ],
       });
     }
 
@@ -982,29 +1066,80 @@ test("sidebar global aparece apenas no chat e some nas outras abas", async () =>
   }
 });
 
-test("workflow editor cria nos e salva JSON compativel com n8n", async () => {
+test("editor de fluxos monta o grafo e salva no formato nativo", async () => {
   const fixture = createFixture();
 
   try {
     await flush(8);
     fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
-    await flush(3);
+    await flush(6);
 
-    assert.equal(fixture.document.querySelectorAll("#workflow-nodes .workflow-node").length, 1);
-    fixture.document.querySelector('[data-workflow-node-type="code"]')?.click();
-    assert.equal(fixture.document.querySelectorAll("#workflow-nodes .workflow-node").length, 2);
-    assert.match(fixture.document.getElementById("workflow-inspector")?.textContent || "", /Code/);
+    // A paleta vem do catalogo publicado pelo daemon.
+    assert.ok(fixture.document.querySelector('[data-flow-node-kind="data.set"]'));
+    assert.equal(fixture.document.querySelectorAll("#flow-nodes .workflow-node").length, 1);
 
-    fixture.document.getElementById("n8n-api-key").value = "test-api-key";
-    fixture.document.getElementById("workflow-save-btn")?.click();
-    await flush(5);
+    fixture.document.querySelector('[data-flow-node-kind="data.set"]')?.click();
+    await flush(2);
+    assert.equal(fixture.document.querySelectorAll("#flow-nodes .workflow-node").length, 2);
+    assert.match(fixture.document.getElementById("flow-inspector")?.textContent || "", /Editar campos/);
 
-    const saveCall = fixture.fetchCalls.find((entry) => entry.path === "/integrations/n8n/workflows/save");
-    assert.ok(saveCall);
-    assert.equal(saveCall.body.api_key, "test-api-key");
-    assert.equal(saveCall.body.workflow.nodes.length, 2);
-    assert.equal(fixture.document.getElementById("workflow-save-state")?.textContent, "Salvo");
-    assert.equal(fixture.document.getElementById("workflow-open-n8n-btn")?.hidden, false);
+    fixture.document.getElementById("flow-save-btn")?.click();
+    await flush(6);
+
+    const saveCall = fixture.fetchCalls.find((entry) => entry.path === "/flows" && entry.method === "POST");
+    assert.ok(saveCall, "deveria ter chamado POST /flows");
+    assert.equal(saveCall.body.schema, "mlxflow.v1");
+    assert.equal(saveCall.body.nodes.length, 2);
+    assert.equal(saveCall.body.nodes[1].kind, "data.set");
+    assert.equal(fixture.document.getElementById("flow-save-state")?.textContent, "Salvo");
+    // Executar so libera com o fluxo gravado.
+    assert.equal(fixture.document.getElementById("flow-run-btn")?.disabled, false);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("condicional expoe as duas portas de saida no canvas", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(6);
+
+    fixture.document.querySelector('[data-flow-node-kind="flow.if"]')?.click();
+    await flush(2);
+
+    const ports = [...fixture.document.querySelectorAll("#flow-nodes .workflow-node-port.output")]
+      .map((port) => port.dataset.portName);
+    assert.ok(ports.includes("true"), `portas encontradas: ${ports.join(",")}`);
+    assert.ok(ports.includes("false"), `portas encontradas: ${ports.join(",")}`);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("executar um fluxo salvo mostra o resultado por no", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(6);
+
+    fixture.document.querySelector('[data-flow-open="flow-1"]')?.click();
+    await flush(6);
+
+    fixture.document.getElementById("flow-run-btn")?.click();
+    await flush(6);
+
+    const runCall = fixture.fetchCalls.find((entry) => entry.path === "/flows/flow-1/run");
+    assert.ok(runCall, "deveria ter chamado POST /flows/{id}/run");
+
+    const result = fixture.document.getElementById("flow-run-result");
+    assert.equal(result?.hidden, false);
+    assert.match(result?.textContent || "", /Sucesso/);
+    assert.match(result?.textContent || "", /Gatilho manual/);
   } finally {
     fixture.cleanup();
   }
