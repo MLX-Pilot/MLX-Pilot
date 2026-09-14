@@ -351,7 +351,7 @@ pub async fn generate_workflow(
     let generated_workflow =
         match generate_workflow_json_with_agent(&state, &request, &prompt).await {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return *response,
         };
     let workflow = match normalize_generated_workflow(generated_workflow, &request) {
         Ok(value) => value,
@@ -399,19 +399,19 @@ async fn generate_workflow_json_with_agent(
     state: &super::AppState,
     request: &N8nGenerateWorkflowRequest,
     prompt: &str,
-) -> Result<Value, Response> {
+) -> Result<Value, Box<Response>> {
     let agent_request = workflow_generator_agent_request(request, prompt);
     let agent_response = match crate::agent_api::execute_agent_request(state, agent_request).await {
         Ok(response) => response,
-        Err(error) => return Err(error.into_response()),
+        Err(error) => return Err(Box::new(error.into_response())),
     };
 
     parse_json_object_from_text(&agent_response.content).map_err(|error| {
-        n8n_error(
+        Box::new(n8n_error(
             StatusCode::BAD_GATEWAY,
             "workflow_generation_failed",
             Some(error),
-        )
+        ))
     })
 }
 
