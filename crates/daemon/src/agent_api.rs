@@ -456,6 +456,15 @@ impl AgentApiError {
         Self::new(StatusCode::BAD_REQUEST, error, None)
     }
 
+    /// Mensagem legivel para quem consome o erro fora da camada HTTP, como o
+    /// motor de workflows, que precisa embutir a causa no registro do no.
+    pub(crate) fn message(&self) -> String {
+        match &self.details {
+            Some(details) if !details.trim().is_empty() => format!("{}: {details}", self.error),
+            _ => self.error.clone(),
+        }
+    }
+
     fn from_agent_error(err: AgentError) -> Self {
         match err {
             AgentError::MaxIterations { max } => Self::new(
