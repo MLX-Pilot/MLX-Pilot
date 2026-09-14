@@ -46,6 +46,24 @@ impl SelectOption {
     }
 }
 
+/// Origem das opcoes de um campo `select` que o daemon nao consegue preencher
+/// sozinho, porque dependem do que o usuario configurou no resto do app.
+///
+/// O catalogo publica so o nome da fonte; quem resolve e a UI, que ja mantem a
+/// lista de provedores, modelos e ferramentas para as outras abas. E isso que
+/// faz um no `agent.run` nascer apontando para o mesmo provedor e modelo que
+/// estao selecionados no MLX Pilot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OptionsSource {
+    /// Provedores de modelo configurados e disponiveis.
+    AgentProviders,
+    /// Modelos do provedor escolhido no proprio no.
+    AgentModels,
+    /// Ferramentas registradas para o no `tool.call`.
+    FlowTools,
+}
+
 /// Descricao de um parametro editavel.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FieldSpec {
@@ -58,8 +76,15 @@ pub struct FieldSpec {
     pub help: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<SelectOption>,
+    /// Preenche `options` em tempo de renderizacao.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options_source: Option<OptionsSource>,
     #[serde(default)]
     pub required: bool,
+    /// Campo que fica recolhido em "Avancado": tem um padrao herdado do app e
+    /// so precisa aparecer quando alguem quiser sobrescrever.
+    #[serde(default)]
+    pub advanced: bool,
 }
 
 impl FieldSpec {
@@ -71,12 +96,27 @@ impl FieldSpec {
             placeholder: None,
             help: None,
             options: Vec::new(),
+            options_source: None,
             required: false,
+            advanced: false,
         }
+    }
+
+    /// Campo `select` cujas opcoes a UI resolve.
+    pub fn dynamic(key: &str, label: &str, source: OptionsSource) -> Self {
+        let mut field = Self::new(key, label, FieldKind::Select);
+        field.options_source = Some(source);
+        field
     }
 
     pub fn required(mut self) -> Self {
         self.required = true;
+        self
+    }
+
+    /// Move o campo para a secao recolhida de avancado.
+    pub fn advanced(mut self) -> Self {
+        self.advanced = true;
         self
     }
 

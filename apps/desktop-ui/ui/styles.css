@@ -4160,3 +4160,22 @@ code { font-family: var(--font-mono); }
 .flow-run-result[hidden] {
   display: none;
 }
+
+/* Rotulo de itens sobre a conexao, como o contador do n8n. */
+.workflow-connection-count {
+  fill: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  pointer-events: none;
+}
+.workflow-connection-group:hover .workflow-connection-count {
+  fill: var(--text-secondary);
+}
+
+/* Porta de saida destacada enquanto se arrasta uma ligacao. */
+.workflow-node-port.output.connecting {
+  box-shadow: 0 0 0 4px rgba(0, 212, 255, 0.25);
+}
+.workflow-inspector-advanced > .settings-field:first-of-type {
+  margin-top: 8px;
+}

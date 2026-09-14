@@ -12,6 +12,7 @@ use crate::host::{AgentNodeRequest, ToolNodeRequest};
 use crate::model::MAIN_PORT;
 use crate::registry::{
     FieldKind, FieldSpec, NodeContext, NodeDescriptor, NodeError, NodeExecutor, NodeOutput,
+    OptionsSource,
 };
 
 use super::{param_array, param_bool, param_str, param_str_or, param_u64};
@@ -34,9 +35,14 @@ impl NodeExecutor for AgentNode {
             defaults: json!({
                 "message": "Resuma em uma frase: {{ $json.texto }}",
                 "system_prompt": "",
+                // Preenchidos pela UI com o provedor/modelo ativos ao criar o
+                // no; vazios significam "usar o que o agente estiver usando".
                 "provider": "",
                 "model_id": "",
+                "provider_profile_id": "",
                 "base_url": "",
+                // `null` significa herdar a temperatura configurada no agente.
+                "temperature": null,
                 "max_iterations": 1,
                 "tools": [],
                 "output_key": "response",
@@ -44,25 +50,32 @@ impl NodeExecutor for AgentNode {
                 "keep_input": true
             }),
             fields: vec![
+                FieldSpec::dynamic("provider", "Provedor", OptionsSource::AgentProviders)
+                    .help("Comeca no provedor ativo do MLX Pilot."),
+                FieldSpec::dynamic("model_id", "Modelo", OptionsSource::AgentModels)
+                    .help("Modelos locais instalados ou os do provedor de nuvem escolhido."),
                 FieldSpec::new("message", "Mensagem", FieldKind::Textarea)
                     .required()
                     .placeholder("Resuma em uma frase: {{ $json.texto }}"),
                 FieldSpec::new("system_prompt", "Prompt de sistema", FieldKind::Textarea),
-                FieldSpec::new("provider", "Provedor", FieldKind::Text)
-                    .placeholder("vazio usa o provedor ativo do agente"),
-                FieldSpec::new("model_id", "Modelo", FieldKind::Text)
-                    .placeholder("vazio usa o modelo ativo do agente"),
-                FieldSpec::new("base_url", "Base URL", FieldKind::Text)
-                    .placeholder("http://127.0.0.1:11434"),
-                FieldSpec::new("max_iterations", "Iteracoes maximas", FieldKind::Number)
-                    .help("1 desliga o laco de ferramentas e devolve a primeira resposta."),
                 FieldSpec::new("tools", "Ferramentas liberadas", FieldKind::Json)
                     .help("Lista de nomes. Vazia roda sem ferramenta nenhuma."),
-                FieldSpec::new("output_key", "Campo de saida", FieldKind::Text)
-                    .placeholder("response"),
+                FieldSpec::new("max_iterations", "Iteracoes maximas", FieldKind::Number)
+                    .help("1 desliga o laco de ferramentas e devolve a primeira resposta."),
                 FieldSpec::new("parse_json", "Interpretar a resposta como JSON", FieldKind::Boolean)
                     .help("Falha se o modelo nao devolver JSON valido."),
-                FieldSpec::new("keep_input", "Manter os campos de entrada", FieldKind::Boolean),
+                FieldSpec::new("output_key", "Campo de saida", FieldKind::Text)
+                    .placeholder("response")
+                    .advanced(),
+                FieldSpec::new("keep_input", "Manter os campos de entrada", FieldKind::Boolean)
+                    .advanced(),
+                // Herdados do provedor escolhido; so aparecem para sobrescrever.
+                FieldSpec::new("base_url", "Base URL", FieldKind::Text)
+                    .placeholder("herdada do provedor selecionado")
+                    .advanced(),
+                FieldSpec::new("temperature", "Temperatura", FieldKind::Number)
+                    .placeholder("herdada do agente")
+                    .advanced(),
             ],
         }
     }
@@ -176,24 +189,27 @@ impl NodeExecutor for ToolNode {
                 "tool": "read_file",
                 "params": {},
                 "read_only": true,
+                "workspace_root": "",
                 "output_key": "tool_output",
                 "parse_json": false,
                 "keep_input": true
             }),
             fields: vec![
-                FieldSpec::new("tool", "Ferramenta", FieldKind::Text)
-                    .required()
-                    .placeholder("read_file"),
+                FieldSpec::dynamic("tool", "Ferramenta", OptionsSource::FlowTools).required(),
                 FieldSpec::new("params", "Parametros", FieldKind::Json)
                     .help("Objeto JSON com os argumentos da ferramenta. Aceita expressoes."),
-                FieldSpec::new("workspace_root", "Raiz do workspace", FieldKind::Text)
-                    .placeholder("vazio usa o workspace padrao do agente"),
                 FieldSpec::new("read_only", "Somente leitura", FieldKind::Boolean)
                     .help("Bloqueia escrita e execucao de comandos."),
-                FieldSpec::new("output_key", "Campo de saida", FieldKind::Text)
-                    .placeholder("tool_output"),
                 FieldSpec::new("parse_json", "Interpretar a saida como JSON", FieldKind::Boolean),
-                FieldSpec::new("keep_input", "Manter os campos de entrada", FieldKind::Boolean),
+                FieldSpec::new("output_key", "Campo de saida", FieldKind::Text)
+                    .placeholder("tool_output")
+                    .advanced(),
+                FieldSpec::new("keep_input", "Manter os campos de entrada", FieldKind::Boolean)
+                    .advanced(),
+                // Herdado do workspace do agente.
+                FieldSpec::new("workspace_root", "Raiz do workspace", FieldKind::Text)
+                    .placeholder("herdada do workspace do agente")
+                    .advanced(),
             ],
         }
     }
