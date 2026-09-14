@@ -3076,6 +3076,174 @@
     };
   }
 
+  // -- Campos dinamicos: provedor, modelo e ferramentas ------
+  // O catalogo do daemon so diz de onde vem as opcoes (`options_source`); quem
+  // resolve e a UI, que ja mantem provedores, modelos e chaves configuradas
+  // para as outras abas. E isso que faz um no `agent.run` nascer apontando para
+  // a mesma IA que esta selecionada no resto do MLX Pilot.
+
+  const FLOW_LOCAL_GROUP = 'Local (MLX Pilot)';
+  const FLOW_CLOUD_GROUP = 'Cloud';
+
+  function flowAgentProviderOptions() {
+    return state.agentProviderOptions.length ? state.agentProviderOptions : buildAgentProviderOptions();
+  }
+
+  function flowLocalModels() {
+    return state.models
+      .filter(model => isLocalProvider(model.provider || inferModelProvider(model.id, '')))
+      .slice()
+      .sort((a, b) => humanizeModelLabel(a.id).localeCompare(humanizeModelLabel(b.id), 'pt-BR'));
+  }
+
+  /// Provedores em dois grupos: o runtime local e as nuvens ja configuradas.
+  function flowProviderOptionGroups() {
+    const groups = [];
+
+    const localProviders = [...new Set(
+      state.models
+        .map(model => normalizeProviderId(model.provider || inferModelProvider(model.id, '')))
+        .filter(provider => provider && isLocalProvider(provider)),
+    )].sort();
+    const localFallback = localProviders.length ? localProviders : ['ollama'];
+    groups.push({
+      label: FLOW_LOCAL_GROUP,
+      options: localFallback.map(provider => ({
+        value: provider,
+        label: `MLX Pilot - ${provider}`,
+        profileId: '',
+      })),
+    });
+
+    const cloud = flowAgentProviderOptions().filter(option => option.kind !== 'local');
+    if (cloud.length) {
+      groups.push({
+        label: FLOW_CLOUD_GROUP,
+        options: cloud.map(option => ({
+          value: option.provider,
+          label: option.label,
+          profileId: option.profileId || '',
+        })),
+      });
+    }
+    return groups;
+  }
+
+  /// Modelos nos mesmos dois grupos: instalados localmente e os das nuvens
+  /// configuradas. Escolher um modelo daqui ja define o provedor.
+  function flowModelOptionGroups() {
+    const groups = [];
+
+    const local = flowLocalModels();
+    if (local.length) {
+      groups.push({
+        label: FLOW_LOCAL_GROUP,
+        options: local.map(model => ({
+          value: model.id,
+          label: humanizeModelLabel(model.id) + (model.is_available === false ? ' (nao instalado)' : ''),
+          provider: normalizeProviderId(model.provider || inferModelProvider(model.id, 'ollama')),
+          profileId: '',
+        })),
+      });
+    }
+
+    const cloudOptions = [];
+    flowAgentProviderOptions()
+      .filter(option => option.kind !== 'local')
+      .forEach(option => {
+        const seen = new Set();
+        [option.modelId, defaultCloudModelForProvider(option.provider)]
+          .concat(
+            state.models
+              .filter(model => normalizeProviderId(model.provider) === option.provider)
+              .map(model => model.id),
+          )
+          .filter(Boolean)
+          .forEach(modelId => {
+            if (seen.has(modelId)) return;
+            seen.add(modelId);
+            cloudOptions.push({
+              value: modelId,
+              label: `${option.label} - ${humanizeModelLabel(modelId)}`,
+              provider: option.provider,
+              profileId: option.profileId || '',
+            });
+          });
+      });
+    if (cloudOptions.length) groups.push({ label: FLOW_CLOUD_GROUP, options: cloudOptions });
+
+    return groups;
+  }
+
+  function flowToolOptionGroups() {
+    return [{
+      label: '',
+      options: (state.flowCatalog.tools || []).map(name => ({ value: name, label: name })),
+    }];
+  }
+
+  function flowFieldOptionGroups(field) {
+    switch (field.options_source) {
+      case 'agent_providers': return flowProviderOptionGroups();
+      case 'agent_models': return flowModelOptionGroups();
+      case 'flow_tools': return flowToolOptionGroups();
+      default: return [{ label: '', options: field.options || [] }];
+    }
+  }
+
+  /// Provedor e modelo ativos no resto do app, usados como ponto de partida de
+  /// um no `agent.run` recem-criado.
+  function flowActiveAgentSelection() {
+    const options = flowAgentProviderOptions();
+    const current = options.find(option => option.value === currentAgentProviderChoiceValue()) || options[0];
+    if (!current) return { provider: '', model_id: '', provider_profile_id: '' };
+    if (current.kind === 'local') {
+      const modelId = activeAgentModelId() || current.modelId || '';
+      return {
+        provider: normalizeProviderId(inferModelProvider(modelId, state.agentConfig?.provider || 'ollama')),
+        model_id: modelId,
+        provider_profile_id: '',
+      };
+    }
+    return {
+      provider: current.provider,
+      model_id: current.modelId || defaultCloudModelForProvider(current.provider),
+      provider_profile_id: current.profileId || '',
+    };
+  }
+
+  /// Mantem provedor, modelo e perfil coerentes depois de mexer num dos dois.
+  function flowSyncAgentSelection(node, changedKey) {
+    if (node.kind !== 'agent.run') return;
+
+    if (changedKey === 'model_id') {
+      const modelId = String(node.parameters.model_id || '');
+      const match = flowModelOptionGroups()
+        .flatMap(group => group.options)
+        .find(option => option.value === modelId);
+      node.parameters.provider = match
+        ? match.provider
+        : normalizeProviderId(inferModelProvider(modelId, node.parameters.provider || 'ollama'));
+      node.parameters.provider_profile_id = match?.profileId || '';
+      return;
+    }
+
+    if (changedKey === 'provider') {
+      const provider = normalizeProviderId(node.parameters.provider);
+      const providerOption = flowProviderOptionGroups()
+        .flatMap(group => group.options)
+        .find(option => option.value === provider);
+      node.parameters.provider_profile_id = providerOption?.profileId || '';
+
+      // Trocar de provedor invalida um modelo que pertencia ao anterior.
+      const models = flowModelOptionGroups()
+        .flatMap(group => group.options)
+        .filter(option => option.provider === provider);
+      const stillValid = models.some(option => option.value === node.parameters.model_id);
+      if (!stillValid) node.parameters.model_id = models[0]?.value || '';
+    }
+  }
+
   function flowDescriptor(kind) {
     return state.flowCatalog.nodes.find(item => item.kind === kind) || {
       kind: String(kind || 'desconhecido'),
@@ -3339,10 +3507,22 @@
         const outputs = flowDescriptor(source.kind).outputs || ['main'];
         const portIndex = Math.max(0, outputs.indexOf(edge.from_port));
         const path = flowEdgePath(source, portIndex, outputs.length, target);
+
+        // Quantos itens passaram por esta aresta na ultima execucao, como o
+        // rotulo que o n8n mostra sobre a conexao.
+        const carried = runByNode.get(edge.from)?.output?.[edge.from_port]?.total;
+        const midX = (source.position.x + FLOW_NODE_WIDTH + target.position.x) / 2;
+        const midY = (source.position.y + flowOutputPortOffset(portIndex, outputs.length)
+          + target.position.y + FLOW_NODE_HEIGHT / 2) / 2;
+        const badge = Number.isFinite(carried)
+          ? `<text class="workflow-connection-count" x="${midX}" y="${midY - 6}" text-anchor="middle">${carried} item${carried === 1 ? '' : 's'}</text>`
+          : '';
+
         return `
           <g class="workflow-connection-group ${edge.from_port === 'false' ? 'branch-false' : ''}" data-edge-id="${flowAttr(edge.id)}">
             <path class="workflow-connection-hit" d="${path}"></path>
             <path class="workflow-connection-line" d="${path}"></path>
+            ${badge}
           </g>
         `;
       }).join('');
@@ -3367,11 +3547,25 @@
       case 'number':
         control = `<input class="input" type="number" ${attrs} value="${flowAttr(value ?? '')}" />`;
         break;
-      case 'select':
-        control = `<select class="input" ${attrs}>${(field.options || []).map(option =>
-          `<option value="${flowAttr(option.value)}" ${String(value) === option.value ? 'selected' : ''}>${esc(option.label)}</option>`
-        ).join('')}</select>`;
+      case 'select': {
+        const groups = flowFieldOptionGroups(field);
+        const current = String(value ?? '');
+        const known = groups.some(group => group.options.some(option => option.value === current));
+        // Um valor vindo do JSON que nao esta na lista viraria selecao vazia e
+        // seria perdido no proximo change; mostra como opcao propria.
+        const orphan = current && !known
+          ? `<option value="${flowAttr(current)}" selected>${esc(current)} (fora da lista)</option>`
+          : '';
+        const body = groups.map(group => {
+          const items = group.options.map(option =>
+            `<option value="${flowAttr(option.value)}" ${current === option.value ? 'selected' : ''}>${esc(option.label)}</option>`
+          ).join('');
+          if (!items) return '';
+          return group.label ? `<optgroup label="${flowAttr(group.label)}">${items}</optgroup>` : items;
+        }).join('');
+        control = `<select class="input" ${attrs}>${orphan}${body || '<option value="">Nada disponivel</option>'}</select>`;
         break;
+      }
       case 'textarea':
       case 'expression':
         control = `<textarea class="input ${field.kind === 'expression' ? 'workflow-expression-input' : ''}" rows="3" spellcheck="false" ${attrs}>${esc(value ?? '')}</textarea>`;
@@ -3417,9 +3611,10 @@
             <input class="input" id="flow-node-name" value="${flowAttr(node.name)}" />
             <span class="workflow-inspector-muted">Usado por expressoes $node["${flowAttr(node.name)}"].</span>
           </div>
-          ${descriptor.fields.map(field => flowFieldControl(node, field)).join('')}
+          ${descriptor.fields.filter(field => !field.advanced).map(field => flowFieldControl(node, field)).join('')}
           <details class="workflow-inspector-advanced">
             <summary>Avancado</summary>
+            ${descriptor.fields.filter(field => field.advanced).map(field => flowFieldControl(node, field)).join('')}
             <label class="workflow-inspector-toggle">
               <input id="flow-node-disabled" type="checkbox" ${node.disabled ? 'checked' : ''} />
               <span>No desativado (repassa a entrada)</span>
@@ -3532,8 +3727,41 @@
       disabled: false,
       on_error: 'stop',
     };
-    state.flowEditor.flow.nodes.push(node);
+    // Um no de agente ja nasce apontando para a IA ativa no resto do app.
+    if (node.kind === 'agent.run') {
+      Object.assign(node.parameters, flowActiveAgentSelection());
+    }
+    if (node.kind === 'tool.call' && !node.parameters.tool) {
+      node.parameters.tool = (state.flowCatalog.tools || [])[0] || '';
+    }
+
+    const flow = state.flowEditor.flow;
+    // Como no n8n: um no adicionado com outro selecionado ja entra conectado.
+    const previous = flowEditorNodeById(state.flowEditor.selectedNodeId);
+    flow.nodes.push(node);
+    if (previous && position === null && (descriptor.inputs || []).length) {
+      const port = (flowDescriptor(previous.kind).outputs || ['main'])[0];
+      const free = !flow.edges.some(edge => edge.from === previous.id && edge.from_port === port);
+      if (free) {
+        node.position = { x: previous.position.x + 260, y: previous.position.y };
+        flow.edges.push({ id: flowUid(), from: previous.id, from_port: port, to: node.id, to_port: 'main' });
+      }
+    }
+
     state.flowEditor.selectedNodeId = node.id;
+    flowEditorCheckpoint();
+  }
+
+  /// Copia o no selecionado, deslocado e sem conexoes.
+  function flowEditorDuplicateSelected() {
+    const source = flowEditorNodeById(state.flowEditor.selectedNodeId);
+    if (!source) return;
+    const copy = flowClone(source);
+    copy.id = flowUid();
+    copy.name = flowUniqueNodeName(source.name);
+    copy.position = { x: source.position.x + 40, y: source.position.y + 60 };
+    state.flowEditor.flow.nodes.push(copy);
+    state.flowEditor.selectedNodeId = copy.id;
     flowEditorCheckpoint();
   }
 
@@ -3954,6 +4182,13 @@
   function flowEditorPointerMove(event) {
     const drag = state.flowEditor.drag;
     if (!drag) return;
+    if (drag.type === 'link') {
+      // Só marca que houve arrasto; a linha guia sai do proprio destaque da porta.
+      if (Math.abs(event.clientX - drag.clientX) > 4 || Math.abs(event.clientY - drag.clientY) > 4) {
+        drag.moved = true;
+      }
+      return;
+    }
     if (drag.type === 'node') {
       const node = flowEditorNodeById(drag.nodeId);
       if (!node) return;
@@ -3974,6 +4209,16 @@
 
   function flowEditorPointerUp() {
     const drag = state.flowEditor.drag;
+    // A ligacao e resolvida pelo `pointerup` da camada de nos, que sabe onde
+    // soltou; aqui so limpamos se soltou fora do canvas.
+    if (drag?.type === 'link') {
+      state.flowEditor.drag = null;
+      if (drag.moved) {
+        state.flowEditor.connectingFrom = null;
+        renderFlowCanvas();
+      }
+      return;
+    }
     state.flowEditor.drag = null;
     document.getElementById('flow-canvas-viewport')?.classList.remove('panning');
     if (drag?.type === 'node' && drag.moved) flowEditorCheckpoint();
@@ -4046,12 +4291,9 @@
       const port = event.target.closest('[data-port]');
       if (port) {
         event.stopPropagation();
-        if (port.dataset.port === 'output') {
-          const candidate = { nodeId: port.dataset.nodeId, port: port.dataset.portName || 'main' };
-          const same = editor.connectingFrom?.nodeId === candidate.nodeId && editor.connectingFrom?.port === candidate.port;
-          editor.connectingFrom = same ? null : candidate;
-          renderFlowCanvas();
-        } else if (editor.connectingFrom) {
+        // A saida ja foi tratada no par pointerdown/pointerup, que distingue
+        // clique de arrasto; aqui so falta fechar a ligacao na entrada.
+        if (port.dataset.port === 'input' && editor.connectingFrom) {
           flowEditorConnect(editor.connectingFrom.nodeId, editor.connectingFrom.port, port.dataset.nodeId);
         }
         return;
@@ -4062,6 +4304,49 @@
         renderFlowEditor();
       }
     });
+    // Arrastar da porta de saida ate a de entrada, como no n8n. O clique
+    // simples continua funcionando: `pointerup` sem arrasto nao conecta nada e
+    // o handler de `click` assume.
+    nodes?.addEventListener('pointerdown', event => {
+      const port = event.target.closest('[data-port="output"]');
+      if (event.button !== 0 || !port) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const candidate = { nodeId: port.dataset.nodeId, port: port.dataset.portName || 'main' };
+      const wasArmed = editor.connectingFrom?.nodeId === candidate.nodeId
+        && editor.connectingFrom?.port === candidate.port;
+      editor.connectingFrom = candidate;
+      editor.drag = { type: 'link', clientX: event.clientX, clientY: event.clientY, moved: false, wasArmed };
+      // Destaca a porta sem re-renderizar: o canvas precisa ficar estavel ate o
+      // `pointerup`, senao o elemento sob o cursor e trocado no meio do arrasto.
+      nodes.querySelectorAll('.workflow-node-port.output.connecting')
+        .forEach(item => item.classList.remove('connecting'));
+      port.classList.add('connecting');
+    });
+
+    nodes?.addEventListener('pointerup', event => {
+      if (editor.drag?.type !== 'link') return;
+      const { moved, wasArmed } = editor.drag;
+      editor.drag = null;
+
+      if (!moved) {
+        // Clique simples: arma a porta, ou desarma se ja estava armada. O
+        // segundo clique, na porta de entrada, fecha a ligacao.
+        if (wasArmed) editor.connectingFrom = null;
+        renderFlowCanvas();
+        return;
+      }
+
+      const target = event.target.closest('[data-port="input"]') || event.target.closest('.workflow-node');
+      const targetId = target?.dataset.nodeId;
+      if (targetId && editor.connectingFrom) {
+        flowEditorConnect(editor.connectingFrom.nodeId, editor.connectingFrom.port, targetId);
+        return;
+      }
+      editor.connectingFrom = null;
+      renderFlowCanvas();
+    });
+
     nodes?.addEventListener('pointerdown', event => {
       if (event.button !== 0 || event.target.closest('[data-port]')) return;
       const element = event.target.closest('.workflow-node');
@@ -4116,6 +4401,7 @@
         return;
       }
       if (target.dataset.fieldKey && flowApplyFieldChange(node, target)) {
+        flowSyncAgentSelection(node, target.dataset.fieldKey);
         flowEditorCheckpoint();
       }
     });
@@ -4155,6 +4441,9 @@
       } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') {
         event.preventDefault();
         flowEditorUndo(1);
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') {
+        event.preventDefault();
+        flowEditorDuplicateSelected();
       } else if (event.key === 'Delete' || event.key === 'Backspace') {
         event.preventDefault();
         flowEditorDeleteSelected();
@@ -4168,6 +4457,15 @@
   async function initFlowsPanel() {
     initFlowEditorEvents();
     if (!state.flowCatalog.nodes.length) await loadFlowCatalog();
+    // Os seletores de provedor e modelo do no `agent.run` leem o mesmo estado
+    // que a aba Agent, entao ele precisa estar carregado antes de renderizar.
+    try {
+      if (!state.modelsLoaded) await loadModels();
+      if (!state.agentConfig) await loadAgentConfig();
+      buildAgentProviderOptions();
+    } catch (error) {
+      pushConsoleEntry('warn', 'flows', `Lista de modelos indisponivel: ${error.message}`);
+    }
     renderFlowPalette(document.getElementById('flow-node-search')?.value || '');
     if (!state.flowEditor.flow) flowEditorNew();
     else renderFlowEditor();

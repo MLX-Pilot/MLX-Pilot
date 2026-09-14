@@ -113,6 +113,42 @@ publicado em `GET /flows/node-types`. A paleta e o inspetor da UI sao montados a
 partir dele, entao registrar um no novo em Rust o faz aparecer na interface sem
 mexer no JavaScript.
 
+### Campos herdados do app
+
+Um `FieldSpec` pode declarar `options_source`, e o daemon publica so o nome da
+fonte; quem resolve e a UI, que ja mantem essas listas para as outras abas:
+
+| Fonte | Preenchida com |
+| --- | --- |
+| `agent_providers` | Provedores em dois grupos: **Local (MLX Pilot)** e **Cloud**. |
+| `agent_models` | Modelos nos mesmos grupos: os instalados localmente, em ordem, e os das nuvens configuradas. |
+| `flow_tools` | Ferramentas registradas, para o `tool.call`. |
+
+Um no `agent.run` recem-criado ja nasce apontando para o mesmo provedor e modelo
+que estao ativos no resto do MLX Pilot. Escolher um modelo ajusta o provedor
+junto (e o perfil, no caso de nuvem); trocar de provedor repõe o modelo quando o
+atual nao pertence mais a ele.
+
+Campos marcados como `advanced` ficam recolhidos em **Avancado** no inspetor.
+Sao os que tem um padrao herdado do app e so precisam aparecer para sobrescrever
+— `base_url` e `temperature` no `agent.run`, `workspace_root` no `tool.call`.
+Deixar qualquer um deles vazio significa "usar o que o agente ja usa".
+
+### Interacoes do editor
+
+| Acao | Como |
+| --- | --- |
+| Conectar | Arrastar da porta de saida ate o no de destino, ou clicar na saida e depois na entrada. |
+| Encadear | Adicionar um no pela paleta com outro selecionado ja cria a conexao. |
+| Duplicar | `Ctrl+D`. |
+| Desfazer / refazer | `Ctrl+Z` / `Ctrl+Shift+Z` ou `Ctrl+Y`. |
+| Remover no | `Delete`. |
+| Remover conexao | Clicar na linha. |
+| Cancelar ligacao | `Esc`. |
+
+Depois de executar, cada no fica colorido pelo resultado e cada conexao mostra
+quantos itens passaram por ela.
+
 ## Expressoes
 
 Qualquer string de parametro que contenha `{{ ... }}` e tratada como template.
