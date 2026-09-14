@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use serde_json::{json, Map, Value};
 
 
-use crate::host::{AgentNodeRequest, ToolNodeRequest};
+use crate::host::{AgentNodeRequest, McpNodeRequest, ToolNodeRequest};
 use crate::model::MAIN_PORT;
 use crate::registry::{
     FieldKind, FieldSpec, NodeContext, NodeDescriptor, NodeError, NodeExecutor, NodeOutput,
@@ -169,6 +169,104 @@ fn parse_json_payload(text: &str) -> Result<Value, NodeError> {
     ))
 }
 
+
+/// Chama uma ferramenta de um servidor MCP configurado no MLX Pilot.
+pub struct McpNode;
+
+#[async_trait]
+impl NodeExecutor for McpNode {
+    fn descriptor(&self) -> NodeDescriptor {
+        NodeDescriptor {
+            kind: "mcp.call".to_string(),
+            label: "Servidor MCP".to_string(),
+            group: "MLX Pilot".to_string(),
+            description: "Executa uma ferramenta de um servidor Model Context Protocol."
+                .to_string(),
+            color: "#c77dff".to_string(),
+            glyph: "MCP".to_string(),
+            inputs: vec![MAIN_PORT.to_string()],
+            outputs: vec![MAIN_PORT.to_string()],
+            defaults: json!({
+                "server": "",
+                "tool": "",
+                "arguments": {},
+                "output_key": "mcp_output",
+                "parse_json": false,
+                "keep_input": true
+            }),
+            fields: vec![
+                FieldSpec::dynamic("server", "Servidor", OptionsSource::McpServers).required(),
+                FieldSpec::dynamic("tool", "Ferramenta", OptionsSource::McpTools).required(),
+                FieldSpec::new("arguments", "Argumentos", FieldKind::Json)
+                    .help("Objeto JSON com os argumentos da ferramenta. Aceita expressoes."),
+                FieldSpec::new("parse_json", "Interpretar a saida como JSON", FieldKind::Boolean),
+                FieldSpec::new("output_key", "Campo de saida", FieldKind::Text)
+                    .placeholder("mcp_output")
+                    .advanced(),
+                FieldSpec::new("keep_input", "Manter os campos de entrada", FieldKind::Boolean)
+                    .advanced(),
+            ],
+        }
+    }
+
+    async fn execute(&self, ctx: &NodeContext<'_>) -> Result<NodeOutput, NodeError> {
+        let items = ctx.items_or_single_empty();
+        let mut output = Vec::with_capacity(items.len());
+
+        for (index, item) in items.iter().enumerate() {
+            let params = ctx.params(index)?;
+            let server = param_str(&params, "server")
+                .ok_or_else(|| NodeError::new("escolha o servidor MCP"))?;
+            let tool = param_str(&params, "tool")
+                .ok_or_else(|| NodeError::new("escolha a ferramenta do servidor MCP"))?;
+
+            let result = ctx
+                .host
+                .call_mcp(McpNodeRequest {
+                    server: server.clone(),
+                    tool: tool.clone(),
+                    arguments: crate::mcp::arguments_from(
+                        params.get("arguments").unwrap_or(&Value::Null),
+                    ),
+                })
+                .await
+                .map_err(|error| {
+                    NodeError::new(format!("`{server}` / `{tool}` falhou: {error}"))
+                })?;
+
+            if result.is_error {
+                return Err(NodeError::with_details(
+                    format!("a ferramenta `{tool}` do servidor `{server}` retornou erro"),
+                    json!({ "output": result.text }),
+                ));
+            }
+
+            let value = if param_bool(&params, "parse_json", false) {
+                serde_json::from_str::<Value>(result.text.trim()).map_err(|error| {
+                    NodeError::new(format!(
+                        "a saida de `{tool}` nao era JSON valido: {error}"
+                    ))
+                })?
+            } else {
+                Value::String(result.text.clone())
+            };
+
+            let mut target = if param_bool(&params, "keep_input", true) {
+                item.as_object().cloned().unwrap_or_default()
+            } else {
+                Map::new()
+            };
+            target.insert(param_str_or(&params, "output_key", "mcp_output"), value);
+            target.insert(
+                "_mcp".to_string(),
+                json!({ "server": server, "tool": tool }),
+            );
+            output.push(Value::Object(target));
+        }
+
+        Ok(NodeOutput::main(output))
+    }
+}
 /// Executa uma ferramenta registrada no agente.
 pub struct ToolNode;
 
@@ -289,8 +387,11 @@ mod tests {
         tool_reply: String,
         tool_is_error: bool,
         fail: bool,
+        mcp_reply: String,
+        mcp_is_error: bool,
         agent_calls: Mutex<Vec<AgentNodeRequest>>,
         tool_calls: Mutex<Vec<ToolNodeRequest>>,
+        mcp_calls: Mutex<Vec<McpNodeRequest>>,
     }
 
     #[async_trait]
@@ -319,6 +420,21 @@ mod tests {
                 output: self.tool_reply.clone(),
                 is_error: self.tool_is_error,
                 metadata: Map::new(),
+            })
+        }
+
+        async fn call_mcp(
+            &self,
+            request: McpNodeRequest,
+        ) -> Result<crate::host::McpNodeResult, String> {
+            if self.fail {
+                return Err("servidor MCP indisponivel".to_string());
+            }
+            self.mcp_calls.lock().unwrap().push(request);
+            Ok(crate::host::McpNodeResult {
+                text: self.mcp_reply.clone(),
+                is_error: self.mcp_is_error,
+                raw: json!({}),
             })
         }
     }
@@ -516,6 +632,99 @@ mod tests {
         .await
         .unwrap_err();
         assert!(error.message.contains("retornou erro"));
+    }
+
+    #[tokio::test]
+    async fn mcp_node_forwards_server_tool_and_resolved_arguments() {
+        let host = Arc::new(SpyHost {
+            mcp_reply: "conteudo do arquivo".to_string(),
+            ..Default::default()
+        });
+
+        let output = run_node(
+            &McpNode,
+            json!({
+                "server": "arquivos",
+                "tool": "read_text_file",
+                "arguments": { "path": "/docs/{{ $json.nome }}.md" }
+            }),
+            vec![json!({ "nome": "guia" })],
+            host.clone(),
+        )
+        .await
+        .unwrap();
+
+        let item = &output.main_items()[0];
+        assert_eq!(item["mcp_output"], json!("conteudo do arquivo"));
+        assert_eq!(item["nome"], json!("guia"));
+        assert_eq!(item["_mcp"]["server"], json!("arquivos"));
+
+        let calls = host.mcp_calls.lock().unwrap();
+        assert_eq!(calls[0].server, "arquivos");
+        assert_eq!(calls[0].tool, "read_text_file");
+        assert_eq!(calls[0].arguments["path"], json!("/docs/guia.md"));
+    }
+
+    #[tokio::test]
+    async fn mcp_node_requires_server_and_tool() {
+        let host = Arc::new(SpyHost::default());
+
+        let sem_servidor = run_node(&McpNode, json!({ "tool": "x" }), vec![json!({})], host.clone())
+            .await
+            .unwrap_err();
+        assert!(sem_servidor.message.contains("servidor MCP"));
+
+        let sem_ferramenta = run_node(&McpNode, json!({ "server": "s" }), vec![json!({})], host)
+            .await
+            .unwrap_err();
+        assert!(sem_ferramenta.message.contains("ferramenta"));
+    }
+
+    #[tokio::test]
+    async fn mcp_node_surfaces_the_servers_error_flag() {
+        let host = Arc::new(SpyHost {
+            mcp_reply: "arquivo nao encontrado".to_string(),
+            mcp_is_error: true,
+            ..Default::default()
+        });
+
+        let error = run_node(
+            &McpNode,
+            json!({ "server": "arquivos", "tool": "read" }),
+            vec![json!({})],
+            host,
+        )
+        .await
+        .unwrap_err();
+        assert!(error.message.contains("retornou erro"));
+    }
+
+    #[tokio::test]
+    async fn mcp_node_without_a_configured_host_fails_clearly() {
+        // O padrao de `FlowHost::call_mcp` recusa, para o no nao ficar mudo.
+        let mut node = Node::new("n", "No", "mcp.call");
+        node.parameters = json!({ "server": "arquivos", "tool": "x" });
+        let nodes: HashMap<String, NodeView> = HashMap::new();
+        let env = Map::new();
+        let payload = Value::Null;
+        let ctx = NodeContext {
+            node: &node,
+            flow_id: "f",
+            run_id: "r",
+            items: vec![json!({})],
+            nodes: &nodes,
+            env: &env,
+            trigger_payload: &payload,
+            now: chrono::Utc::now(),
+            host: Arc::new(crate::host::UnavailableHost),
+        };
+
+        let error = McpNode.execute(&ctx).await.unwrap_err();
+        assert!(
+            error.message.contains("nenhum servidor MCP configurado"),
+            "{}",
+            error.message
+        );
     }
 
     #[test]
