@@ -325,6 +325,34 @@ Limites conhecidos, reportados como aviso:
   principal.
 - O `Code` node nao tem equivalente: nao ha motor JavaScript neste motor.
 
+## Demonstracao gravada
+
+`docs/media/workflow-demo.mp4` mostra um fluxo executando do inicio ao fim na
+interface do MLX Pilot: um chamado entra pelo gatilho manual, o no `agent.run`
+pede ao modelo local que classifique como urgente ou normal, o `flow.if`
+decide a fila pela resposta da IA, e o painel mostra o resultado por no — com
+o ramo nao escolhido marcado como pulado e o contador de itens nas conexoes.
+
+A execucao do video e real: o registro traz `qwen2.5:7b-instruct-q4_K_M` via
+ollama, 144 tokens, e a classificacao `URGENTE` que motivou o desvio.
+
+Para gravar de novo, com o daemon no ar e a UI servida estaticamente:
+
+```bash
+node scripts/static-server.mjs apps/desktop-ui/ui 5610
+```
+
+```bash
+node scripts/record-workflow-demo.mjs http://127.0.0.1:5610 http://127.0.0.1:11500 "Triagem de chamados com IA"
+```
+
+O script usa Playwright, desenha um cursor sintetico (a gravacao nao mostra o
+ponteiro real) e salva um `.webm` em `docs/media/`. Para converter:
+
+```bash
+ffmpeg -i docs/media/workflow-demo.webm -c:v libx264 -crf 23 -pix_fmt yuv420p -movflags +faststart docs/media/workflow-demo.mp4
+```
+
 ## Testes
 
 ```bash
