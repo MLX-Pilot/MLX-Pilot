@@ -3428,6 +3428,13 @@ code { font-family: var(--font-mono); }
   stroke-width: 2;
   pointer-events: none;
 }
+.workflow-connection-preview {
+  fill: none;
+  stroke: var(--cyan);
+  stroke-width: 2.5;
+  stroke-dasharray: 8 6;
+  pointer-events: none;
+}
 .workflow-connection-group:hover .workflow-connection-line {
   stroke: var(--rose);
   stroke-width: 3;
@@ -3507,6 +3514,11 @@ code { font-family: var(--font-mono); }
 .workflow-node-port:hover,
 .workflow-node-port.connecting {
   box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.13);
+}
+.workflow-node-port.connect-target {
+  border-color: var(--cyan);
+  background: #ffffff;
+  box-shadow: 0 0 0 5px rgba(0, 212, 255, 0.24);
 }
 .workflow-canvas-empty {
   position: absolute;
