@@ -8,40 +8,117 @@ import {
   safeCss,
   escapeHtml,
 } from "./document.js";
+import { auditDocument, auditSlide } from "./quality.js";
 const color = (s) => (s || "#000000").slice(1);
-export async function renderFrame(doc, slide) {
+function abortError() {
+  return new DOMException("Operação cancelada.", "AbortError");
+}
+function checkAbort(signal) {
+  if (signal?.aborted) throw abortError();
+}
+function abortable(promise, signal) {
+  if (!signal) return promise;
+  checkAbort(signal);
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(abortError());
+    signal.addEventListener("abort", abort, { once: true });
+    promise
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+function requireQuality(diagnostics) {
+  const errors = diagnostics.filter((item) => item.severity === "error");
+  if (!errors.length) return;
+  const error = new Error(
+    `Revise ${errors.length} problema(s) antes de exportar: ${errors
+      .slice(0, 3)
+      .map((item) => `${item.slide_id}/${item.element_id}: ${item.message}`)
+      .join(" ")}`,
+  );
+  error.name = "PresentationQualityError";
+  error.diagnostics = diagnostics;
+  throw error;
+}
+export async function renderFrame(doc, slide, { signal } = {}) {
+  checkAbort(signal);
   const frame = document.createElement("iframe");
   frame.setAttribute("sandbox", "allow-same-origin");
   frame.style.cssText =
     "position:fixed;left:-15000px;top:0;width:1280px;height:720px;border:0;";
+  let timeout;
   const ready = new Promise((resolve, reject) => {
     frame.onload = resolve;
-    frame.onerror = reject;
+    frame.onerror = () =>
+      reject(new Error(`Não foi possível renderizar ${slide.id}.`));
+    timeout = setTimeout(
+      () => reject(new Error(`Tempo de renderização excedido em ${slide.id}.`)),
+      15000,
+    );
   });
-  frame.srcdoc = previewHtml(slide, doc);
+  frame.srcdoc = previewHtml(slide, doc).replace(
+    "</head>",
+    "<style>*,*::before,*::after{animation:none!important;transition:none!important}</style></head>",
+  );
   document.body.append(frame);
   try {
-    await ready;
-    await frame.contentDocument.fonts.ready;
-    await Promise.all(
-      [...frame.contentDocument.images].map((img) => img.decode()),
+    await abortable(ready, signal);
+    // Inline declarations also override an author's more specific !important animation rule.
+    for (const node of frame.contentDocument.querySelectorAll("*")) {
+      node.style?.setProperty("animation", "none", "important");
+      node.style?.setProperty("transition", "none", "important");
+    }
+    await abortable(frame.contentDocument.fonts.ready, signal);
+    await abortable(
+      Promise.all([...frame.contentDocument.images].map((img) => img.decode())),
+      signal,
     );
+    checkAbort(signal);
     return frame;
   } catch (e) {
     frame.remove();
     throw e;
+  } finally {
+    clearTimeout(timeout);
+    frame.onload = null;
+    frame.onerror = null;
   }
+}
+export async function inspectPresentation(
+  doc,
+  { signal, onProgress = () => {} } = {},
+) {
+  const diagnostics = [];
+  for (let index = 0; index < doc.slides.length; index++) {
+    checkAbort(signal);
+    const slide = doc.slides[index];
+    const frame = await renderFrame(doc, slide, { signal });
+    try {
+      checkAbort(signal);
+      diagnostics.push(...auditSlide(doc, slide, frame.contentDocument));
+    } finally {
+      frame.remove();
+    }
+    onProgress((index + 1) / doc.slides.length);
+  }
+  return diagnostics;
 }
 export async function screenshot(frame) {
   return toPng(frame.contentDocument.querySelector(".slide"), {
-    pixelRatio: 1.5,
+    pixelRatio: 2,
     width: 1280,
     height: 720,
     skipFonts: true,
     cacheBust: false,
   });
 }
-export async function exportPdf(doc, onProgress = () => {}) {
+export async function exportPdf(doc, onProgress = () => {}, { signal } = {}) {
+  requireQuality(
+    await inspectPresentation(doc, {
+      signal,
+      onProgress: (progress) => onProgress(progress * 0.2),
+    }),
+  );
   const pdf = new jsPDF({
     orientation: "landscape",
     unit: "px",
@@ -50,15 +127,17 @@ export async function exportPdf(doc, onProgress = () => {}) {
     compress: true,
   });
   for (let i = 0; i < doc.slides.length; i++) {
-    const frame = await renderFrame(doc, doc.slides[i]);
+    checkAbort(signal);
+    const frame = await renderFrame(doc, doc.slides[i], { signal });
     try {
       const png = await screenshot(frame);
+      checkAbort(signal);
       if (i) pdf.addPage([1280, 720], "landscape");
       pdf.addImage(png, "PNG", 0, 0, 1280, 720, undefined, "FAST");
     } finally {
       frame.remove();
     }
-    onProgress((i + 1) / doc.slides.length);
+    onProgress(0.2 + 0.8 * ((i + 1) / doc.slides.length));
   }
   pdf.setProperties({
     title: doc.title,
@@ -68,8 +147,33 @@ export async function exportPdf(doc, onProgress = () => {}) {
 }
 export async function buildPptx(
   doc,
-  { raster = false, onProgress = () => {} } = {},
+  { raster = false, onProgress = () => {}, signal } = {},
 ) {
+  checkAbort(signal);
+  // Editable PowerPoint uses structured styles, not the author's HTML stylesheet.
+  const nativeDocument = {
+    ...doc,
+    css: "",
+    slides: doc.slides.map((slide) => ({
+      ...slide,
+      elements: slide.elements.map((element) =>
+        element.kind === "shape"
+          ? {
+              ...element,
+              style: {
+                ...element.style,
+                fill: element.style?.fill || doc.theme.accent,
+              },
+            }
+          : element,
+      ),
+    })),
+  };
+  requireQuality(
+    raster
+      ? await inspectPresentation(doc, { signal })
+      : auditDocument(nativeDocument),
+  );
   const pptx = new pptxgen();
   pptx.layout = "LAYOUT_WIDE";
   pptx.author = "MLX Pilot";
@@ -83,12 +187,13 @@ export async function buildPptx(
   };
   const scale = 13.333333 / 1280;
   for (let i = 0; i < doc.slides.length; i++) {
+    checkAbort(signal);
     const s = doc.slides[i],
       slide = pptx.addSlide();
     slide.background = { color: color(s.background || doc.theme.background) };
     slide.addNotes(s.notes || "");
     if (raster) {
-      const frame = await renderFrame(doc, s);
+      const frame = await renderFrame(doc, s, { signal });
       try {
         slide.addImage({
           data: await screenshot(frame),
@@ -202,6 +307,7 @@ export async function buildPptx(
       }
     onProgress((i + 1) / doc.slides.length);
   }
+  checkAbort(signal);
   return pptx;
 }
 export function exportHtml(doc) {
