@@ -11,6 +11,88 @@ Projeto em Rust para execucao local de LLMs com roteamento multi-provider:
 
 Tambem oferece descoberta/download de modelos e interface desktop (Tauri).
 
+## Presentation Studio e plugins WASM
+
+A aba **Plugins** é a central de ferramentas: cada plugin pode ter backend WASM,
+frontend HTML/CSS/JS e ferramentas disponíveis para a IA. O **Presentation Studio**
+vem incluído e abre na aba **Apresentações**.
+
+### Adicionar, ativar, desativar e remover
+
+| Ação | Como fazer na interface |
+| --- | --- |
+| Adicionar | Abra **Plugins → Adicionar plugin**, selecione um arquivo `.mlxplugin.json`, revise as permissões, marque as que deseja conceder e clique em **Instalar plugin**. Para ativar, todas as permissões declaradas são necessárias. |
+| Abrir | Clique em **Abrir** no cartão do plugin. O frontend próprio abre na central; o Presentation Studio abre em **Apresentações**. |
+| Desativar | Clique em **Desativar**. A interface é fechada/bloqueada e novas chamadas às ferramentas são recusadas. A instalação e os documentos permanecem salvos. |
+| Ativar | Clique em **Ativar** para liberar novamente a interface e as ferramentas autorizadas. |
+| Remover | Clique em **Remover** e confirme. O pacote é desinstalado; documentos e revisões são preservados. A remoção continua valendo após reiniciar o aplicativo. |
+| Reinstalar o Studio | Use **Reinstalar Presentation Studio**, disponível na central após removê-lo. Os projetos anteriores voltam a ficar acessíveis. |
+
+Instale somente pacotes cuja origem você conhece. A revisão de permissões acontece
+antes da instalação. Plugins de terceiros executam ferramentas em WASM; seus
+frontends ficam em um iframe isolado, sem acesso ao DOM principal, credenciais ou
+requisições de rede pelo SDK. A comunicação com o backend passa pelo host e só
+pode chamar ferramentas do próprio plugin, respeitando os grants e o estado ativo.
+
+### Criar apresentações e exportar PDF/PPTX
+
+1. Abra **Plugins → Presentation Studio → Abrir** e clique em **+ Nova**.
+2. Escolha layouts, defina o briefing e a paleta em **Design**. Use **＋ Imagens**
+   para enviar PNG/JPEG/WebP; em **Imagens**, descreva cada referência, insira-a no
+   slide ou extraia uma cor com **Paleta**. Também é possível importar uma paleta.
+3. Em **Chat**, selecione um modelo instalado e peça uma mudança. Exemplo:
+   “Crie um slide sobre os benefícios de IA local, use a paleta atual e entradas
+   suaves. Use apenas os fatos do briefing.” As operações são validadas antes de salvar.
+4. Edite com o mouse (arrastar, redimensionar, texto e propriedades) ou abra
+   **Código e validação** para editar HTML, CSS, JavaScript ou o documento JSON.
+   Há desfazer/refazer, salvamento automático e histórico de revisões.
+5. Escolha **PDF**, **PPTX editável**, **HTML animado** ou **Projeto JSON** e clique
+   em **Exportar**. Use **Apresentar** para testar a reprodução.
+
+O PDF preserva o visual como imagens. O PPTX contém elementos nativos editáveis
+(textos, imagens, gráficos e tabelas); a opção **PPTX como imagens** preserva CSS
+personalizado. Animações e transições são reproduzidas no HTML, enquanto PDF e
+PPTX são estáticos. A exportação usa o documento estruturado original; não depende
+de extrair elementos de um PDF já rasterizado.
+
+### Modelo local recomendado para Mac M4 com 24 GB
+
+O perfil usado nesta demonstração é **Qwen 3.5 9B**, com contexto de **8192 tokens**
+e raciocínio estendido desativado no chat do Studio. O modelo padrão ocupa cerca de
+6,6 GB, deixando espaço para macOS, editor e exportação. O consumo total varia
+com contexto, imagens e concorrência. Consulte o [modelo oficial](https://ollama.com/library/qwen3.5).
+
+Com o MLX-Pilot aberto e seu Ollama gerenciado em execução:
+
+```bash
+OLLAMA_HOST=http://127.0.0.1:11438 ollama pull qwen3.5:9b
+```
+
+Depois clique em **Chat → Atualizar modelos** no Studio. O aplicativo valida a
+compatibilidade do Ollama e instala a versão aprovada quando necessário.
+
+### Desenvolver um plugin com backend e frontend
+
+Pré-requisitos: Node.js, [Extism JavaScript PDK](https://github.com/extism/js-pdk)
+(`extism-js`) e [Binaryen](https://github.com/WebAssembly/binaryen) (`wasm-merge`) no PATH.
+
+```bash
+npm ci --prefix packages/plugin-sdk
+node packages/plugin-sdk/src/cli.mjs init meu_plugin
+cd meu_plugin
+npm install
+npm run build
+npm run pack
+```
+
+O gerador cria `src/index.ts` (ferramentas WASM), `src/index.html`,
+`src/frontend.css` e `src/frontend.ts` (interface). O build empacota os assets
+junto ao manifesto. Instale o `.mlxplugin.json` gerado pela aba **Plugins**.
+O exemplo em [`plugins/number-lab`](plugins/number-lab) mostra uma interface
+chamando a ferramenta `summarize_numbers` com `createFrontendClient().invoke(...)`.
+
+Consulte o [guia de arquitetura, SDK, permissões e API](docs/plugin-platform.md).
+
 ---
 
 ## Conceitos principais
