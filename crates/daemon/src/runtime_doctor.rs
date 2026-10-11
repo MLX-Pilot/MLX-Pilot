@@ -720,6 +720,7 @@ async fn validate_active_backend(
                         max_tokens: Some(16),
                         top_p: None,
                         airllm_enabled: None,
+                        ..Default::default()
                     },
                 })
                 .await

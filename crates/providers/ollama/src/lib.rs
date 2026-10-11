@@ -346,6 +346,8 @@ struct OllamaOptions {
     max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    num_ctx: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -525,7 +527,7 @@ impl OllamaProvider {
     ) -> Result<reqwest::Response, ProviderError> {
         let mut body = self.build_chat_request(model_id, messages, options, None)?;
         body.stream = true;
-        body.think = Some(true);
+        body.think = Some(options.thinking.unwrap_or(true));
         self.ensure_ready_for_model(model_id).await?;
 
         let endpoint = self.endpoint("/api/chat")?;
@@ -726,11 +728,12 @@ impl OllamaProvider {
             model: model_id.to_string(),
             messages: mapped_messages,
             stream: false,
-            think: None,
+            think: options.thinking,
             options: Some(OllamaOptions {
                 temperature: options.temperature,
                 max_tokens: options.max_tokens,
                 top_p: options.top_p,
+                num_ctx: options.context_window.map(|n| n.clamp(512, 32768)),
             }),
             tools: mapped_tools,
         })

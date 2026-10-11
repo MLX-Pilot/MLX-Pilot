@@ -373,6 +373,7 @@ impl AgentLoop {
                 max_tokens: Some(self.config.max_tokens_per_turn),
                 top_p: None,
                 airllm_enabled: None,
+                ..Default::default()
             };
             let tool_request = ChatToolsRequest {
                 model_id: self.config.model_id.clone(),

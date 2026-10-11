@@ -135,6 +135,10 @@ pub struct GenerationOptions {
     pub top_p: Option<f32>,
     #[serde(default)]
     pub airllm_enabled: Option<bool>,
+    #[serde(default)]
+    pub context_window: Option<u32>,
+    #[serde(default)]
+    pub thinking: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
