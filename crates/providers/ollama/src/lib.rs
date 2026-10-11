@@ -82,6 +82,11 @@ impl OllamaProvider {
         self.runtime.cancel();
     }
 
+    /// Check compatibility before daemon operations that call Ollama directly.
+    pub async fn validate_server_version(&self) -> Result<(), ProviderError> {
+        self.check_server_version(None).await
+    }
+
     pub async fn delete_model(&self, model_id: &str) -> Result<(), ProviderError> {
         let model = model_id.trim();
         if model.is_empty() {

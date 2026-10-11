@@ -20,6 +20,7 @@ pub struct ProviderEmbedder {
     dim: usize,
     model: String,
     ready: bool,
+    provider: Option<Arc<OllamaProvider>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -43,6 +44,7 @@ impl ProviderEmbedder {
             dim: 0,
             model: String::new(),
             ready: false,
+            provider: ollama_provider.clone(),
         };
 
         // Auto-detect an embedding-capable model.
@@ -109,6 +111,7 @@ impl ProviderEmbedder {
 
     /// Probe the embeddings endpoint to determine the embedding dimension.
     async fn probe_dimension(&self) -> io::Result<usize> {
+        self.validate_server_version().await?;
         let response = self
             .client
             .post(format!("{}/api/embeddings", self.base_url))
@@ -135,6 +138,17 @@ impl ProviderEmbedder {
 
         Ok(result.embedding.len())
     }
+
+    async fn validate_server_version(&self) -> io::Result<()> {
+        let provider = self
+            .provider
+            .as_ref()
+            .ok_or_else(|| io::Error::other("ProviderEmbedder has no Ollama provider"))?;
+        provider
+            .validate_server_version()
+            .await
+            .map_err(|e| io::Error::other(e.to_string()))
+    }
 }
 
 #[async_trait::async_trait]
@@ -149,6 +163,7 @@ impl Embedder for ProviderEmbedder {
         let mut results = Vec::with_capacity(texts.len());
 
         for text in texts {
+            self.validate_server_version().await?;
             let response = self
                 .client
                 .post(format!("{}/api/embeddings", self.base_url))
@@ -189,5 +204,47 @@ impl Embedder for ProviderEmbedder {
 
     fn name(&self) -> &str {
         "ollama"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ollama_provider::OllamaProviderConfig;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+
+    #[tokio::test]
+    async fn ready_embedder_rejects_replacement_with_incompatible_server() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = [0u8; 4096];
+            let count = stream.read(&mut bytes).await.unwrap();
+            assert!(String::from_utf8_lossy(&bytes[..count]).starts_with("GET /api/version"));
+            let body = r#"{"version":"0.16.2"}"#;
+            stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+        });
+        let provider = Arc::new(OllamaProvider::new(OllamaProviderConfig {
+            base_url: base_url.clone(),
+            auto_install: false,
+            auto_start: false,
+            ..Default::default()
+        }));
+        let embedder = ProviderEmbedder {
+            client: Client::new(),
+            base_url,
+            dim: 3,
+            model: "nomic-embed-text".into(),
+            ready: true,
+            provider: Some(provider),
+        };
+        let error = embedder.embed(&["hello".into()]).await.unwrap_err();
+        assert!(error.to_string().contains("0.16.2"));
+        assert!(error.to_string().contains("0.30.7"));
+        server.await.unwrap();
     }
 }
