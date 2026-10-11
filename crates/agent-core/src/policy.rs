@@ -72,6 +72,10 @@ pub struct PolicyConfig {
     pub session_id: Option<String>,
     #[serde(default)]
     pub allowed_tool_subset: BTreeSet<String>,
+    #[serde(default)]
+    pub plugin_catalog: Vec<crate::tool_catalog::ToolCatalogEntry>,
+    #[serde(default)]
+    pub plugin_mutating_tools: BTreeSet<String>,
 }
 
 impl Default for PolicyConfig {
@@ -119,6 +123,8 @@ impl Default for PolicyConfig {
             agent_id: default_agent_id(),
             session_id: None,
             allowed_tool_subset: BTreeSet::new(),
+            plugin_catalog: Vec::new(),
+            plugin_mutating_tools: BTreeSet::new(),
         }
     }
 }
@@ -192,7 +198,13 @@ impl PolicyEngine for DefaultPolicyEngine {
         skill: Option<&SkillPackage>,
         mode: ExecutionMode,
     ) -> PolicyToolInspection {
-        let catalog = catalog_entry(tool_name);
+        let catalog = self
+            .config
+            .plugin_catalog
+            .iter()
+            .find(|entry| entry.name == tool_name)
+            .cloned()
+            .or_else(|| catalog_entry(tool_name));
         let resolved = resolve_tool_access(
             tool_name,
             &self.config.tool_policy,
@@ -245,7 +257,10 @@ impl PolicyEngine for DefaultPolicyEngine {
             );
         }
 
-        if mode == ExecutionMode::ReadOnly && is_mutating_tool(tool_name) {
+        if mode == ExecutionMode::ReadOnly
+            && (is_mutating_tool(tool_name)
+                || self.config.plugin_mutating_tools.contains(tool_name))
+        {
             trace.push(policy_trace("execution_mode", "deny", "read_only"));
             return deny_inspection(
                 format!("Tool '{tool_name}' is blocked in read-only mode"),
@@ -1093,5 +1108,59 @@ mod tests {
             )
             .await;
         assert!(matches!(denied, PolicyDecision::Deny { .. }));
+    }
+    #[tokio::test]
+    async fn dynamic_plugin_tools_respect_mode_and_subset() {
+        use crate::tool_catalog::{ToolCatalogEntry, ToolProfileName, ToolRisk, ToolSection};
+        let config = PolicyConfig {
+            plugin_catalog: vec![ToolCatalogEntry {
+                name: "presentation_edit".into(),
+                section: ToolSection::Automation,
+                risk: ToolRisk::Low,
+                description: "Edit".into(),
+                profiles: vec![ToolProfileName::Coding, ToolProfileName::Full],
+                implemented: true,
+            }],
+            plugin_mutating_tools: BTreeSet::from(["presentation_edit".into()]),
+            ..PolicyConfig::default()
+        };
+        let policy = DefaultPolicyEngine::new(config.clone());
+        assert!(matches!(
+            policy
+                .check_tool_call(
+                    "presentation_edit",
+                    &serde_json::json!({}),
+                    None,
+                    ExecutionMode::Full
+                )
+                .await,
+            PolicyDecision::Allow
+        ));
+        assert!(matches!(
+            policy
+                .check_tool_call(
+                    "presentation_edit",
+                    &serde_json::json!({}),
+                    None,
+                    ExecutionMode::ReadOnly
+                )
+                .await,
+            PolicyDecision::Deny { .. }
+        ));
+        let policy = DefaultPolicyEngine::new(PolicyConfig {
+            allowed_tool_subset: BTreeSet::from(["read_file".into()]),
+            ..config
+        });
+        assert!(matches!(
+            policy
+                .check_tool_call(
+                    "presentation_edit",
+                    &serde_json::json!({}),
+                    None,
+                    ExecutionMode::Full
+                )
+                .await,
+            PolicyDecision::Deny { .. }
+        ));
     }
 }

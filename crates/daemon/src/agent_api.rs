@@ -1412,6 +1412,8 @@ fn build_policy_config(
         agent_id: DEFAULT_AGENT_ID.to_string(),
         session_id: session_id.map(normalize_scope_key),
         allowed_tool_subset,
+        plugin_catalog: Vec::new(),
+        plugin_mutating_tools: BTreeSet::new(),
     }
 }
 
@@ -3347,6 +3349,14 @@ fn build_tool_registry(
         },
     );
 
+    for tool in crate::presentations::StudioTool::builtins(state.studio.clone())
+        .into_iter()
+        .chain(crate::presentations::StudioTool::plugins(
+            state.studio.clone(),
+        ))
+    {
+        registry.register(tool);
+    }
     registry.retain(|name| allowed_tools.contains(name));
 
     if agent_cfg.security.require_capabilities {
@@ -3574,9 +3584,25 @@ async fn run_agent_once(
         request.enabled_tools.as_deref(),
     );
     let toolset = resolve_toolset_profile(agent_cfg, request);
-    let allowed_tools = allowed_tool_subset(agent_cfg, request, &toolset);
+    let mut allowed_tools = allowed_tool_subset(agent_cfg, request, &toolset);
+    let plugin_tools = crate::presentations::StudioTool::builtins(state.studio.clone())
+        .into_iter()
+        .chain(crate::presentations::StudioTool::plugins(
+            state.studio.clone(),
+        ))
+        .collect::<Vec<_>>();
+    for tool in &plugin_tools {
+        if matches!(toolset.id.as_str(), "general" | "full")
+            && request
+                .enabled_tools
+                .as_ref()
+                .is_none_or(|names| names.iter().any(|n| n == tool.name()))
+        {
+            allowed_tools.insert(tool.name().to_string());
+        }
+    }
     let session_context = merged_session_context(request);
-    let policy_config = build_policy_config(
+    let mut policy_config = build_policy_config(
         agent_cfg,
         mode,
         &workspace,
@@ -3585,6 +3611,31 @@ async fn run_agent_once(
         Some(&session_id),
         allowed_tools.clone(),
     );
+    for tool in &plugin_tools {
+        let read_only = state.studio.readonly_tool_names().contains(tool.name());
+        if !read_only {
+            policy_config
+                .plugin_mutating_tools
+                .insert(tool.name().to_string());
+        }
+        policy_config
+            .plugin_catalog
+            .push(mlx_agent_core::ToolCatalogEntry {
+                name: tool.name().into(),
+                section: mlx_agent_core::ToolSection::Automation,
+                risk: if read_only {
+                    mlx_agent_core::ToolRisk::Low
+                } else {
+                    mlx_agent_core::ToolRisk::High
+                },
+                description: tool.description().into(),
+                profiles: vec![
+                    mlx_agent_core::ToolProfileName::Coding,
+                    mlx_agent_core::ToolProfileName::Full,
+                ],
+                implemented: true,
+            });
+    }
     let policy: Arc<dyn PolicyEngine> = Arc::new(DefaultPolicyEngine::new(policy_config));
 
     let tool_registry = build_tool_registry(

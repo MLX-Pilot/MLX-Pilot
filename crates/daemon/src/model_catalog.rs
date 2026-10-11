@@ -260,11 +260,11 @@ pub async fn build_unified_models(
         .into_iter()
         .map(|m| {
             let id = if m.provider == "ollama" {
-                format!("ollama::{}", m.id)
+                crate::qualify_local_model_id("ollama", &m.id)
             } else if m.provider == "llamacpp" {
-                format!("llama::{}", m.id)
+                crate::qualify_local_model_id("llama", &m.id)
             } else {
-                format!("mlx::{}", m.id)
+                crate::qualify_local_model_id("mlx", &m.id)
             };
             ModelGroupEntry {
                 id,

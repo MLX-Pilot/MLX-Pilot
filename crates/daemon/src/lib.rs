@@ -9,6 +9,7 @@ mod jobs;
 mod model_catalog;
 mod n8n_integration;
 mod plugins;
+mod presentations;
 mod provider_embedder;
 mod research_routes;
 mod runtime_doctor;
@@ -75,6 +76,7 @@ struct AppState {
     pub session_store: Arc<mlx_agent_core::SessionStore>,
     pub agent_state: agent_api::AgentState,
     pub plugin_manager: Arc<PluginManager>,
+    pub studio: Arc<presentations::StudioService>,
     pub channel_service: Arc<ChannelService>,
     pub presets: Arc<mlx_agent_core::PresetStore>,
     pub compare: Arc<mlx_agent_core::CompareStore>,
@@ -532,6 +534,12 @@ pub async fn run() -> anyhow::Result<()> {
             .expect("Failed to initialize session store"),
         ),
         plugin_manager: Arc::new(PluginManager::new(AppConfig::get_settings_path())),
+        studio: Arc::new(presentations::StudioService::new(
+            AppConfig::get_settings_path()
+                .parent()
+                .unwrap_or(FsPath::new("."))
+                .join("presentation-studio"),
+        )?),
         channel_service: Arc::new(ChannelService::new(AppConfig::get_settings_path())),
         presets: Arc::new(
             mlx_agent_core::PresetStore::new(
@@ -831,6 +839,43 @@ pub async fn run() -> anyhow::Result<()> {
             "/scheduler/tasks/{task_id}/runs",
             get(jobs::scheduler_task_runs),
         )
+        .route(
+            "/presentations",
+            get(presentations::list).post(presentations::create),
+        )
+        .route(
+            "/presentations/instructions",
+            get(presentations::instructions),
+        )
+        .route(
+            "/presentations/{id}",
+            get(presentations::get).put(presentations::save),
+        )
+        .route("/presentations/{id}/edit", post(presentations::edit))
+        .route("/presentations/{id}/validate", get(presentations::validate))
+        .route("/presentations/{id}/history", get(presentations::history))
+        .route("/presentations/{id}/restore", post(presentations::restore))
+        .route(
+            "/agent/wasm-plugins",
+            get(presentations::plugins).post(presentations::install),
+        )
+        .route(
+            "/agent/wasm-plugins/{id}",
+            patch(presentations::toggle).delete(presentations::uninstall),
+        )
+        .route(
+            "/agent/wasm-plugins/{id}/frontend",
+            get(presentations::frontend),
+        )
+        .route(
+            "/agent/wasm-plugins/bundled/presentation",
+            post(presentations::restore_plugin),
+        )
+        .route(
+            "/agent/wasm-plugins/{id}/tools/{tool}",
+            post(presentations::invoke),
+        )
+        .layer(axum::extract::DefaultBodyLimit::max(26 * 1024 * 1024))
         .with_state(state)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
@@ -1387,8 +1432,21 @@ async fn chat_stream(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn local_catalog_does_not_duplicate_provider_prefixes() {
+        assert_eq!(
+            qualify_local_model_id("ollama", "qwen2.5:0.5b"),
+            "ollama::qwen2.5:0.5b"
+        );
+        assert_eq!(
+            qualify_local_model_id("ollama", "ollama::qwen2.5:0.5b"),
+            "ollama::qwen2.5:0.5b"
+        );
+        assert_eq!(qualify_local_model_id("mlx", "mlx::model"), "mlx::model");
+    }
     use super::{
         annotate_agent_model_compatibility, find_workspace_root_from, has_workspace_marker,
+        qualify_local_model_id,
     };
     use mlx_ollama_core::ModelDescriptor;
     use std::fs;
@@ -2007,7 +2065,7 @@ async fn list_chat_models(state: &AppState) -> Result<Vec<ModelDescriptor>, Prov
             let mut combined = Vec::new();
             for model in mlx_models {
                 combined.push(ModelDescriptor {
-                    id: format!("mlx::{}", model.id),
+                    id: qualify_local_model_id("mlx", &model.id),
                     name: format!("{} [MLX]", model.name),
                     provider: model.provider,
                     path: model.path,
@@ -2020,7 +2078,7 @@ async fn list_chat_models(state: &AppState) -> Result<Vec<ModelDescriptor>, Prov
 
             for model in llamacpp_models {
                 combined.push(ModelDescriptor {
-                    id: format!("llama::{}", model.id),
+                    id: qualify_local_model_id("llama", &model.id),
                     name: format!("{} [llama.cpp]", model.name),
                     provider: model.provider,
                     path: model.path,
@@ -2033,7 +2091,7 @@ async fn list_chat_models(state: &AppState) -> Result<Vec<ModelDescriptor>, Prov
 
             for model in ollama_models {
                 combined.push(ModelDescriptor {
-                    id: format!("ollama::{}", model.id),
+                    id: qualify_local_model_id("ollama", &model.id),
                     name: format!("{} [Ollama]", model.name),
                     provider: model.provider,
                     path: model.path,
@@ -2430,6 +2488,12 @@ fn request_has_explicit_provider(model_id: &str) -> bool {
         || trimmed.ends_with(" [MLX]")
         || trimmed.ends_with(" [Ollama]")
         || trimmed.ends_with(" [llama.cpp]")
+}
+
+// Providers may already qualify their IDs. The combined catalog adds the namespace once.
+fn qualify_local_model_id(provider: &str, id: &str) -> String {
+    let prefix = format!("{provider}::");
+    format!("{prefix}{}", id.trim_start_matches(&prefix))
 }
 
 fn normalize_display_model_id(model_id: &str) -> (String, Option<RoutedProvider>) {
