@@ -1,0 +1,17 @@
+[package]
+name = "presentation-studio-plugin"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+[workspace]
+[lib]
+crate-type = ["cdylib"]
+[dependencies]
+extism-pdk = "1.4"
+mlx-presentation = { path = "../../../crates/presentation" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+[profile.release]
+lto = true
+opt-level = "s"
+strip = true

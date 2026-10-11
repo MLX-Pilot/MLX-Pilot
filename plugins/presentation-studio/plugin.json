@@ -1,0 +1,14 @@
+{
+  "api_version": 1,
+  "id": "presentation",
+  "name": "Presentation Studio",
+  "version": "1.0.0",
+  "permissions": ["documents:read", "documents:write"],
+  "tools": [{
+    "name": "edit",
+    "description": "Apply validated, atomic presentation operations to a versioned document.",
+    "export": "edit",
+    "mutating": true,
+    "parameters": {"type":"object","properties":{"document":{"type":"object"},"operations":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"object"}}},"required":["document","operations"],"additionalProperties":false}
+  }]
+}
