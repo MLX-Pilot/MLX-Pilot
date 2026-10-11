@@ -62,6 +62,39 @@ Prioridade:
 - remoção do fallback implícito incorreto para `MLX` em hosts não suportados
 - correção da auto-instalação do `llama.cpp` no provider Windows
 
+## Compatibilidade obrigatória do Ollama
+
+O MLX-Pilot instala o Ollama **0.30.7** e aceita servidores estáveis no
+intervalo **>= 0.30.0 e < 0.31.0**. A versão mais recente publicada não é
+necessariamente compatível. A política fica em
+`crates/providers/ollama/src/runtime.rs`: ao atualizar a versão aprovada,
+revise também os limites de compatibilidade e os testes do provedor.
+
+A validação usa `GET /api/version` antes de listar ou excluir modelos e
+antes de gerar respostas, incluindo streaming, URLs configuradas manualmente
+e conexões que já estavam prontas. Versões incompatíveis, pré-lançamentos
+e respostas de versão inválidas são recusados antes da operação. Servidores
+configurados manualmente devem ser atualizados pelo responsável pelo endpoint.
+
+Com `APP_OLLAMA_AUTO_INSTALL=true` e `APP_OLLAMA_AUTO_START=true` (padrões),
+o runtime gerenciado substitui uma instalação de sistema incompatível pelo
+pacote aprovado. O pacote depende do sistema e da arquitetura: TGZ no macOS,
+TAR.ZST no Linux e ZIP no Windows, com binários para ARM64 e x86-64.
+Bibliotecas e permissões de execução são preservadas. O pacote extraído só
+é ativado depois de confirmar a versão exata 0.30.7; uma instalação
+interrompida preserva o manifesto ativo anterior.
+
+O runtime fica em `APP_OLLAMA_RUNTIME_ROOT` ou na pasta padrão de dados do
+MLX-Pilot (`~/.local/share/mlx-pilot/runtime/ollama` no macOS/Linux).
+`OLLAMA_MODELS` continua controlando a pasta dos modelos. A instalação
+gerenciada não altera automaticamente o executável global no PATH nem
+encerra servidores externos para liberar portas.
+
+O endpoint `/runtime/startup` informa a versão detectada, a prontidão do
+provedor e o motivo de uma falha. O arquivo `runtime-state.json`, dentro da
+pasta do runtime, registra também `required_version` e `installed_version`.
+Desativar a instalação automática não desativa a exigência de compatibilidade.
+
 ## Comandos manuais úteis
 
 ### Ollama
