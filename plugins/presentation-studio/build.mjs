@@ -7,6 +7,8 @@ await build({
   bundle: true,
   format: "iife",
   target: ["es2020"],
+  // Escape multiline literals, including significant whitespace in bundled dependencies.
+  supported: { "template-literal": false },
   minify: true,
   sourcemap: false,
   outfile: path.resolve(

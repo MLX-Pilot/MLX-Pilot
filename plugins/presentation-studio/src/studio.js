@@ -12,8 +12,16 @@ import {
   extractJson,
   aiContext,
   escapeHtml,
+  slideTitle,
 } from "./document.js";
-import { exportPdf, buildPptx, exportHtml, download } from "./export.js";
+import {
+  exportPdf,
+  buildPptx,
+  exportHtml,
+  download,
+  inspectPresentation,
+} from "./export.js";
+import { directPresentation } from "./director.js";
 import "./studio.css";
 
 const root = document.getElementById("presentation-studio");
@@ -146,6 +154,13 @@ async function load(id) {
   state.redo = [];
   state.dirty = false;
   render();
+  $("chat-mode").value =
+    doc.slides.length === 1 &&
+    doc.slides[0].elements.length === 1 &&
+    doc.slides[0].elements[0].text === doc.title
+      ? "create"
+      : "edit";
+  $("creation-progress").textContent = "";
   status(`Salvo · revisão ${doc.revision}`);
   await refreshProjects();
 }
@@ -163,6 +178,8 @@ async function create() {
   state.undo = [];
   state.redo = [];
   render();
+  $("chat-mode").value = "create";
+  $("creation-progress").textContent = "";
   await refreshProjects();
   status("Pronta para criar. Escolha um layout ou descreva sua ideia.");
 }
@@ -188,7 +205,7 @@ function render() {
   $("slides").innerHTML = state.doc.slides
     .map(
       (s, i) =>
-        `<button class="ps-slide-thumb ${i === state.index ? "active" : ""}" data-slide="${i}"><span>${String(i + 1).padStart(2, "0")}</span><strong>${escapeHtml(s.elements.find((e) => e.kind === "text")?.text.slice(0, 85) || "Slide")}</strong><small>${s.elements.length} elementos</small></button>`,
+        `<button class="ps-slide-thumb ${i === state.index ? "active" : ""}" data-slide="${i}"><span>${String(i + 1).padStart(2, "0")}</span><strong>${escapeHtml(slideTitle(s).slice(0, 85))}</strong><small>${s.elements.length} elementos</small></button>`,
     )
     .join("");
   $("slides")
@@ -556,20 +573,94 @@ function chatMessage(text, who = "assistant") {
   $("messages").scrollTop = $("messages").scrollHeight;
 }
 async function sendChat() {
+  if (state.busy) return;
   const prompt = $("prompt").value.trim(),
     model = $("model").value;
   if (!prompt || !state.doc) return;
   if (!model) throw new Error("Selecione um modelo local disponível.");
-  await save();
-  const projectId = state.doc.id,
-    base = state.doc.revision;
   state.busy = true;
   $("send").disabled = true;
   $("cancel").hidden = false;
   state.chatController = new AbortController();
+  const locked = [...root.querySelectorAll("input,select,textarea")]
+    .filter((e) => e !== $("prompt"))
+    .map((e) => [e, e.disabled]);
+  locked.forEach(([e]) => {
+    e.disabled = true;
+  });
   chatMessage(prompt, "user");
   $("prompt").value = "";
   try {
+    await save();
+    if (state.chatController.signal.aborted)
+      throw new DOMException("Cancelado", "AbortError");
+    const projectId = state.doc.id,
+      base = state.doc.revision;
+    const mode = $("chat-mode").value;
+    const progress = (message) => {
+      status(message);
+      $("creation-progress").textContent = message;
+    };
+    if (mode !== "edit") {
+      const result = await directPresentation({
+        document: clone(state.doc),
+        request: prompt,
+        mode,
+        signal: state.chatController.signal,
+        onProgress: progress,
+        inspect: inspectPresentation,
+        generate: async ({ messages, options, signal }) => {
+          const response = await api("/chat", {
+            method: "POST",
+            signal,
+            body: JSON.stringify({ model_id: model, messages, options }),
+          });
+          return response.message?.content || "";
+        },
+      });
+      if (
+        state.doc.id !== projectId ||
+        state.doc.revision !== base ||
+        state.dirty
+      )
+        throw new Error("O documento mudou. Reenvie o pedido após salvar.");
+      const initial =
+        state.doc.slides.length === 1 &&
+        state.doc.slides[0].elements.length === 1 &&
+        state.doc.slides[0].elements[0].text === state.doc.title;
+      const separate = mode === "create" && !initial;
+      const saved = await api(
+        separate ? "/presentations" : `/presentations/${projectId}`,
+        {
+          method: separate ? "POST" : "PUT",
+          signal: state.chatController.signal,
+          body: JSON.stringify({
+            base_revision: base,
+            document: result.document,
+          }),
+        },
+      );
+      if (separate) {
+        state.undo = [];
+        state.redo = [];
+        state.loadSequence++;
+      } else remember();
+      state.doc = saved;
+      state.index =
+        mode === "append" ? saved.slides.length - result.plan.slides.length : 0;
+      state.selected = null;
+      render();
+      await refreshProjects();
+      $("chat-mode").value = "edit";
+      $("diagnostics").textContent =
+        result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n") ||
+        "Todos os slides foram renderizados; nenhum erro detectado nas verificações automáticas.";
+      chatMessage(
+        `${result.plan.slides.length} slides criados · direção ${result.plan.style}. ${result.summary}${result.plan.assumptions.length ? ` Premissas: ${result.plan.assumptions.join("; ")}` : ""}${result.diagnostics.length ? ` Há ${result.diagnostics.length} observações em Código e validação.` : ""}`,
+      );
+      progress(`Criação concluída · revisão ${saved.revision}`);
+      return;
+    }
     const { instructions } = await api("/presentations/instructions");
     const context = aiContext(state.doc, state.index);
     let response;
@@ -578,7 +669,7 @@ async function sendChat() {
       { role: "user", content: JSON.stringify({ request: prompt, context }) },
     ];
     for (let attempt = 0; attempt < 2; attempt++) {
-      status("Modelo local preparando alterações…");
+      progress("Modelo local refinando o slide…");
       response = await api("/chat", {
         method: "POST",
         signal: state.chatController.signal,
@@ -590,6 +681,7 @@ async function sendChat() {
             max_tokens: 4096,
             context_window: 8192,
             thinking: false,
+            json_mode: true,
           },
         }),
       });
@@ -601,19 +693,37 @@ async function sendChat() {
           state.dirty
         )
           throw new Error("O documento mudou. Reenvie o pedido após salvar.");
-        const saved = await api(`/presentations/${projectId}/edit`, {
+        const candidate = await api(`/presentations/${projectId}/edit`, {
           method: "POST",
           signal: state.chatController.signal,
           body: JSON.stringify({
             base_revision: base,
             operations: parsed.operations,
+            dry_run: true,
           }),
+        });
+        progress("Conferindo a apresentação antes de salvar…");
+        const issues = await inspectPresentation(candidate, {
+          signal: state.chatController.signal,
+        });
+        const failures = issues.filter((d) => d.severity === "error");
+        if (failures.length)
+          throw new Error(
+            failures
+              .slice(0, 5)
+              .map((d) => `${d.slide_id}/${d.element_id}: ${d.message}`)
+              .join(" "),
+          );
+        const saved = await api(`/presentations/${projectId}`, {
+          method: "PUT",
+          signal: state.chatController.signal,
+          body: JSON.stringify({ base_revision: base, document: candidate }),
         });
         remember();
         state.doc = saved;
         render();
         chatMessage(parsed.message || "Alterações aplicadas.");
-        status(`Salvo · revisão ${saved.revision}`);
+        progress(`Salvo · revisão ${saved.revision}`);
         return;
       } catch (e) {
         if (
@@ -632,6 +742,10 @@ async function sendChat() {
       }
     }
   } catch (e) {
+    $("creation-progress").textContent =
+      e.name === "AbortError"
+        ? "Criação cancelada."
+        : "Criação interrompida. Revise o aviso abaixo.";
     if (e.name === "AbortError") {
       chatMessage(
         "Pedido cancelado. Recarregue se uma alteração já tiver sido salva.",
@@ -645,6 +759,9 @@ async function sendChat() {
     $("send").disabled = false;
     $("cancel").hidden = true;
     state.chatController = null;
+    locked.forEach(([e, disabled]) => {
+      e.disabled = disabled;
+    });
   }
 }
 async function models() {
@@ -754,7 +871,7 @@ if (root) {
  <aside class="ps-side"><div class="ps-side-tabs"><button data-side="design" class="active">Design</button><button data-side="chat">Chat</button><button data-side="assets">Imagens</button><button data-side="plugins">Plugins</button></div>
  <div id="ps-side-design" class="ps-side-content"><div class="ps-eyebrow">DIREÇÃO VISUAL</div><label>Briefing e animações<textarea id="ps-brief" rows="3" placeholder="Público, referências, tom, cores e movimentos desejados…"></textarea></label><label>Tema<select id="ps-theme"><option value="custom" disabled>Personalizado</option><option value="orbital">Orbital</option><option value="paper">Editorial</option><option value="ocean">Oceano</option><option value="plum">Ameixa</option></select></label><div class="ps-colors">${["background", "foreground", "accent", "muted"].map((k, i) => `<label>${["Fundo", "Texto", "Destaque", "Apoio"][i]}<input id="ps-${k}" type="color"></label>`).join("")}</div><label>Fonte<select id="ps-font">${["Arial", "Georgia", "Verdana", "Helvetica", "Courier New"].map((f) => `<option>${f}</option>`).join("")}</select></label><label class="ps-upload">Importar paleta<input id="ps-palette-file" type="file" accept=".json,.txt,.css" hidden></label><label>Transição do slide<select id="ps-transition"><option value="none">Nenhuma</option><option value="fade">Fade</option><option value="slide">Deslizar</option></select></label><p class="ps-help">Animações no HTML. PDF e PPTX são estáticos.</p><label class="ps-checkbox"><input id="ps-raster" type="checkbox">PPTX como imagens (preserva CSS customizado)</label>
  <hr><div id="ps-inspector-empty" class="ps-help">Selecione um elemento no slide para editar.</div><div id="ps-inspector" hidden><div id="ps-selection" class="ps-eyebrow"></div><label>Texto<textarea id="ps-text" rows="4"></textarea></label><div class="ps-geometry">${["x", "y", "w", "h"].map((k) => `<label>${{ x: "X", y: "Y", w: "Largura", h: "Altura" }[k]}<input id="ps-${k}" type="number" min="0" max="1280"></label>`).join("")}</div><div class="ps-geometry"><label>Tamanho<input id="ps-font-size" type="number" min="10" max="160"></label><label>Cor<input id="ps-text-color" type="color"></label><label>Preenchimento<input id="ps-fill" type="color"></label></div><div class="ps-inline"><button id="ps-bold"><b>B</b></button><button id="ps-align-left">←</button><button id="ps-align-center">↔</button><button id="ps-align-right">→</button><button id="ps-front">Frente</button><button id="ps-delete-element">Excluir</button></div><label>Animação<select id="ps-animation">${["none", "fade", "rise", "slide", "zoom"].map((a) => `<option>${a}</option>`).join("")}</select></label><label>Atraso (ms)<input id="ps-delay" type="number" min="0" max="10000" step="100"></label><label>Dados (JSON)<textarea id="ps-chart-data" rows="5"></textarea></label></div></div>
- <div id="ps-side-chat" class="ps-side-content" hidden><div class="ps-eyebrow">SEU COPILOTO LOCAL</div><select id="ps-model" aria-label="Modelo local"><option>Carregando modelos…</option></select><button id="ps-refresh-models">Atualizar modelos</button><p class="ps-help">A IA recebe o slide atual, briefing, paleta e descrições das imagens. Descreva o que importa nas referências.</p><div id="ps-messages"><p class="ps-message">Conte sua ideia ou selecione um slide e peça uma mudança. Ex.: “Crie mais 3 slides sobre este tema, use a paleta atual e entradas suaves.”</p></div><textarea id="ps-prompt" rows="4" placeholder="O que vamos criar ou melhorar?" aria-label="Pedido para a IA"></textarea><div class="ps-inline"><button id="ps-send" class="ps-primary">Enviar ↑</button><button id="ps-cancel" hidden>Cancelar</button></div></div>
+ <div id="ps-side-chat" class="ps-side-content" hidden><div class="ps-eyebrow">DIREÇÃO DE ARTE COM IA LOCAL</div><select id="ps-model" aria-label="Modelo local"><option>Carregando modelos…</option></select><button id="ps-refresh-models">Atualizar modelos</button><label>O que vamos fazer?<select id="ps-chat-mode"><option value="create">Criar apresentação completa</option><option value="append">Acrescentar slides</option><option value="edit">Refinar apresentação atual</option></select></label><p class="ps-help">Basta uma ideia. A IA planeja a história, compõe cada slide e revisa o resultado. Paleta, briefing e imagens orientam a criação. Em projetos existentes, criar abre uma nova apresentação.</p><div id="ps-creation-progress" class="ps-help" role="status" aria-live="polite"></div><div id="ps-messages"><p class="ps-message">Ex.: “Uma apresentação sobre jardins urbanos.” Vou definir público, roteiro e direção visual. Você pode pedir até 12 slides por vez, escolher um estilo ou pedir animações. A criação completa pode levar alguns minutos no modelo local.</p></div><textarea id="ps-prompt" rows="4" placeholder="Conte sua ideia; eu cuido da composição e dos detalhes." aria-label="Pedido para a IA"></textarea><div class="ps-inline"><button id="ps-send" class="ps-primary">Criar ou refinar ↑</button><button id="ps-cancel" hidden>Cancelar</button></div></div>
  <div id="ps-side-assets" class="ps-side-content" hidden><div class="ps-eyebrow">REFERÊNCIAS E IMAGENS</div><p class="ps-help">Arraste imagens para o editor ou use “＋ Imagens”. Adicione uma descrição para orientar modelos sem visão. Extraia uma cor de destaque com “Paleta”.</p><div id="ps-assets"></div></div>
  <div id="ps-side-plugins" class="ps-side-content" hidden><div class="ps-eyebrow">PLUGINS WASM</div><p class="ps-help">Pacotes locais, com permissões explícitas e execução limitada.</p><div id="ps-plugins"></div><label class="ps-upload">Instalar pacote .mlxplugin.json<input id="ps-install-plugin" type="file" accept=".json" hidden></label><pre id="ps-plugin-review"></pre><button id="ps-confirm-plugin" hidden>Conceder permissões e instalar</button></div>
  </aside></div><footer class="ps-footer"><span id="ps-status" role="status">Conectando ao daemon…</span><span>1280 × 720 · 16:9 · local</span></footer></div>`;
@@ -1000,11 +1117,16 @@ if (root) {
   button("refresh-models", models);
   button("validate", async () => {
     await save();
-    const r = await api(`/presentations/${state.doc.id}/validate`);
-    const issues = [
-      ...r.diagnostics,
-      ...validateLayout(state.doc, $("canvas").contentDocument),
-    ];
+    state.busy = true;
+    let issues;
+    try {
+      issues = await inspectPresentation(clone(state.doc), {
+        onProgress: (n) =>
+          status(`Conferindo todos os slides · ${Math.round(n * 100)}%`),
+      });
+    } finally {
+      state.busy = false;
+    }
     $("diagnostics").textContent =
       issues
         .map((x) => `${x.code} · ${x.slide_id}/${x.element_id}: ${x.message}`)
