@@ -270,6 +270,16 @@ impl StudioService {
         base: u64,
         operations: Value,
     ) -> Result<Document, String> {
+        let edited = self.preview_edit(workspace, id, base, operations)?;
+        self.save(workspace, edited, Some(base))
+    }
+    pub fn preview_edit(
+        &self,
+        workspace: &FsPath,
+        id: &str,
+        base: u64,
+        operations: Value,
+    ) -> Result<Document, String> {
         let mut doc = self.get(workspace, id)?;
         if doc.revision != base {
             return Err("REVISION_CONFLICT: reload the project before editing".into());
@@ -291,7 +301,7 @@ impl StudioService {
             return Err("plugin changed project identity".into());
         }
         edited.assets = assets;
-        self.save(workspace, edited, Some(base))
+        Ok(edited)
     }
     pub fn readonly_tool_names(&self) -> BTreeSet<String> {
         let mut names: BTreeSet<String> = [
@@ -340,7 +350,14 @@ pub(crate) async fn list(State(s): State<AppState>) -> ApiResult {
 }
 pub(crate) async fn create(State(s): State<AppState>, Json(v): Json<Value>) -> ApiResult {
     let title = v["title"].as_str().unwrap_or("Nova apresentação");
-    let d = Document::new(uuid::Uuid::new_v4().to_string(), title.into());
+    // A directed deck is committed once, after all generation and visual checks finish.
+    let mut d = if let Some(document) = v.get("document") {
+        serde_json::from_value::<Document>(document.clone()).map_err(error)?
+    } else {
+        Document::new(uuid::Uuid::new_v4().to_string(), title.into())
+    };
+    d.id = uuid::Uuid::new_v4().to_string();
+    d.revision = 0;
     s.studio
         .save(&s.agent_state.default_workspace, d, None)
         .map(|d| Json(json!(d)))
@@ -378,6 +395,8 @@ pub(crate) async fn save(
 pub(crate) struct EditRequest {
     base_revision: u64,
     operations: Value,
+    #[serde(default)]
+    dry_run: bool,
 }
 pub(crate) async fn edit(
     State(s): State<AppState>,
@@ -387,7 +406,11 @@ pub(crate) async fn edit(
     let service = s.studio.clone();
     let workspace = s.agent_state.default_workspace.clone();
     tokio::task::spawn_blocking(move || {
-        service.edit(&workspace, &id, v.base_revision, v.operations)
+        if v.dry_run {
+            service.preview_edit(&workspace, &id, v.base_revision, v.operations)
+        } else {
+            service.edit(&workspace, &id, v.base_revision, v.operations)
+        }
     })
     .await
     .map_err(error)?
@@ -613,6 +636,41 @@ mod tests {
         let ws2 = dir.path().join("other");
         std::fs::create_dir(&ws2).unwrap();
         assert!(service.get(&ws2, "one").is_err());
+    }
+    #[test]
+    fn preview_edits_do_not_persist_and_still_enforce_revision_and_grants() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = StudioService::new(dir.path().join("state")).unwrap();
+        let doc = service
+            .save(
+                dir.path(),
+                Document::new("preview".into(), "Original".into()),
+                None,
+            )
+            .unwrap();
+        let operations = json!([{"type":"set_text","slide_id":"slide-1","element_id":"title-1","text":"Candidate"}]);
+        let candidate = service
+            .preview_edit(dir.path(), &doc.id, doc.revision, operations.clone())
+            .unwrap();
+        assert_eq!(candidate.slides[0].elements[0].text, "Candidate");
+        assert_eq!(candidate.revision, doc.revision);
+        assert_eq!(
+            service.get(dir.path(), &doc.id).unwrap().slides[0].elements[0].text,
+            "Original"
+        );
+        assert!(!service
+            .directory(dir.path())
+            .unwrap()
+            .join(&doc.id)
+            .exists());
+        assert!(service
+            .preview_edit(dir.path(), &doc.id, doc.revision + 1, operations.clone())
+            .unwrap_err()
+            .starts_with("REVISION_CONFLICT"));
+        service.enable("presentation", false).unwrap();
+        assert!(service
+            .preview_edit(dir.path(), &doc.id, doc.revision, operations)
+            .is_err());
     }
     #[test]
     fn edits_execute_real_wasm() {
