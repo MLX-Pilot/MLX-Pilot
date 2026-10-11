@@ -317,6 +317,16 @@ impl OllamaRuntime {
     pub async fn ensure_ready_for_model(&self, model: Option<&str>) -> Result<(), ProviderError> {
         let status = self.status().await;
         if status.provider_ready {
+            // A cached Ready status must not authorize a replacement server on the same port.
+            let version = api_version(&self.client, &self.cfg.base_url).await?;
+            if let Err(error) = require_compatible_version(&version) {
+                self.update_status(|s| {
+                    s.provider_ready = false;
+                    s.installed_version = Some(version);
+                })
+                .await;
+                return Err(error);
+            }
             if let Some(model) = model.filter(|value| !value.trim().is_empty()) {
                 if status.selected_model.as_deref() != Some(model)
                     || status.model_available != Some(true)
@@ -928,19 +938,12 @@ impl OllamaRuntime {
             });
         }
 
+        let version = api_version(&self.client, &self.cfg.base_url).await?;
+        require_compatible_version(&version)?;
         if let Some(model) = selected_model.filter(|value| !value.trim().is_empty()) {
             self.validate_model(model).await?;
         }
 
-        let version = api_version(&self.client, &self.cfg.base_url).await?;
-        if !version_is_compatible(&version) {
-            return Err(ProviderError::Unavailable {
-                details: format!(
-                    "servidor Ollama iniciou na versao {version}, fora do intervalo compativel {}",
-                    self.status.read().await.compatible_range
-                ),
-            });
-        }
         self.persist_last_validation().await;
         self.update_status(|status| {
             status.phase = RuntimePhase::Ready;
@@ -1216,6 +1219,15 @@ fn executable_name() -> &'static str {
     }
 }
 
+pub(crate) fn require_compatible_version(version: &str) -> Result<(), ProviderError> {
+    if version_is_compatible(version) {
+        return Ok(());
+    }
+    Err(ProviderError::Unavailable {details:format!(
+        "servidor Ollama iniciou na versao {version}, fora do intervalo compativel >={MIN_OLLAMA_VERSION}, <{MAX_OLLAMA_VERSION_EXCLUSIVE}; instale a versao aprovada {MANAGED_OLLAMA_VERSION}"
+    )})
+}
+
 fn version_is_compatible(version: &str) -> bool {
     let Some(version) = parse_version(version) else {
         return false;
@@ -1228,11 +1240,15 @@ fn version_is_compatible(version: &str) -> bool {
 fn parse_version(value: &str) -> Option<(u64, u64, u64)> {
     let normalized = value.trim().trim_start_matches('v');
     let mut parts = normalized.split('.');
-    Some((
+    let parsed = (
         parts.next()?.parse().ok()?,
         parts.next()?.parse().ok()?,
-        parts.next()?.split('-').next()?.parse().ok()?,
-    ))
+        parts.next()?.parse().ok()?,
+    );
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(parsed)
 }
 
 fn extract_version(output: &str) -> Option<String> {
@@ -1947,6 +1963,42 @@ mod tests {
         assert!(version_is_compatible("0.30.7"));
         assert!(!version_is_compatible("0.21.0"));
         assert!(!version_is_compatible("0.31.0"));
+        for version in ["0.30.7-rc1", "0.30.7.1", "0.30", "unknown"] {
+            assert!(!version_is_compatible(version));
+        }
+        assert!(require_compatible_version(MANAGED_OLLAMA_VERSION).is_ok());
+    }
+
+    #[tokio::test]
+    async fn cached_ready_rechecks_server_version_before_using_model() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut b = [0u8; 2048];
+            let n = socket.read(&mut b).await.unwrap();
+            assert!(String::from_utf8_lossy(&b[..n]).starts_with("GET /api/version"));
+            let body = r#"{"version":"0.16.2"}"#;
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+        });
+        let root = std::env::temp_dir().join(format!("mlx-version-test-{}", Uuid::new_v4()));
+        let runtime = OllamaRuntime::new(OllamaRuntimeConfig {
+            root: root.clone(),
+            models_dir: root.join("models"),
+            base_url: format!("http://{address}"),
+            startup_timeout: Duration::from_secs(2),
+            auto_install: false,
+            auto_start: false,
+        });
+        runtime.status.write().await.provider_ready = true;
+        let error = runtime
+            .ensure_ready_for_model(Some("unavailable-model"))
+            .await
+            .unwrap_err();
+        assert!(is_incompatible_server_version(&error));
+        assert!(!runtime.status().await.provider_ready);
+        server.await.unwrap();
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

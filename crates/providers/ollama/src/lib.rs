@@ -90,14 +90,7 @@ impl OllamaProvider {
             });
         }
 
-        if !self
-            .ping_server_with_timeout(Duration::from_secs(2), None)
-            .await
-        {
-            return Err(ProviderError::Unavailable {
-                details: "runtime Ollama nao esta acessivel para remover o modelo".to_string(),
-            });
-        }
+        self.check_server_version(None).await?;
 
         let endpoint = self.endpoint("/api/delete")?;
         let response = self
@@ -180,11 +173,13 @@ impl OllamaProvider {
     }
 
     async fn ensure_ready(&self) -> Result<(), ProviderError> {
-        self.runtime.ensure_ready_for_model(None).await
+        self.runtime.ensure_ready_for_model(None).await?;
+        self.check_server_version(None).await
     }
 
     async fn ensure_ready_for_model(&self, model_id: &str) -> Result<(), ProviderError> {
-        self.runtime.ensure_ready_for_model(Some(model_id)).await
+        self.runtime.ensure_ready_for_model(Some(model_id)).await?;
+        self.check_server_version(None).await
     }
 
     async fn ensure_ready_with_runtime(
@@ -196,18 +191,36 @@ impl OllamaProvider {
             .filter(|value| !value.trim().is_empty())
             .is_some()
         {
-            if self
-                .ping_server_with_timeout(Duration::from_secs(2), runtime)
-                .await
-            {
-                return Ok(());
-            }
-            return Err(ProviderError::Unavailable {
-                details: "runtime Ollama base_url did not respond".to_string(),
-            });
+            return self.check_server_version(runtime).await;
         }
 
         self.ensure_ready().await
+    }
+
+    async fn check_server_version(
+        &self,
+        runtime: Option<&RuntimeProviderConfig>,
+    ) -> Result<(), ProviderError> {
+        let endpoint = self.endpoint_with_runtime("/api/version", runtime)?;
+        let response = self
+            .apply_runtime_headers(self.client.get(endpoint), runtime)
+            .timeout(Duration::from_secs(2))
+            .send()
+            .await
+            .map_err(Self::map_network_error)?;
+        if !response.status().is_success() {
+            return Err(Self::http_error(
+                response.status(),
+                response.text().await.unwrap_or_default(),
+            ));
+        }
+        let payload: serde_json::Value = response.json().await.map_err(Self::map_network_error)?;
+        let version = payload["version"]
+            .as_str()
+            .ok_or_else(|| ProviderError::Unavailable {
+                details: "API Ollama nao informou a versao".into(),
+            })?;
+        runtime::require_compatible_version(version)
     }
 
     async fn ping_server_with_timeout(
@@ -385,6 +398,7 @@ impl ModelProvider for OllamaProvider {
             return Ok(Vec::new());
         }
 
+        self.check_server_version(runtime.as_ref()).await?;
         let endpoint = self.endpoint_with_runtime("/api/tags", runtime.as_ref())?;
         let response = self
             .apply_runtime_headers(self.client.get(&endpoint), runtime.as_ref())
@@ -738,6 +752,46 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
+    #[tokio::test]
+    async fn manual_endpoint_requires_compatible_version_and_keeps_auth_headers() {
+        for version in ["0.16.2", "0.31.0", "0.30.7-rc1", "0.30.7"] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut b = [0u8; 4096];
+                let n = socket.read(&mut b).await.unwrap();
+                let request = String::from_utf8_lossy(&b[..n]);
+                assert!(request.starts_with("GET /api/version"));
+                assert!(request
+                    .to_ascii_lowercase()
+                    .contains("authorization: bearer test-token"));
+                let body = format!(r#"{{"version":"{version}"}}"#);
+                socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+            });
+            let provider = OllamaProvider::new(OllamaProviderConfig {
+                base_url: format!("http://{address}"),
+                timeout: Duration::from_secs(2),
+                startup_timeout: Duration::from_secs(2),
+                auto_start: false,
+                auto_install: false,
+            });
+            let runtime = RuntimeProviderConfig {
+                base_url: Some(format!("http://{address}")),
+                api_key: Some("test-token".into()),
+                ..Default::default()
+            };
+            assert_eq!(
+                provider
+                    .ensure_ready_with_runtime(Some(&runtime))
+                    .await
+                    .is_ok(),
+                version == "0.30.7"
+            );
+            server.await.unwrap();
+        }
+    }
+
     #[test]
     fn test_tool_serialization() {
         let tools = vec![OllamaTool {
@@ -815,7 +869,7 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
             let mut requests = Vec::new();
-            for _ in 0..2 {
+            for index in 0..2 {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 let mut request = Vec::new();
                 let mut buffer = [0_u8; 2048];
@@ -845,10 +899,13 @@ mod tests {
                     }
                 }
                 requests.push(String::from_utf8_lossy(&request).to_string());
+                let body = if index == 0 {
+                    r#"{"version":"0.30.7"}"#
+                } else {
+                    "{}"
+                };
                 socket
-                    .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
-                    )
+                    .write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes())
                     .await
                     .unwrap();
             }
