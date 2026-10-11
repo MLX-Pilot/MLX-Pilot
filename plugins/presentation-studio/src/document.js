@@ -336,6 +336,21 @@ export function extractJson(text) {
     throw new Error("O modelo deve retornar 1–20 operações.");
   return result;
 }
+export function slideTitle(slide) {
+  const texts = slide.elements.filter((e) => e.kind === "text");
+  return (
+    (
+      texts.find((e) => e.id.includes("-title-")) ||
+      texts.reduce(
+        (best, e) =>
+          !best || (e.style?.fontSize || 32) > (best.style?.fontSize || 32)
+            ? e
+            : best,
+        null,
+      )
+    )?.text || "Slide"
+  );
+}
 export function aiContext(doc, slideIndex) {
   return {
     project_id: doc.id,
@@ -346,7 +361,7 @@ export function aiContext(doc, slideIndex) {
     selected_slide: doc.slides[slideIndex],
     outline: doc.slides.map((s) => ({
       id: s.id,
-      title: s.elements.find((e) => e.kind === "text")?.text.slice(0, 150),
+      title: slideTitle(s).slice(0, 150),
     })),
     assets: doc.assets.map(({ id, name, description }) => ({
       id,
