@@ -16,6 +16,9 @@ tokio.workspace = true
 tracing.workspace = true
 mlx-ollama-core = { path = "../../core" }
 uuid = { version = "1", features = ["v4"] }
+flate2 = "1"
+tar = "0.4"
+zstd = "0.13"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]

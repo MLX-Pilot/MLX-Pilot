@@ -21,6 +21,8 @@ use uuid::Uuid;
 
 use crate::silence_console;
 
+mod archive;
+
 pub const MANAGED_OLLAMA_VERSION: &str = "0.30.7";
 const MIN_OLLAMA_VERSION: &str = "0.30.0";
 const MAX_OLLAMA_VERSION_EXCLUSIVE: &str = "0.31.0";
@@ -557,12 +559,13 @@ impl OllamaRuntime {
             }
         }
 
+        let asset = archive::release_asset(std::env::consts::OS, std::env::consts::ARCH)?;
         let url = std::env::var("APP_OLLAMA_RUNTIME_URL")
             .ok()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| {
                 format!(
-                    "https://github.com/ollama/ollama/releases/download/v{0}/ollama-windows-amd64.zip",
+                    "https://github.com/ollama/ollama/releases/download/v{0}/{asset}",
                     MANAGED_OLLAMA_VERSION
                 )
             });
@@ -575,13 +578,13 @@ impl OllamaRuntime {
             context: format!("criando staging {}", staging.display()),
             source,
         })?;
-        let archive_path = staging.join("ollama.zip.part");
+        let archive_path = staging.join("ollama.archive.part");
 
         let download_message = system
             .and_then(|runtime| runtime.client_version.as_deref())
             .map(|version| {
                 format!(
-                    "Preparando runtime isolado; instalacao do sistema {version} esta incompleta"
+                    "Preparando Ollama {MANAGED_OLLAMA_VERSION}; instalacao do sistema {version} precisa ser substituida"
                 )
             })
             .unwrap_or_else(|| "Baixando runtime isolado do Ollama".to_string());
@@ -607,7 +610,7 @@ impl OllamaRuntime {
         let archive_for_extract = archive_path.clone();
         let extracted_for_task = extracted.clone();
         let extraction = tokio::task::spawn_blocking(move || {
-            extract_zip(&archive_for_extract, &extracted_for_task)
+            archive::extract(&archive_for_extract, &extracted_for_task)
         })
         .await
         .map_err(|error| ProviderError::Unavailable {
@@ -639,7 +642,13 @@ impl OllamaRuntime {
             return Err(error);
         }
 
-        let installed_version = executable_version(&staged_executable).await?;
+        let installed_version = match executable_version(&staged_executable).await {
+            Ok(version) => version,
+            Err(error) => {
+                let _ = fs::remove_dir_all(&staging);
+                return Err(error);
+            }
+        };
         if installed_version != MANAGED_OLLAMA_VERSION {
             let _ = fs::remove_dir_all(&staging);
             let _ = lock.unlock();
@@ -1263,6 +1272,8 @@ async fn executable_version(executable: &Path) -> Result<String, ProviderError> 
     let mut command = Command::new(executable);
     silence_console(&mut command);
     let output = command
+        // Ask the installed client, not an unrelated server's version on the default port.
+        .env("OLLAMA_HOST", "http://127.0.0.1:1")
         .arg("--version")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1291,7 +1302,7 @@ fn validate_runtime_payload(executable: &Path) -> Result<(), ProviderError> {
             details: format!("executavel Ollama ausente em {}", executable.display()),
         });
     }
-    if cfg!(windows) {
+    if cfg!(all(windows, target_arch = "x86_64")) {
         let root = executable.parent().unwrap_or_else(|| Path::new("."));
         let base = root.join("lib").join("ollama").join("ggml-base.dll");
         let cuda12 = root
