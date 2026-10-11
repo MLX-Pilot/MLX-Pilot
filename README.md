@@ -40,16 +40,37 @@ pode chamar ferramentas do próprio plugin, respeitando os grants e o estado ati
 2. Escolha layouts, defina o briefing e a paleta em **Design**. Use **＋ Imagens**
    para enviar PNG/JPEG/WebP; em **Imagens**, descreva cada referência, insira-a no
    slide ou extraia uma cor com **Paleta**. Também é possível importar uma paleta.
-3. Em **Chat**, selecione um modelo instalado e peça uma mudança. Exemplo:
-   “Crie um slide sobre os benefícios de IA local, use a paleta atual e entradas
-   suaves. Use apenas os fatos do briefing.” As operações são validadas antes de salvar.
+3. Em **Chat**, selecione um modelo instalado e **Criar apresentação completa**.
+   Basta escrever “Uma apresentação sobre jardins urbanos”. A IA define público,
+   roteiro e direção de arte, escreve cada slide e faz uma revisão editorial.
+   São 5 slides por padrão, ou até 12 por pedido. O progresso mostra cada etapa;
+   a criação pode levar alguns minutos e pode ser cancelada.
+   **Acrescentar slides** preserva o projeto atual. **Refinar apresentação atual**
+   permite pedir ajustes específicos. Criar em um projeto já preenchido salva uma
+   nova apresentação, preservando a anterior.
 4. Edite com o mouse (arrastar, redimensionar, texto e propriedades) ou abra
    **Código e validação** para editar HTML, CSS, JavaScript ou o documento JSON.
    Há desfazer/refazer, salvamento automático e histórico de revisões.
 5. Escolha **PDF**, **PPTX editável**, **HTML animado** ou **Projeto JSON** e clique
    em **Exportar**. Use **Apresentar** para testar a reprodução.
 
-O PDF preserva o visual como imagens. O PPTX contém elementos nativos editáveis
+A direção visual combina sete composições (capa, divisão em colunas, cartões,
+processo, afirmação, encerramento e gráfico) com estilos editorial, minimalista ou
+marcante. A paleta escolhida é mantida, salvo pedido explícito para alterá-la. Peça,
+por exemplo, “estilo editorial, animações suaves, sem estatísticas inventadas”.
+Imagens enviadas são usadas pelos IDs e descrições; sem imagens, o editor compõe
+com tipografia e formas. As premissas inferidas ficam nas notas do apresentador.
+
+Antes de salvar, todos os slides são renderizados e verificados quanto a cortes,
+sobreposição de textos e contraste em fundos sólidos. O modelo recebe uma rodada
+de reparo para problemas visuais. Se o problema persistir, o projeto anterior é
+preservado. PDF/PPTX bloqueiam exportações com erros detectados; avisos de densidade
+ou contraste não verificável aparecem em **Código e validação → Validar**.
+CSS personalizado e imagens de fundo ainda exigem conferência visual humana.
+Essas verificações reduzem defeitos mensuráveis; não substituem revisão editorial.
+
+O PDF é exportado em 2560 × 1440 pixels por página e preserva o visual como imagens.
+O PPTX contém elementos nativos editáveis
 (textos, imagens, gráficos e tabelas); a opção **PPTX como imagens** preserva CSS
 personalizado. Animações e transições são reproduzidas no HTML, enquanto PDF e
 PPTX são estáticos. A exportação usa o documento estruturado original; não depende
