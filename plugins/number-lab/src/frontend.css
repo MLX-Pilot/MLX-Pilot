@@ -1,0 +1,37 @@
+body {
+  margin: 0;
+  background: #101827;
+  color: #edf2f9;
+  font: 16px system-ui;
+}
+main {
+  max-width: 650px;
+  margin: 48px auto;
+  padding: 30px;
+}
+span {
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: #baf66d;
+}
+input,
+button {
+  display: block;
+  padding: 12px;
+  margin: 16px 0;
+  border-radius: 8px;
+  border: 1px solid #45536a;
+}
+input {
+  width: 90%;
+  background: #192539;
+  color: white;
+}
+button {
+  background: #baf66d;
+  color: #10200c;
+  cursor: pointer;
+}
+pre {
+  white-space: pre-wrap;
+}

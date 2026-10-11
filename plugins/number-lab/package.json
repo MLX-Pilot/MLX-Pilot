@@ -1,0 +1,12 @@
+{
+  "name": "number-lab",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "mlx-plugin build",
+    "pack": "mlx-plugin pack"
+  },
+  "dependencies": {
+    "@mlx-pilot/plugin-sdk": "file:../../packages/plugin-sdk"
+  }
+}
