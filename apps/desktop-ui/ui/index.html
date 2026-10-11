@@ -8,6 +8,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@200;300;400;500;600;700;800&family=Manrope:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="presentation-studio.css">
+  <link rel="stylesheet" href="plugin-manager.css">
 </head>
 <body>
   <!-- Atmospheric canvas -->
@@ -184,6 +186,8 @@
               </span>
               Hardware
             </button>
+            <button class="tab" data-panel="plugins" role="tab"><span class="tab-icon">◇</span>Plugins</button>
+            <button class="tab" data-panel="presentations" role="tab"><span class="tab-icon">▧</span>Apresentações</button>
             <button class="tab" data-panel="settings" role="tab">
               <span class="tab-icon">
                 <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -978,7 +982,9 @@
         </section>
 
         <!-- SETTINGS PANEL -->
-        <section class="panel" id="panel-settings">
+        <section class="panel" id="panel-plugins"><div id="plugin-manager"></div></section>
+        <section class="panel" id="panel-presentations"><div id="presentation-studio"></div></section>
+          <section class="panel" id="panel-settings">
           <div class="panel-scroll">
             <div class="section-header">
               <h2 class="section-title">Configura&ccedil;&otilde;es</h2>
@@ -1091,5 +1097,7 @@
   <script src="app.js"></script>
   <script src="wave1.js"></script>
   <script src="wave5.js"></script>
+  <script src="presentation-studio.js"></script>
+  <script src="plugin-manager.js"></script>
 </body>
 </html>

@@ -1,0 +1,23 @@
+{
+  "name": "@mlx-pilot/presentation-studio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.mjs",
+    "build:wasm": "cargo build --release --target wasm32-unknown-unknown --manifest-path guest/Cargo.toml && node copy-wasm.mjs"
+  },
+  "dependencies": {
+    "html-to-image": "1.11.13",
+    "jspdf": "4.2.1",
+    "pptxgenjs": "4.0.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "jsdom": "26.1.0"
+  },
+  "overrides": {
+    "image-size": "^2.0.3"
+  }
+}
