@@ -37,3 +37,20 @@ jobs:
         run: cargo build --workspace --verbose
       - name: Test
         run: cargo test --workspace --verbose
+
+  presentation-studio:
+    name: Presentation Studio & Plugin SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --prefix plugins/presentation-studio
+      - run: npm ci --prefix packages/plugin-sdk
+      - run: npm test --prefix plugins/presentation-studio
+      - run: npm test --prefix packages/plugin-sdk
+      - run: node --check apps/desktop-ui/ui/plugin-manager.js
+      - run: npm run build --prefix plugins/presentation-studio
+      - name: Check generated desktop bundles
+        run: git diff --exit-code -- apps/desktop-ui/ui/presentation-studio.js apps/desktop-ui/ui/presentation-studio.css

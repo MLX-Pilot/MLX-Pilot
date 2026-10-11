@@ -24,3 +24,8 @@ temp/
 
 # Stray editor backups
 *.html.backup
+
+# Generated plugin packages and CLI browser recordings
+plugins/*/dist/
+plugins/*/*.mlxplugin.json
+.playwright-cli/
