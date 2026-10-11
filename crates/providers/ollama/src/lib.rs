@@ -300,6 +300,8 @@ struct OllamaChatRequestBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     think: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    format: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     options: Option<OllamaOptions>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     tools: Vec<OllamaTool>,
@@ -729,6 +731,7 @@ impl OllamaProvider {
             messages: mapped_messages,
             stream: false,
             think: options.thinking,
+            format: (options.json_mode == Some(true)).then_some("json"),
             options: Some(OllamaOptions {
                 temperature: options.temperature,
                 max_tokens: options.max_tokens,
@@ -759,6 +762,65 @@ mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    #[test]
+    fn json_mode_preserves_generation_options_messages_and_tools() {
+        let provider = OllamaProvider::new(OllamaProviderConfig::default());
+        let messages = vec![ChatMessage::text(MessageRole::User, "Return JSON.")];
+        let options = GenerationOptions {
+            temperature: Some(0.25),
+            max_tokens: Some(512),
+            top_p: Some(0.5),
+            context_window: Some(8192),
+            thinking: Some(false),
+            json_mode: Some(true),
+            ..Default::default()
+        };
+        let tools = vec![mlx_ollama_core::FunctionDef {
+            name: "inspect_slide".into(),
+            description: "Inspect one slide".into(),
+            parameters: serde_json::json!({"type": "object"}),
+        }];
+        let body = provider
+            .build_chat_request("local-model", &messages, &options, Some(tools))
+            .unwrap();
+        let payload = serde_json::to_value(body).unwrap();
+        assert_eq!(payload["format"], "json");
+        assert_eq!(payload["stream"], false);
+        assert_eq!(payload["think"], false);
+        assert_eq!(payload["messages"][0]["content"], "Return JSON.");
+        assert_eq!(payload["tools"][0]["function"]["name"], "inspect_slide");
+        assert_eq!(
+            payload["options"],
+            serde_json::json!({
+                "temperature": 0.25,
+                "num_predict": 512,
+                "top_p": 0.5,
+                "num_ctx": 8192
+            })
+        );
+    }
+
+    #[test]
+    fn json_mode_is_omitted_unless_explicitly_enabled() {
+        let provider = OllamaProvider::new(OllamaProviderConfig::default());
+        let messages = vec![ChatMessage::text(MessageRole::User, "Hello")];
+        for input in [
+            serde_json::json!({}),
+            serde_json::json!({"json_mode": false}),
+        ] {
+            let options: GenerationOptions = serde_json::from_value(input).unwrap();
+            let body = provider
+                .build_chat_request("local-model", &messages, &options, None)
+                .unwrap();
+            let payload = serde_json::to_value(body).unwrap();
+            assert!(payload.get("format").is_none());
+            assert!(payload.get("think").is_none());
+            assert!(payload.get("tools").is_none());
+            assert_eq!(payload["stream"], false);
+            assert_eq!(payload["options"], serde_json::json!({}));
+        }
+    }
 
     #[tokio::test]
     async fn manual_endpoint_requires_compatible_version_and_keeps_auth_headers() {

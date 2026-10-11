@@ -139,6 +139,9 @@ pub struct GenerationOptions {
     pub context_window: Option<u32>,
     #[serde(default)]
     pub thinking: Option<bool>,
+    /// Request constrained JSON output from providers that support JSON mode.
+    #[serde(default)]
+    pub json_mode: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
