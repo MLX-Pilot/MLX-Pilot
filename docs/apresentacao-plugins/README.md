@@ -17,6 +17,11 @@ build**. HTML, estilos, scripts, imagens, vídeos e legendas estão no pacote lo
 Os links de referências e perfis GitHub só precisam de internet quando abertos.
 Não é necessário instalar MLX-Pilot, Node.js, Rust ou um modelo para assistir.
 
+A identidade visual acompanha o **Orbital Command** do frontend: fundos azul-escuros,
+ciano e violeta, logomarca hexagonal e as fontes Outfit, Manrope e JetBrains Mono.
+As fontes e suas licenças estão em `assets/fonts/`; nenhuma delas precisa ser
+baixada ou instalada ao abrir a apresentação.
+
 | Controle | Ação |
 | --- | --- |
 | Setas ← / →, Page Up / Page Down | Slide anterior / próximo |

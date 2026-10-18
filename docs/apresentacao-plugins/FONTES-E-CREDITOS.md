@@ -43,6 +43,22 @@ visual completa em todos os leitores de PDF/PPTX.
 
 ## Procedência da mídia
 
+### Identidade visual e tipografia
+
+A apresentação usa o tema **Orbital Command** do frontend do MLX-Pilot:
+fundos `#06090f`, `#0a0e17` e `#0f1520`, ciano `#00d4ff`, violeta `#7b61ff`,
+Outfit nos títulos, Manrope no corpo e JetBrains Mono nos dados. A logomarca e o
+ícone vetoriais reproduzem a geometria hexagonal e o núcleo orbital do aplicativo.
+Os SVGs são locais e o texto da marca está convertido em curvas.
+
+As três fontes variáveis são distribuídas sob SIL Open Font License 1.1, com
+[origem e licenças locais](assets/fonts/README.md). Foram obtidas do repositório
+oficial `google/fonts`, na revisão `47d54ca1ebb14fd864695f1d39dc734f39017c33`,
+e convertidas de TTF para WOFF2 sem recorte de glifos. A apresentação e o
+aplicativo carregam essas cópias locais para manter a tipografia offline.
+
+### Capturas da aplicação
+
 As imagens e os vídeos desta pasta são **capturas próprias da aplicação real**,
 produzidas para a demonstração com daemon isolado e dados de exemplo. Não foram
 usadas imagens externas da web para representar telas, pessoas ou resultados do

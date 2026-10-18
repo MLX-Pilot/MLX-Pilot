@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="apps/desktop-ui/ui/assets/mlxpilot-wordmark.png" alt="MLX Pilot" />
+  <img src="apps/desktop-ui/ui/assets/mlxpilot-banner.svg" alt="MLX Pilot — Orbital Command" width="720" />
 </p>
 
 # MLX Pilot (Arquitetura Multi-Provider)
@@ -10,6 +10,9 @@ Projeto em Rust para execucao local de LLMs com roteamento multi-provider:
 - Ollama (compatibilidade)
 
 Tambem oferece descoberta/download de modelos e interface desktop (Tauri).
+
+A [identidade visual Orbital Command](docs/brand-identity.md) documenta a marca,
+as fontes locais e a geração dos ícones do aplicativo.
 
 ## Presentation Studio e plugins WASM
 
