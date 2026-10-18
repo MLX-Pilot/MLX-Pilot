@@ -48,6 +48,7 @@ jobs:
           node-version: '22'
       - run: npm ci --prefix plugins/presentation-studio
       - run: npm ci --prefix packages/plugin-sdk
+      - run: npm ci --prefix apps/desktop-ui
       - run: npm test --prefix plugins/presentation-studio
       - run: npm test --prefix packages/plugin-sdk
       - run: node --check apps/desktop-ui/ui/plugin-manager.js

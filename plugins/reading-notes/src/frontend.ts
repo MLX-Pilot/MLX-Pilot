@@ -5,6 +5,7 @@ const query = document.querySelector<HTMLInputElement>("#query")!;
 const status = document.querySelector<HTMLElement>("#status")!;
 const results = document.querySelector<HTMLElement>("#results")!;
 const buttons = [...document.querySelectorAll<HTMLButtonElement>("button")];
+let busy = false;
 type Book = {
   title: string;
   author: string;
@@ -30,6 +31,8 @@ function showBooks(books: Book[]) {
 }
 
 async function run(action: () => Promise<void>) {
+  if (busy) return;
+  busy = true;
   buttons.forEach((button) => {
     button.disabled = true;
   });
@@ -39,13 +42,14 @@ async function run(action: () => Promise<void>) {
   } catch (error) {
     status.textContent = error instanceof Error ? error.message : String(error);
   } finally {
+    busy = false;
     buttons.forEach((button) => {
       button.disabled = false;
     });
   }
 }
-form.onsubmit = (event) => {
-  event.preventDefault();
+function searchBooks() {
+  if (!form.reportValidity()) return;
   void run(async () => {
     const response = await host.invoke<{ books: Book[] }>("search_books", {
       query: query.value.trim(),
@@ -53,6 +57,13 @@ form.onsubmit = (event) => {
     showBooks(response.books);
     status.textContent = `${response.books.length} livros encontrados.`;
   });
+}
+document.querySelector<HTMLButtonElement>("#search")!.onclick = searchBooks;
+form.onsubmit = (event) => event.preventDefault();
+query.onkeydown = (event) => {
+  if (event.key !== "Enter" || event.isComposing) return;
+  event.preventDefault();
+  searchBooks();
 };
 document.querySelector<HTMLButtonElement>("#create")!.onclick = () => {
   if (!form.reportValidity()) return;
