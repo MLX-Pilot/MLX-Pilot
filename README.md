@@ -94,23 +94,195 @@ compatibilidade do Ollama e instala a versão aprovada quando necessário.
 
 ### Desenvolver um plugin com backend e frontend
 
-Pré-requisitos: Node.js, [Extism JavaScript PDK](https://github.com/extism/js-pdk)
-(`extism-js`) e [Binaryen](https://github.com/WebAssembly/binaryen) (`wasm-merge`) no PATH.
+Um plugin reúne ferramentas de computação em WASM e, opcionalmente, uma interface
+HTML/CSS/JavaScript. O mesmo backend atende aos botões da interface e às chamadas
+da IA. O SDK gera o manifesto e empacota tudo em um `.mlxplugin.json`; instalar
+esse arquivo conecta o plugin ao MLX-Pilot, sem um servidor separado por plugin.
+
+#### 1. Gerar o projeto
+
+Para desenvolver, use Node.js 20+, npm,
+[Extism JavaScript PDK](https://github.com/extism/js-pdk) (`extism-js`) e
+[Binaryen](https://github.com/WebAssembly/binaryen) (`wasm-opt` e `wasm-merge`) no
+PATH. Quem apenas instala um pacote pronto não precisa dessas ferramentas.
+
+Execute a partir da raiz deste repositório:
 
 ```bash
 npm ci --prefix packages/plugin-sdk
 node packages/plugin-sdk/src/cli.mjs init meu_plugin
 cd meu_plugin
 npm install
+```
+
+O scaffold já vem com uma ferramenta funcional de soma e uma tela para usá-la:
+
+```text
+meu_plugin/
+├── package.json       # scripts de build/pack e dependência do SDK local
+└── src/
+    ├── index.ts       # definição do plugin e ferramentas compiladas para WASM
+    ├── index.html     # estrutura da interface
+    ├── frontend.css   # aparência da interface
+    └── frontend.ts    # eventos da tela e chamadas ao backend
+```
+
+O SDK é referenciado por uma dependência `file:` deste checkout. Não é necessário
+buscar `@mlx-pilot/plugin-sdk` em um registro npm; ao mover o projeto para outro
+computador, ajuste essa dependência para o checkout correspondente.
+
+#### 2. Definir ferramentas, entradas e permissões
+
+Edite `src/index.ts`. Este exemplo mantém os nomes usados pelo scaffold:
+
+```ts
+import { definePlugin, defineTool } from '@mlx-pilot/plugin-sdk';
+
+export default definePlugin({
+  id: 'meu_plugin',
+  name: 'Meu plugin',
+  version: '1.0.0',
+  permissions: ['compute'],
+  frontend: {
+    html: 'src/index.html',
+    script: 'src/frontend.ts',
+    style: 'src/frontend.css',
+  },
+  tools: [defineTool({
+    name: 'summarize_numbers',
+    description: 'Calcule a quantidade e a soma dos números fornecidos pelo usuário.',
+    parameters: {
+      type: 'object',
+      properties: {
+        values: { type: 'array', items: { type: 'number' }, maxItems: 1000 },
+      },
+      required: ['values'],
+      additionalProperties: false,
+    },
+    mutating: false,
+    execute({ values }: { values: number[] }) {
+      return { count: values.length, sum: values.reduce((a, b) => a + b, 0) };
+    },
+  })],
+});
+```
+
+O `id` do plugin e os nomes das ferramentas usam `snake_case`, com 1–30 caracteres.
+A `description` explica à IA quando usar a ferramenta; `parameters` declara as
+entradas em JSON Schema, validadas pelo host. `execute` recebe esse objeto e retorna
+JSON de forma síncrona. Marque `mutating: true` em ferramentas que alterem estado;
+o agente usa essa informação para bloquear mutações nos modos ReadOnly/DryRun.
+
+Use `compute` para funções de cálculo/transformação. A API v1 também reconhece
+`documents:read` e `documents:write`, usadas pelo broker do Presentation Studio;
+declará-las em um plugin de terceiros não concede acesso a arquivos ou aos
+documentos do Studio. O guest WASM não recebe Node.js, DOM, `fetch`, shell ou
+credenciais. A API atual de terceiros também não oferece uma ponte para serviços
+HTTP externos.
+
+#### 3. Conectar a interface ao backend
+
+O `frontend` acima faz o build incluir os três assets no pacote. O HTML contém os
+elementos da tela; o CSS define o visual; o TypeScript trata eventos e usa a ponte
+do SDK. Dentro de um evento, por exemplo:
+
+```ts
+import { createFrontendClient } from '@mlx-pilot/plugin-sdk';
+
+const host = createFrontendClient();
+document.getElementById('calculate')!.onclick = async () => {
+  const output = document.getElementById('result')!;
+  try {
+    const result = await host.invoke('summarize_numbers', { values: [10, 20, 30] });
+    output.textContent = JSON.stringify(result); // {"count":3,"sum":60}
+  } catch (error) {
+    output.textContent = String(error);
+  }
+};
+```
+
+Os IDs `calculate` e `result` já existem no HTML gerado. O scaffold também mostra
+como ler os valores do campo de entrada. `host.invoke` retorna uma Promise; o host
+confere ativação, permissões e schema antes de executar o WASM. Use `host.dispose()`
+ao encerrar um cliente que você gerencie para liberar listeners e chamadas pendentes.
+
+O fluxo é **interface → ponte do SDK → daemon → ferramenta WASM → resultado**.
+O frontend roda em iframe isolado e só pode chamar ferramentas do próprio plugin.
+Não configure uma URL de backend na tela: o aplicativo encaminha a chamada para
+seu daemon local. Inclua os assets no pacote; CDNs e requisições de rede ficam
+bloqueadas nesse iframe. Abrir `index.html` diretamente no navegador não fornece
+a ponte do host; teste a conexão abrindo o plugin dentro do MLX-Pilot.
+
+#### 4. Testar, compilar e empacotar
+
+Na pasta `meu_plugin`, crie `fixtures.json` com entradas e resultados esperados:
+
+```json
+[
+  {
+    "tool": "summarize_numbers",
+    "input": { "values": [10, 20, 30] },
+    "expected": { "count": 3, "sum": 60 }
+  }
+]
+```
+
+Depois execute, ainda nessa pasta:
+
+```bash
+npx --no-install mlx-plugin test fixtures.json
 npm run build
 npm run pack
 ```
 
-O gerador cria `src/index.ts` (ferramentas WASM), `src/index.html`,
-`src/frontend.css` e `src/frontend.ts` (interface). O build empacota os assets
-junto ao manifesto. Instale o `.mlxplugin.json` gerado pela aba **Plugins**.
-O exemplo em [`plugins/number-lab`](plugins/number-lab) mostra uma interface
-chamando a ferramenta `summarize_numbers` com `createFrontendClient().invoke(...)`.
+O teste de fixtures verifica a lógica JavaScript local. O build gera
+`dist/plugin.json` e `dist/plugin.wasm`, incluindo o frontend no manifesto; o pack
+gera **`meu_plugin-1.0.0.mlxplugin.json` na raiz do plugin**. Para conferir também
+a execução WASM e a integração da tela, instale o pacote e teste pelo aplicativo.
+
+#### 5. Instalar, conectar à IA e atualizar
+
+1. Com o MLX-Pilot aberto, vá a **Plugins → Adicionar plugin** e selecione
+   `meu_plugin-1.0.0.mlxplugin.json`.
+2. Revise e conceda as permissões declaradas; clique em **Instalar plugin**.
+   A instalação valida o pacote e o deixa ativo.
+3. Clique em **Abrir** no cartão do plugin e teste **Calcular**. Para os números
+   `10, 20, 30`, o resultado esperado é `{"count":3,"sum":60}`.
+4. Para a IA usar a ferramenta, abra o **Agent**, selecione um modelo com suporte
+   a ferramentas, use o toolset `general` ou `full` e o perfil de ferramentas
+   `coding` ou `full`. O catálogo da execução registra
+   automaticamente **`meu_plugin__summarize_numbers`**, com a descrição e o schema
+   definidos no código. Se houver seleção explícita de ferramentas, inclua esse
+   nome. As políticas e o modo de execução do agente continuam valendo.
+5. Peça, por exemplo: “Use `meu_plugin__summarize_numbers` para calcular a quantidade
+   e a soma de 10, 20 e 30”. Não é preciso manter a interface do plugin aberta para
+   o agente chamar suas ferramentas; o plugin precisa estar instalado, ativo e
+   autorizado. A disponibilidade no agente não adiciona chamadas de ferramentas
+   automaticamente a todo chat comum.
+
+Para atualizar, mantenha o mesmo `id`, aumente `version`, repita build/pack e
+instale o novo arquivo pelo mesmo fluxo de permissões. Não há recarga automática
+dos fontes: alterações em `.ts`, `.html` ou `.css` precisam ser recompiladas e
+reinstaladas. Os botões **Desativar**, **Ativar** e **Remover** controlam o ciclo de
+vida descrito acima. O ID `presentation` é reservado para o Studio embarcado.
+
+Para integrar outro cliente local diretamente ao daemon, uma ferramenta instalada
+também pode ser chamada por HTTP. Exemplo com o endereço padrão:
+
+```bash
+curl --fail-with-body http://127.0.0.1:11435/agent/wasm-plugins/meu_plugin/tools/summarize_numbers \
+  -H 'Content-Type: application/json' \
+  -d '{"values":[10,20,30]}'
+```
+
+O corpo é a entrada da ferramenta, sem um campo `input` adicional. Use o endereço
+configurado do daemon caso tenha alterado a porta; a rota revalida ativação,
+grants e schema. No frontend de um plugin, use a ponte do SDK em vez dessa rota.
+
+O exemplo completo em [`plugins/number-lab`](plugins/number-lab) reúne backend e
+frontend. O [`Presentation Studio`](plugins/presentation-studio) mostra uma
+integração embarcada mais ampla, com broker de documentos e exportadores; essas
+APIs adicionais não fazem parte do SDK genérico de terceiros.
 
 Consulte o [guia de arquitetura, SDK, permissões e API](docs/plugin-platform.md).
 
