@@ -18,6 +18,8 @@ pub struct RuntimeToolServices {
     pub delegate_executor: Option<Arc<dyn DelegateSessionExecutor>>,
 }
 
+// async-trait generates #[must_use] on future-returning methods.
+#[allow(clippy::double_must_use)]
 #[async_trait::async_trait]
 pub trait DelegateSessionExecutor: Send + Sync {
     async fn execute(

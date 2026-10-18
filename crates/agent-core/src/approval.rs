@@ -82,6 +82,8 @@ impl ApprovalMode {
 ///
 /// Concrete implementation will bridge to the Tauri UI via WebSocket
 /// in Phase 3/4.
+// async-trait generates #[must_use] on future-returning methods.
+#[allow(clippy::double_must_use)]
 #[async_trait::async_trait]
 pub trait ApprovalService: Send + Sync {
     /// Request approval from the user. Blocks until decision or timeout.

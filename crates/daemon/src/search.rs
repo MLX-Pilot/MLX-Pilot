@@ -121,6 +121,8 @@ impl Default for SearchConfig {
 
 // ── SearchProvider trait ────────────────────────────────────────────────────
 
+// async-trait generates #[must_use] on future-returning methods.
+#[allow(clippy::double_must_use)]
 #[async_trait::async_trait]
 pub trait SearchProvider: Send + Sync {
     fn id(&self) -> &str;

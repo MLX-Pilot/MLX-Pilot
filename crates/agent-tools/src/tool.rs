@@ -7,6 +7,8 @@ use serde_json::Value;
 ///
 /// Tools are registered in the `ToolRegistry` (in `agent-core`) and are
 /// dispatched by the `AgentLoop` when the LLM emits a function call.
+// async-trait generates #[must_use] on future-returning methods.
+#[allow(clippy::double_must_use)]
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
     /// Unique tool name (snake_case, e.g. `"read_file"`).

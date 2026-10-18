@@ -130,6 +130,8 @@ impl Default for PolicyConfig {
 }
 
 /// Trait for policy enforcement.
+// async-trait generates #[must_use] on future-returning methods.
+#[allow(clippy::double_must_use)]
 #[async_trait::async_trait]
 pub trait PolicyEngine: Send + Sync {
     /// Check if a tool call is allowed for the active skill.

@@ -38,6 +38,8 @@ pub enum ResolverError {
 /// Trait for resolving skills from a remote registry.
 ///
 /// The default implementation will be `ClawHubResolver` (Phase 2).
+// async-trait generates #[must_use] on future-returning methods.
+#[allow(clippy::double_must_use)]
 #[async_trait::async_trait]
 pub trait SkillResolver: Send + Sync {
     /// Search the registry for skills matching a query.

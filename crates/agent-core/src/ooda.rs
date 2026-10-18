@@ -305,6 +305,8 @@ pub struct ActOutcome {
 ///
 /// Existe como trait para o controlador ser testável com um executor falso: a lógica de
 /// ciclo, estado e limites é verificável sem provider nem rede.
+// async-trait generates #[must_use] on future-returning methods.
+#[allow(clippy::double_must_use)]
 #[async_trait::async_trait]
 pub trait OodaExecutor: Send {
     /// Executa uma instrução com ferramentas disponíveis (fase Act).

@@ -204,6 +204,9 @@ pub enum ProviderError {
     Unavailable { details: String },
 }
 
+// async-trait adds #[must_use] to generated future-returning methods.
+// Newer Clippy considers that redundant; scope the allowance to this trait.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait ModelProvider: Send + Sync {
     fn provider_id(&self) -> &'static str;

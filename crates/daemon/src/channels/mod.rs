@@ -310,6 +310,8 @@ struct ChannelRuntimeState {
     throttles: HashMap<String, AccountThrottleState>,
 }
 
+// async-trait generates #[must_use] on future-returning methods.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 trait ChannelAdapter: Send + Sync {
     fn capabilities(&self) -> Vec<String>;

@@ -9,6 +9,8 @@
 use std::io;
 
 /// Trait for generating embeddings from text.
+// async-trait generates #[must_use] on future-returning methods.
+#[allow(clippy::double_must_use)]
 #[async_trait::async_trait]
 pub trait Embedder: Send + Sync {
     /// Generate embeddings for a batch of texts.
