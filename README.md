@@ -23,16 +23,44 @@ vem incluído e abre na aba **Apresentações**.
 | --- | --- |
 | Adicionar | Abra **Plugins → Adicionar plugin**, selecione um arquivo `.mlxplugin.json`, revise as permissões, marque as que deseja conceder e clique em **Instalar plugin**. Para ativar, todas as permissões declaradas são necessárias. |
 | Abrir | Clique em **Abrir** no cartão do plugin. O frontend próprio abre na central; o Presentation Studio abre em **Apresentações**. |
+| Configurar | No cartão de um plugin de terceiros, clique em **Configurar** para conceder/revogar permissões, autorizar serviços, cadastrar credenciais e selecionar documentos. Funciona também com o plugin desativado. |
 | Desativar | Clique em **Desativar**. A interface é fechada/bloqueada e novas chamadas às ferramentas são recusadas. A instalação e os documentos permanecem salvos. |
 | Ativar | Clique em **Ativar** para liberar novamente a interface e as ferramentas autorizadas. |
 | Remover | Clique em **Remover** e confirme. O pacote é desinstalado; documentos e revisões são preservados. A remoção continua valendo após reiniciar o aplicativo. |
 | Reinstalar o Studio | Use **Reinstalar Presentation Studio**, disponível na central após removê-lo. Os projetos anteriores voltam a ficar acessíveis. |
 
 Instale somente pacotes cuja origem você conhece. A revisão de permissões acontece
-antes da instalação. Plugins de terceiros executam ferramentas em WASM; seus
-frontends ficam em um iframe isolado, sem acesso ao DOM principal, credenciais ou
-requisições de rede pelo SDK. A comunicação com o backend passa pelo host e só
-pode chamar ferramentas do próprio plugin, respeitando os grants e o estado ativo.
+antes da instalação e mostra os destinos, métodos HTTP e cabeçalhos de credenciais
+declarados. Plugins executam ferramentas em WASM; seus frontends ficam em um iframe
+isolado, sem acesso ao DOM principal, shell ou filesystem arbitrário. A ponte do
+SDK permite chamar ferramentas do próprio plugin, serviços HTTP autorizados e
+documentos selecionados. O daemon valida cada acesso e injeta credenciais sem
+entregar seus valores ao plugin.
+
+### Autorizar serviços, credenciais e documentos
+
+Abra **Plugins → Configurar** no plugin desejado:
+
+1. Revise as **Permissões**. Todas as permissões declaradas são necessárias para
+   executar o plugin; revogar qualquer uma bloqueia sua execução até nova concessão.
+2. Em **Serviços autorizados**, confira a URL e marque **Autorizar serviço**.
+   Serviços começam desautorizados. Use HTTPS para serviços externos. Para um
+   serviço local, autorize explicitamente **Permitir acesso à rede local**;
+   HTTP é aceito somente para endereços locais autorizados.
+3. Se houver credencial, preencha o campo de senha. Deixe vazio para manter a chave
+   existente, digite outra para substituí-la ou marque **Remover credencial
+   cadastrada**. O valor salvo não é exibido nem retornado ao plugin.
+4. Selecione os projetos do **Presentation Studio** que o plugin pode acessar e,
+   se necessário, marque **Permitir criar novas apresentações**. Ler um projeto
+   não autoriza editar: são necessárias também as permissões correspondentes.
+5. Clique em **Salvar configuração**. A interface aberta é recarregada com as
+   autorizações atuais, ou fechada quando uma permissão necessária foi revogada.
+
+As permissões gerais pertencem à instalação do plugin. Serviços, documentos e
+credenciais são configurados por workspace; as chaves ficam no cofre criptografado
+local. Atualizações que mudam os serviços ou as permissões declaradas zeram as
+autorizações de serviços/documentos, exigindo revisão. Reutilizar o mesmo ID de
+serviço/credencial pode manter a chave cadastrada, mas não reautoriza suas chamadas.
 
 ### Criar apresentações e exportar PDF/PPTX
 
@@ -173,12 +201,17 @@ entradas em JSON Schema, validadas pelo host. `execute` recebe esse objeto e ret
 JSON de forma síncrona. Marque `mutating: true` em ferramentas que alterem estado;
 o agente usa essa informação para bloquear mutações nos modos ReadOnly/DryRun.
 
-Use `compute` para funções de cálculo/transformação. A API v1 também reconhece
-`documents:read` e `documents:write`, usadas pelo broker do Presentation Studio;
-declará-las em um plugin de terceiros não concede acesso a arquivos ou aos
-documentos do Studio. O guest WASM não recebe Node.js, DOM, `fetch`, shell ou
-credenciais. A API atual de terceiros também não oferece uma ponte para serviços
-HTTP externos.
+| Permissão | Capacidade pelo host |
+| --- | --- |
+| `compute` | Cálculo e transformação dentro do WASM. |
+| `network:request` | Requisições aos serviços declarados e autorizados. |
+| `credentials:use` | Consultar se uma credencial está cadastrada e permitir sua injeção pelo host. |
+| `documents:read` | Listar/ler apresentações autorizadas no workspace. |
+| `documents:write` | Criar apresentações quando permitido e editar projetos autorizados por operações versionadas. |
+
+Declarar a permissão não autoriza todos os serviços ou documentos: o usuário
+escolhe esses acessos em **Configurar**. O guest WASM usa `createHostClient()`;
+não recebe Node.js, DOM, `fetch`, shell, filesystem arbitrário ou valores secretos.
 
 #### 3. Conectar a interface ao backend
 
@@ -206,12 +239,14 @@ como ler os valores do campo de entrada. `host.invoke` retorna uma Promise; o ho
 confere ativação, permissões e schema antes de executar o WASM. Use `host.dispose()`
 ao encerrar um cliente que você gerencie para liberar listeners e chamadas pendentes.
 
-O fluxo é **interface → ponte do SDK → daemon → ferramenta WASM → resultado**.
-O frontend roda em iframe isolado e só pode chamar ferramentas do próprio plugin.
+O fluxo é **interface → ponte do SDK → daemon → ferramenta WASM ou recurso
+autorizado → resultado**. O frontend usa `host.invoke` para suas ferramentas e
+também dispõe de `host.http`, `host.credentials` e `host.documents`.
 Não configure uma URL de backend na tela: o aplicativo encaminha a chamada para
-seu daemon local. Inclua os assets no pacote; CDNs e requisições de rede ficam
-bloqueadas nesse iframe. Abrir `index.html` diretamente no navegador não fornece
-a ponte do host; teste a conexão abrindo o plugin dentro do MLX-Pilot.
+seu daemon local. Inclua os assets no pacote; CDNs e `fetch` direto ficam bloqueados
+pela CSP. Navegar o iframe para outro documento invalida sua ponte, vinculada a um
+token por abertura. Abrir `index.html` diretamente no navegador não fornece a ponte
+do host; teste a conexão abrindo o plugin dentro do MLX-Pilot.
 
 #### 4. Testar, compilar e empacotar
 
@@ -265,6 +300,65 @@ instale o novo arquivo pelo mesmo fluxo de permissões. Não há recarga automá
 dos fontes: alterações em `.ts`, `.html` ou `.css` precisam ser recompiladas e
 reinstaladas. Os botões **Desativar**, **Ativar** e **Remover** controlam o ciclo de
 vida descrito acima. O ID `presentation` é reservado para o Studio embarcado.
+Recompile também frontends que empacotaram uma versão antiga do SDK: a ponte atual
+exige o token do documento isolado, fornecido automaticamente pelo SDK atualizado.
+
+#### 6. Usar serviços e documentos
+
+Para chamar uma API com Bearer token, declare o serviço em `definePlugin`.
+`api.exemplo.com` é um destino ilustrativo: substitua-o pelo seu serviço real.
+
+```ts
+permissions: ['network:request', 'credentials:use'],
+services: [{
+  id: 'research_api', name: 'Minha API',
+  base_url: 'https://api.exemplo.com/', methods: ['GET', 'POST'],
+  credential: { id: 'api_token', header: 'Authorization', prefix: 'Bearer ' },
+}],
+```
+
+Dentro de `execute`, o cliente WASM é **síncrono**:
+
+```ts
+import { createHostClient } from '@mlx-pilot/plugin-sdk';
+const host = createHostClient();
+// Chame consultar() dentro de execute; não faça chamadas durante o build.
+function consultar() {
+  if (!host.credentials.status('research_api').configured)
+    throw new Error('Cadastre a chave em Plugins → Configurar.');
+  const response = host.http.request({
+    service: 'research_api', path: '/v1/search?q=design', method: 'GET',
+  });
+  if (response.status !== 200) throw new Error('A consulta não foi concluída.');
+  return response.body; // O host injeta Authorization.
+}
+```
+
+No frontend, `createFrontendClient()` oferece as mesmas capacidades com Promises.
+Este exemplo edita o primeiro documento autorizado, usando sua revisão atual:
+
+```ts
+import { createFrontendClient } from '@mlx-pilot/plugin-sdk';
+const host = createFrontendClient();
+// Chame a partir de um botão da interface.
+async function atualizarBriefing() {
+  const projects = await host.documents.list();
+  if (!projects.length) throw new Error('Autorize um projeto em Configurar.');
+  const project = await host.documents.get(projects[0].id);
+  return host.documents.edit({
+    id: project.id, base_revision: project.revision,
+    operations: [{ type: 'set_brief', text: 'Briefing informado pelo usuário.' }],
+  });
+}
+```
+
+`documents.get` retorna metadados das imagens, sem seus bytes. `documents.create({
+title })` exige autorização de criação e inclui o projeto criado no acesso daquele
+plugin. `documents.edit` aplica operações pelo WASM e rejeita revisões desatualizadas.
+Ferramentas WASM que gravam documentos ou usam POST/PUT/PATCH/DELETE HTTP precisam
+de `mutating: true`; quando chamadas pelo agente, exigem execução **Full**.
+O SDK não oferece `credentials.get` ou `credentials.set`: chaves são administradas
+somente na configuração, e o plugin consulta apenas `credentials.status(service)`.
 
 Para integrar outro cliente local diretamente ao daemon, uma ferramenta instalada
 também pode ser chamada por HTTP. Exemplo com o endereço padrão:
@@ -279,10 +373,15 @@ O corpo é a entrada da ferramenta, sem um campo `input` adicional. Use o endere
 configurado do daemon caso tenha alterado a porta; a rota revalida ativação,
 grants e schema. No frontend de um plugin, use a ponte do SDK em vez dessa rota.
 
-O exemplo completo em [`plugins/number-lab`](plugins/number-lab) reúne backend e
-frontend. O [`Presentation Studio`](plugins/presentation-studio) mostra uma
-integração embarcada mais ampla, com broker de documentos e exportadores; essas
-APIs adicionais não fazem parte do SDK genérico de terceiros.
+O exemplo [`plugins/number-lab`](plugins/number-lab) reúne cálculo WASM e frontend.
+O [`Reading Notes`](plugins/reading-notes) consulta o catálogo público da Open
+Library, sem credenciais, e cria um projeto com briefing e fontes. Compile e
+empacote com `npm ci --prefix plugins/reading-notes`, `npm run build --prefix
+plugins/reading-notes` e `npm run pack --prefix plugins/reading-notes`. Depois de
+instalar, autorize o serviço **Open Library** e a criação de documentos em
+**Configurar**. A busca retorna metadados de livros; não inventa resumos de seu
+conteúdo. O projeto criado pode ser desenvolvido e exportado no
+[`Presentation Studio`](plugins/presentation-studio).
 
 Consulte o [guia de arquitetura, SDK, permissões e API](docs/plugin-platform.md).
 
