@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Uma apresentação sobre a arquitetura, o SDK e as demonstrações do sistema de plugins do MLX-Pilot.">
+  <title>MLX-Pilot · Sistema de plugins</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="presentation.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#slides">Ir para a apresentação</a>
+  <div class="presentation-shell">
+    <header class="topbar">
+      <a class="wordmark" href="#slide-1" aria-label="MLX-Pilot, início da apresentação">
+        <img src="assets/mlxpilot-wordmark.png" alt="MLX-Pilot" width="480" height="144">
+        <span class="wordmark-fallback" hidden>MLX-Pilot</span>
+      </a>
+      <span class="topbar-label">Sistema de plugins <span class="topbar-date">/ 18 out. 2026</span></span>
+      <button class="quiet-button" id="help-button" type="button" aria-label="Ajuda e atalhos de teclado" aria-haspopup="dialog">Atalhos <kbd>?</kbd></button>
+    </header>
+
+    <main class="stage-area" id="slides" tabindex="-1" aria-label="Apresentação de 12 slides">
+      <div class="deck-stage">
+        <section class="slide cover is-active" id="slide-1" data-title="Um sistema de plugins para IA local" aria-labelledby="title-1" aria-roledescription="slide" aria-label="1 de 12">
+          <div class="cover-copy">
+            <p class="eyebrow reveal">MLX-Pilot / Issue #37</p>
+            <h1 id="title-1" class="reveal delay-1">Um sistema<br>de plugins para<br><em>IA local</em></h1>
+            <p class="cover-description reveal delay-2">Arquitetura, desenvolvimento<br>e demonstrações no aplicativo.</p>
+          </div>
+          <div class="cover-index reveal delay-3" aria-label="Percurso da apresentação">
+            <span class="index-label">O que vamos ver</span>
+            <p><b>01</b> Como funciona</p>
+            <p><b>02</b> Como desenvolver</p>
+            <p><b>03</b> O sistema em uso</p>
+          </div>
+          <p class="slide-footer cover-footer">Extensões com interface própria e acesso autorizado a recursos.</p>
+          <aside class="slide-notes" hidden>Apresente o objetivo: permitir que desenvolvedores ampliem o MLX-Pilot com ferramentas que a pessoa e a IA possam usar. A inspiração do SillyTavern está no manifesto e no gerenciamento de extensões. O que veremos é a implementação específica deste repositório, com WASM, frontend isolado e autorizações do host.</aside>
+        </section>
+
+        <section class="slide proposal" id="slide-2" data-title="Estender sem reescrever o aplicativo" aria-labelledby="title-2" aria-roledescription="slide" aria-label="2 de 12" hidden>
+          <p class="eyebrow reveal">O problema</p>
+          <div class="proposal-grid">
+            <div>
+              <h2 id="title-2" class="reveal delay-1">Estender sem<br>reescrever<br>o aplicativo</h2>
+              <p class="lead reveal delay-2">Uma nova integração não deveria exigir uma nova versão de toda a aplicação.</p>
+            </div>
+            <div class="proposal-rows">
+              <article class="editorial-row reveal delay-1"><span>Antes</span><h3>Integrações no núcleo</h3><p>Cada recurso aumenta o código e o acoplamento do aplicativo.</p></article>
+              <article class="editorial-row reveal delay-2"><span>Proposta</span><h3>Pacotes instaláveis</h3><p>O plugin declara ferramentas, interface e os recursos de que precisa.</p></article>
+              <article class="editorial-row reveal delay-3"><span>Controle</span><h3>Decisão do usuário</h3><p>Instalar, configurar, ativar, desativar e remover pela central.</p></article>
+            </div>
+          </div>
+          <p class="slide-footer">Inspiração: o modelo de extensões do SillyTavern.</p>
+          <aside class="slide-notes" hidden>Explique o problema de manutenção antes de falar de tecnologia. O núcleo continua responsável por políticas e persistência. Ter um pacote separado permite adicionar funcionalidades sem dar ao plugin acesso irrestrito ao aplicativo. O Studio é uma integração embarcada, enquanto os pacotes de terceiros usam as capacidades públicas.</aside>
+        </section>
+
+        <section class="slide architecture-slide" id="slide-3" data-title="Arquitetura e fronteiras de execução" aria-labelledby="title-3" aria-roledescription="slide" aria-label="3 de 12" hidden>
+          <p class="eyebrow reveal">Como funciona</p>
+          <h2 id="title-3" class="reveal delay-1">Arquitetura e fronteiras<br>de execução</h2>
+          <div class="architecture reveal delay-2" role="img" aria-label="O usuário usa a interface isolada ou o agente local. O daemon valida permissões, executa ferramentas WASM e oferece o broker. O broker acessa serviços HTTP autorizados, o cofre local e documentos selecionados do Studio.">
+            <div class="architecture-entry">
+              <div class="diagram-node"><small>Interação</small><strong>Frontend<br>isolado</strong><span>HTML / CSS / JS</span></div>
+              <div class="diagram-node"><small>Automação</small><strong>Agente local</strong><span>Ferramentas declaradas</span></div>
+            </div>
+            <div class="diagram-connector" aria-hidden="true"><i></i></div>
+            <div class="diagram-host">
+              <small>Daemon MLX-Pilot</small>
+              <strong>Permissões<br>e execução</strong>
+              <div class="host-detail"><b>WASM</b><span>Extism / Wasmtime</span></div>
+              <div class="host-detail"><b>Broker</b><span>Capacidades autorizadas</span></div>
+            </div>
+            <div class="diagram-connector" aria-hidden="true"><i></i></div>
+            <div class="architecture-resources">
+              <div class="resource-row"><b>Serviços HTTP</b><span>Destino e métodos permitidos</span></div>
+              <div class="resource-row"><b>Cofre local</b><span>O host injeta a credencial</span></div>
+              <div class="resource-row"><b>Documentos</b><span>IDs autorizados + revisões</span></div>
+            </div>
+          </div>
+          <p class="slide-footer">O plugin não recebe o DOM principal, shell ou acesso arbitrário a arquivos.</p>
+          <aside class="slide-notes" hidden>Leia o diagrama da esquerda para a direita. A pessoa usa o frontend e o agente invoca ferramentas. O daemon verifica permissões. Ferramentas executam no WASM e o broker controla recursos externos. O frontend também pode chamar as APIs autorizadas do broker. O cofre injeta a credencial no cabeçalho HTTP e não a devolve ao plugin. A origem opaca do iframe e o token de cada abertura protegem a ponte. Navegar o iframe invalida a ponte. Fonte técnica: docs/plugin-platform.md, crates/plugin-runtime e crates/daemon/src/plugin_host.rs.</aside>
+        </section>
+
+        <section class="slide anatomy" id="slide-4" data-title="Anatomia de um plugin" aria-labelledby="title-4" aria-roledescription="slide" aria-label="4 de 12" hidden>
+          <p class="eyebrow reveal">O pacote</p>
+          <h2 id="title-4" class="reveal delay-1">Anatomia de um plugin</h2>
+          <div class="package-line reveal delay-1"><code>meu_plugin.mlxplugin.json</code><span>Manifesto + módulo compilado</span></div>
+          <div class="anatomy-columns">
+            <article class="anatomy-part reveal delay-1"><span class="large-number">01</span><h3>Manifesto</h3><p>Identidade, permissões,<br>serviços e ferramentas.</p><code>id · version · permissions<br>tools · services</code></article>
+            <article class="anatomy-part reveal delay-2"><span class="large-number">02</span><h3>WASM</h3><p>Lógica executável<br>com limites no host.</p><code>Entrada JSON<br>Saída JSON</code></article>
+            <article class="anatomy-part reveal delay-3"><span class="large-number">03</span><h3>Frontend</h3><p>Interface opcional<br>do próprio plugin.</p><code>HTML + CSS + JavaScript<br>Ponte do SDK</code></article>
+          </div>
+          <p class="slide-footer">O usuário instala o pacote pronto. Não precisa executar um build.</p>
+          <aside class="slide-notes" hidden>O arquivo real contém manifest e wasm_base64. O frontend é opcional, mas suporta experiências visuais completas. Ferramentas têm nome, descrição, JSON Schema, export WASM e indicador mutating. A instalação valida e compila o módulo antes de persistir. SHA-256 detecta alteração do WASM persistido, mas não equivale a assinatura de autor. O SDK atual é 2.0.0 e o manifesto mantém api_version 1.</aside>
+        </section>
+
+        <section class="slide sdk-slide ink" id="slide-5" data-title="Uma ferramenta em poucas linhas" aria-labelledby="title-5" aria-roledescription="slide" aria-label="5 de 12" hidden>
+          <p class="eyebrow reveal">Experiência do desenvolvedor</p>
+          <div class="sdk-heading"><h2 id="title-5" class="reveal delay-1">Uma ferramenta<br>em poucas linhas</h2><p class="reveal delay-2">O SDK cuida do contrato.<br>O host controla o acesso.</p></div>
+          <div class="sdk-content">
+            <div class="code-sample reveal delay-2"><span class="code-label">Dentro da função da ferramenta</span><pre><code><span class="syntax-keyword">const</span> host = <span class="syntax-call">createHostClient</span>();
+
+<span class="syntax-keyword">const</span> response = host.http.<span class="syntax-call">request</span>({
+  service: <span class="syntax-string">'open_library'</span>,
+  path: <span class="syntax-string">'/search.json?q='</span>
+    + <span class="syntax-call">encodeURIComponent</span>(query),
+  method: <span class="syntax-string">'GET'</span>
+});
+
+<span class="syntax-keyword">return</span> response.body;</code></pre></div>
+            <div class="sdk-steps reveal delay-3"><p><span>01</span> Definir ferramenta<br><small><code>definePlugin / defineTool</code></small></p><p><span>02</span> Testar e compilar<br><small><code>mlx-plugin test / build</code></small></p><p><span>03</span> Empacotar e instalar<br><small><code>mlx-plugin pack</code></small></p></div>
+          </div>
+          <p class="slide-footer">WASM: cliente síncrono. Frontend: as mesmas APIs com Promises.</p>
+          <aside class="slide-notes" hidden>Este é um recorte da implementação, não o manifesto completo. A função precisa fazer parte de uma ferramenta com JSON Schema e declarar network:request, além do serviço open_library. O exemplo completo está em plugins/reading-notes. createHostClient é síncrono dentro do WASM. createFrontendClient é assíncrono no navegador e também oferece invoke para ferramentas do próprio plugin. O SDK usa TypeScript/JavaScript e as etapas init, test, build e pack. Compilar exige as ferramentas de desenvolvimento, mas instalar o pacote não.</aside>
+        </section>
+
+        <section class="slide permissions-slide" id="slide-6" data-title="O usuário decide o alcance" aria-labelledby="title-6" aria-roledescription="slide" aria-label="6 de 12" hidden>
+          <p class="eyebrow reveal">Permissões e credenciais</p>
+          <h2 id="title-6" class="reveal delay-1">O usuário decide o alcance</h2>
+          <div class="permissions-layout">
+            <figure class="app-shot config-shot reveal delay-2"><img src="assets/plugin-configuracao.png" alt="Tela real de configuração com autorizações de serviço e seleção de documentos" loading="lazy"><figcaption>Configuração do plugin no aplicativo</figcaption><p class="media-fallback" hidden>Captura disponível na pasta assets da apresentação.</p></figure>
+            <div class="permissions-copy reveal delay-3"><div><h3>Serviços</h3><p>Destino, métodos e autorização explícita de rede local.</p></div><div><h3>Credenciais</h3><p>Campo de senha. O plugin recebe apenas o status de configuração.</p><button class="media-text-button credential-link" data-image="assets/credenciais.png" type="button" aria-haspopup="dialog">Ver campo de credencial</button></div><div><h3>Documentos</h3><p>IDs selecionados. Criar novos projetos exige uma autorização separada.</p></div></div>
+          </div>
+          <p class="slide-footer">Serviços, documentos e chaves são configurados por workspace.</p>
+          <aside class="slide-notes" hidden>Serviços começam desabilitados e nenhum documento é autorizado por padrão. Os grants das permissões são da instalação. Serviços, chaves e documentos são separados por workspace. O usuário pode manter, substituir ou remover a chave pelo campo de senha. A API retorna apenas credential_set. O SDK não possui credentials.get ou credentials.set. Alterações no conjunto de serviços e permissões exigem reautorizar recursos. Revogar qualquer grant necessário bloqueia o plugin.</aside>
+        </section>
+
+        <section class="slide demo-slide" id="slide-7" data-title="Instalação e configuração" aria-labelledby="title-7" aria-roledescription="slide" aria-label="7 de 12" hidden>
+          <div class="demo-heading"><div><p class="eyebrow reveal">Demonstração 01 / Aplicativo real</p><h2 id="title-7" class="reveal delay-1">Instalação e configuração</h2></div><span class="demo-number" aria-hidden="true">01</span></div>
+          <figure class="video-figure reveal delay-2"><video controls playsinline preload="metadata" poster="assets/plugins-central.png" aria-label="Demonstração: instalar e configurar um plugin no MLX-Pilot"><source src="assets/01-instalar-configurar.mp4" type="video/mp4"><track kind="captions" src="assets/01-instalar-configurar.vtt" srclang="pt-BR" label="Português">Seu navegador não reproduziu este vídeo. Abra o arquivo MP4 na pasta assets.</video><p class="media-fallback" hidden>Vídeo indisponível neste navegador. Abra <a href="assets/01-instalar-configurar.mp4">a gravação local</a>.</p><figcaption>Instalar o pacote, revisar o acesso solicitado e ajustar as autorizações.</figcaption></figure>
+          <aside class="slide-notes" hidden>Reproduza o vídeo pelo controle do player. Destaque a revisão do pacote e a configuração de recursos. Ativar/desativar impede novas invocações. Configurar continua disponível quando o plugin está desativado. Remover apaga pacote e configuração, mas preserva documentos. O vídeo pausa automaticamente quando o apresentador muda de slide. Legendas podem ser ativadas no player. A descrição textual também acompanha o roteiro local.</aside>
+        </section>
+
+        <section class="slide demo-slide" id="slide-8" data-title="Pesquisa real, documento editável" aria-labelledby="title-8" aria-roledescription="slide" aria-label="8 de 12" hidden>
+          <div class="demo-heading"><div><p class="eyebrow reveal">Demonstração 02 / Reading Notes</p><h2 id="title-8" class="reveal delay-1">Pesquisa real, documento editável</h2></div><span class="demo-number" aria-hidden="true">02</span></div>
+          <figure class="video-figure reveal delay-2"><video controls playsinline preload="metadata" poster="assets/reading-notes.png" aria-label="Demonstração: consultar a Open Library e criar um briefing no Studio"><source src="assets/02-servico-documento.mp4" type="video/mp4"><track kind="captions" src="assets/02-servico-documento.vtt" srclang="pt-BR" label="Português">Seu navegador não reproduziu este vídeo. Abra o arquivo MP4 na pasta assets.</video><p class="media-fallback" hidden>Vídeo indisponível neste navegador. Abra <a href="assets/02-servico-documento.mp4">a gravação local</a>.</p><figcaption>Open Library pública, sem chave. Metadados e fontes formam o briefing.</figcaption></figure>
+          <aside class="slide-notes" hidden>Reading Notes é um plugin de terceiros completo, com WASM e frontend. A consulta usa HTTPS/GET pelo broker para o serviço Open Library autorizado. O plugin consulta até cinco livros e cria um projeto com briefing, metadados e fontes. Não deduz nem resume o conteúdo dos livros a partir do catálogo. Criar o projeto exige documents:write e allow_create. O ID criado passa a integrar os documentos autorizados do plugin.</aside>
+        </section>
+
+        <section class="slide demo-slide studio-demo" id="slide-9" data-title="Um projeto, diferentes entregas" aria-labelledby="title-9" aria-roledescription="slide" aria-label="9 de 12" hidden>
+          <div class="demo-heading"><div><p class="eyebrow reveal">Demonstração 03 / Presentation Studio</p><h2 id="title-9" class="reveal delay-1">Um projeto, diferentes entregas</h2></div><span class="demo-number" aria-hidden="true">03</span></div>
+          <div class="studio-demo-layout"><figure class="video-figure reveal delay-2"><video controls playsinline preload="metadata" poster="assets/studio.png" aria-label="Demonstração: editar e exportar uma apresentação no Studio"><source src="assets/03-studio-exportar.mp4" type="video/mp4"><track kind="captions" src="assets/03-studio-exportar.vtt" srclang="pt-BR" label="Português">Seu navegador não reproduziu este vídeo. Abra o arquivo MP4 na pasta assets.</video><p class="media-fallback" hidden>Vídeo indisponível neste navegador. Abra <a href="assets/03-studio-exportar.mp4">a gravação local</a>.</p><figcaption>Edição pelo mouse e exportação real.</figcaption></figure><dl class="format-list reveal delay-3"><div><dt>PDF</dt><dd>Visual fiel, estático.<br>Páginas rasterizadas.<a class="example-link" href="assets/exemplos/jardins-urbanos.pdf" target="_blank" rel="noopener">Abrir exemplo real</a></dd></div><div><dt>PPTX</dt><dd>Elementos editáveis<br>ou imagem por slide.<a class="example-link" href="assets/exemplos/jardins-urbanos.pptx" download>Baixar exemplo real</a></dd></div><div><dt>HTML</dt><dd>Player offline<br>com animações.<a class="example-link" href="assets/exemplos/jardins-urbanos.html" target="_blank" rel="noopener">Abrir exemplo real</a></dd></div></dl></div>
+          <aside class="slide-notes" hidden>O projeto estruturado é a fonte comum dos formatos. O PDF é rasterizado e não tem texto selecionável. PPTX nativo preserva textos, formas, imagens, tabelas, gráficos e notas, mas não traduz CSS arbitrário nem animações. PPTX visual preserva a aparência como uma imagem por slide. HTML preserva entradas e transições no player offline. JSON permite reimportação e continuidade da autoria. Imagens, paletas e descrições alimentam o fluxo de composição. Preview e exportações acontecem no editor, não em ferramentas headless do agente.</aside>
+        </section>
+
+        <section class="slide agent-slide ink" id="slide-10" data-title="A IA usa as mesmas ferramentas" aria-labelledby="title-10" aria-roledescription="slide" aria-label="10 de 12" hidden>
+          <p class="eyebrow reveal">Integração com o agente</p>
+          <h2 id="title-10" class="reveal delay-1">A IA usa as<br><em>mesmas ferramentas</em></h2>
+          <div class="agent-layout"><div class="agent-request reveal delay-2"><span>Um pedido possível</span><blockquote>“Pesquise livros sobre cidades sustentáveis e crie um briefing para uma apresentação.”</blockquote></div><div class="agent-toolchain reveal delay-3"><p class="tool-step"><span>Consulta</span><code>reading_notes__search_books</code></p><p class="tool-step"><span>Criação de documento</span><code>reading_notes__create_reading_brief</code></p><p class="agent-rule">Ferramenta mutante exige <strong>modo Full</strong>.<br>As autorizações do plugin continuam valendo.</p></div></div>
+          <p class="slide-footer">Nomes, descrições e schemas tornam as capacidades disponíveis ao modelo local.</p>
+          <aside class="slide-notes" hidden>O pedido é ilustrativo, não uma transcrição da demonstração. O nome público de ferramentas de terceiros usa plugin_id, dois underscores e tool_name. O catálogo é reconstruído a cada execução. ReadOnly e DryRun bloqueiam mutações. Locked bloqueia ferramentas. Uma ferramenta que grava documentos ou envia métodos HTTP além de GET, HEAD e OPTIONS deve declarar mutating: true. Para compor apresentações no Studio, a IA segue planejamento, composição por slide, revisão editorial e preflight. O modelo de texto recebe metadados e descrições de imagens, não os bytes.</aside>
+        </section>
+
+        <section class="slide evidence-slide" id="slide-11" data-title="Engenharia com limites explícitos" aria-labelledby="title-11" aria-roledescription="slide" aria-label="11 de 12" hidden>
+          <p class="eyebrow reveal">Verificação / 18 out. 2026</p>
+          <h2 id="title-11" class="reveal delay-1">Engenharia com limites explícitos</h2>
+          <div class="evidence-counts reveal delay-2"><div><strong>311</strong><span>testes Rust</span></div><div><strong>85</strong><span>testes JavaScript</span></div><div><strong>4</strong><span>fixtures Reading Notes</span></div><div class="ci-evidence"><span class="status-dot" aria-hidden="true"></span><strong>CI</strong><span>execução aprovada</span></div></div>
+          <div class="limits-layout reveal delay-3"><div><h3>Execução limitada</h3><p>256 MiB por WASM.<br>Até 3 requisições HTTP por invocação.</p></div><div><h3>Gravação protegida</h3><p>Operações validadas.<br>Conflitos de revisão não sobrescrevem o projeto.</p></div><div><h3>Limites conhecidos</h3><p>PDF e PPTX são estáticos.<br>O modelo de texto não faz revisão visual de pixels.</p></div></div>
+          <p class="slide-footer">Testes de contrato, políticas e interface, complementados pelas demonstrações reais.</p>
+          <aside class="slide-notes" hidden>Os totais registram a verificação de 18 de outubro de 2026 informada para esta entrega, não uma garantia de ausência de bugs. O README e o roteiro local registram a evidência e o escopo. WASM: 100 milhões de instruções de combustível, memória de 256 MiB, timeout de 5 s sem broker e 60 s com broker. HTTP: 15 s por requisição, 45 s de prazo total do broker e limite de 1 MiB por corpo. Rede local exige opt-in. O preflight do Studio mede cortes, sobreposições e contraste quando mensurável. CSS arbitrário e imagens sob texto ainda exigem inspeção humana. SHA-256 não é assinatura de confiança.</aside>
+        </section>
+
+        <section class="slide closing" id="slide-12" data-title="Equipe e encerramento" aria-labelledby="title-12" aria-roledescription="slide" aria-label="12 de 12" hidden>
+          <p class="eyebrow reveal">Equipe</p>
+          <div class="closing-layout"><div><h2 id="title-12" class="reveal delay-1">Plugins que<br>ampliam o<br><em>MLX-Pilot</em></h2><p class="closing-summary reveal delay-2">Ferramentas com interface.<br>Recursos com autorização.<br>Documentos que continuam editáveis.</p></div><ul class="team-list reveal delay-3" aria-label="Integrantes da equipe"><li>Kaike-Vitorino</li><li>GabrielSalustiano</li><li>gabriellima-4</li><li>PETROMYZONMONSTER</li><li>MarcellinhoHM</li><li>RamLi06</li></ul></div>
+          <p class="slide-footer closing-footer"><span>Obrigado.</span><span>Perguntas e demonstração aberta</span></p>
+          <aside class="slide-notes" hidden>Encerre retomando o objetivo: uma base para terceiros criarem ferramentas com frontend, usando o modelo local e as autorizações do host. Apresente os integrantes conforme os handles fornecidos, sem atribuir funções individuais não documentadas. Para perguntas, use G para voltar a qualquer slide ou abra o aplicativo para uma demonstração adicional.</aside>
+        </section>
+      </div>
+    </main>
+
+    <aside class="notes-panel" id="notes-panel" aria-labelledby="notes-heading" hidden><div><h2 id="notes-heading">Notas do apresentador</h2><button class="quiet-button" id="close-notes" type="button" aria-label="Fechar notas">Fechar <kbd>N</kbd></button></div><p id="notes-content"></p></aside>
+
+    <footer class="controls" aria-label="Controles da apresentação">
+      <div class="navigation"><button class="icon-button" id="previous" type="button" aria-label="Slide anterior" title="Slide anterior (←)">←</button><output id="slide-counter" aria-live="off">01 <span>/ 12</span></output><button class="icon-button" id="next" type="button" aria-label="Próximo slide" title="Próximo slide (→)">→</button></div>
+      <div class="progress-wrap"><span id="current-slide-title">Um sistema de plugins para IA local</span><progress id="progress" value="1" max="12" aria-label="Progresso da apresentação">1 de 12</progress></div>
+      <div class="view-controls"><button class="quiet-button" id="overview-button" type="button" aria-label="Visão geral dos slides" aria-haspopup="dialog">Visão geral <kbd>G</kbd></button><button class="quiet-button" id="notes-button" type="button" aria-controls="notes-panel" aria-expanded="false">Notas <kbd>N</kbd></button><button class="quiet-button" id="motion-button" type="button" aria-pressed="false" title="Ativar ou desativar movimento reduzido">Reduzir movimento</button><button class="icon-button fullscreen-button" id="fullscreen-button" type="button" aria-label="Entrar em tela cheia" title="Tela cheia (F)">⛶</button></div>
+    </footer>
+  </div>
+
+  <dialog id="overview" aria-labelledby="overview-title"><div class="dialog-heading"><div><p class="eyebrow">Navegação</p><h2 id="overview-title">Visão geral</h2></div><button class="quiet-button" data-close-dialog type="button" aria-label="Fechar visão geral">Fechar <kbd>Esc</kbd></button></div><div id="overview-grid" class="overview-grid"></div></dialog>
+  <dialog id="help" aria-labelledby="help-title"><div class="dialog-heading"><div><p class="eyebrow">Apresentação offline</p><h2 id="help-title">Atalhos de teclado</h2></div><button class="quiet-button" data-close-dialog type="button" aria-label="Fechar ajuda">Fechar <kbd>Esc</kbd></button></div><dl class="shortcut-list"><div><dt><kbd>→</kbd> <kbd>Espaço</kbd> <kbd>Page Down</kbd></dt><dd>Próximo slide</dd></div><div><dt><kbd>←</kbd> <kbd>Page Up</kbd></dt><dd>Slide anterior</dd></div><div><dt><kbd>Home</kbd> / <kbd>End</kbd></dt><dd>Primeiro / último slide</dd></div><div><dt><kbd>G</kbd></dt><dd>Visão geral</dd></div><div><dt><kbd>N</kbd></dt><dd>Notas do apresentador</dd></div><div><dt><kbd>F</kbd></dt><dd>Tela cheia</dd></div><div><dt><kbd>?</kbd></dt><dd>Esta ajuda</dd></div></dl><p class="help-note">Vídeos começam apenas ao pressionar play e pausam ao sair do slide. Os controles do vídeo mantêm seus próprios atalhos. Para uma versão estática, use a impressão do navegador.</p></dialog>
+  <dialog id="media-dialog" aria-labelledby="media-title"><div class="dialog-heading"><div><p class="eyebrow">Material da demonstração</p><h2 id="media-title">Captura do aplicativo</h2></div><button class="quiet-button" data-close-dialog type="button" aria-label="Fechar material da demonstração">Fechar <kbd>Esc</kbd></button></div><div id="media-content"></div></dialog>
+  <p class="sr-only" id="announcer" role="status" aria-live="polite" aria-atomic="true"></p>
+  <noscript><div class="noscript-note">JavaScript está desativado. Todos os slides aparecem abaixo para leitura e impressão.</div><style>.presentation-shell{height:auto}.stage-area{display:block}.deck-stage{width:100%;aspect-ratio:auto}.slide,.slide[hidden]{display:block;position:relative;min-height:720px;margin-bottom:24px}.controls{display:none}.reveal{opacity:1!important;transform:none!important}.slide-notes{display:none!important}</style></noscript>
+</body>
+</html>
