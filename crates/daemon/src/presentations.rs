@@ -18,6 +18,10 @@ use std::{
     sync::{Arc, Mutex, RwLock},
 };
 
+#[path = "plugin_host.rs"]
+mod plugin_host;
+pub(crate) use plugin_host::{configure_plugin, host_operation, plugin_configuration};
+
 type ApiResult = Result<Json<Value>, (StatusCode, Json<Value>)>;
 fn error(e: impl ToString) -> (StatusCode, Json<Value>) {
     let message = e.to_string();
@@ -32,6 +36,7 @@ fn error(e: impl ToString) -> (StatusCode, Json<Value>) {
 pub struct StudioService {
     root: PathBuf,
     gate: Mutex<()>,
+    host_gate: Mutex<()>,
     packages: RwLock<BTreeMap<String, Package>>,
 }
 impl StudioService {
@@ -73,6 +78,7 @@ impl StudioService {
         Ok(Self {
             root,
             gate: Mutex::new(()),
+            host_gate: Mutex::new(()),
             packages: RwLock::new(packages),
         })
     }
@@ -183,6 +189,7 @@ impl StudioService {
         if m.id == "presentation" {
             return Err("bundled plugin cannot be replaced by third-party packages".into());
         }
+        let _access = self.host_gate.lock().map_err(|e| e.to_string())?;
         let _guard = self.gate.lock().map_err(|e| e.to_string())?;
         let p = Package::new(m, wasm, grants).map_err(|e| e.to_string())?;
         p.save(
@@ -199,6 +206,7 @@ impl StudioService {
         Ok(self.inventory())
     }
     pub fn enable(&self, id: &str, enabled: bool) -> Result<Value, String> {
+        let _access = self.host_gate.lock().map_err(|e| e.to_string())?;
         let _guard = self.gate.lock().map_err(|e| e.to_string())?;
         let mut p = self.package(id)?;
         p.enabled = enabled;
@@ -217,6 +225,7 @@ impl StudioService {
         Ok(())
     }
     pub fn remove(&self, id: &str) -> Result<Value, String> {
+        let _access = self.host_gate.lock().map_err(|e| e.to_string())?;
         let _guard = self.gate.lock().map_err(|e| e.to_string())?;
         self.package(id)?;
         if id == "presentation" {
@@ -226,6 +235,7 @@ impl StudioService {
         std::fs::remove_file(self.root.join("plugins").join(format!("{id}.json")))
             .map_err(|e| e.to_string())?;
         self.packages.write().unwrap().remove(id);
+        self.remove_plugin_access(id)?;
         Ok(self.inventory())
     }
     pub fn restore_bundled(&self) -> Result<Value, String> {
@@ -518,8 +528,9 @@ pub(crate) async fn invoke(
     if id == "presentation" {
         return Err(error("Use the scoped project edit endpoint"));
     }
-    let p = s.studio.package(&id).map_err(error)?;
-    tokio::task::spawn_blocking(move || p.invoke(&tool, &v))
+    let service = s.studio.clone();
+    let workspace = s.agent_state.default_workspace.clone();
+    tokio::task::spawn_blocking(move || service.invoke_plugin(&workspace, &id, &tool, &v, true))
         .await
         .map_err(error)?
         .map(Json)
@@ -591,8 +602,9 @@ impl Tool for StudioTool {
         let name = self.name.clone();
         let plugin = self.plugin.clone();
         let p = p.clone();
+        let ctx_mutation = self.mutating && matches!(ctx.mode, ExecutionMode::Full);
         let value=tokio::task::spawn_blocking(move||->Result<Value,String>{
-   if let Some((id,tool))=plugin{return service.package(&id)?.invoke(&tool,&p).map_err(|e|e.to_string());}
+   if let Some((id,tool))=plugin{return service.invoke_plugin(&workspace,&id,&tool,&p,ctx_mutation);}
    let builtin=service.package("presentation")?;if !builtin.enabled || !builtin.manifest.permissions.iter().all(|x|builtin.grants.contains(x)){return Err("Presentation plugin disabled or permission revoked".into());}
    let id=p["project_id"].as_str().unwrap_or("");
    match name.as_str(){

@@ -50,7 +50,7 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
@@ -868,6 +868,14 @@ pub async fn run() -> anyhow::Result<()> {
             get(presentations::frontend),
         )
         .route(
+            "/agent/wasm-plugins/{id}/configuration",
+            get(presentations::plugin_configuration).put(presentations::configure_plugin),
+        )
+        .route(
+            "/agent/wasm-plugins/{id}/host",
+            post(presentations::host_operation),
+        )
+        .route(
             "/agent/wasm-plugins/bundled/presentation",
             post(presentations::restore_plugin),
         )
@@ -877,13 +885,79 @@ pub async fn run() -> anyhow::Result<()> {
         )
         .layer(axum::extract::DefaultBodyLimit::max(26 * 1024 * 1024))
         .with_state(state)
-        .layer(CorsLayer::permissive())
+        .layer(
+            CorsLayer::new()
+                .allow_origin(AllowOrigin::predicate(|origin, _| {
+                    trusted_ui_origin(origin)
+                }))
+                .allow_methods(Any)
+                .allow_headers(Any),
+        )
+        .layer(axum::middleware::from_fn(local_request_guard))
         .layer(TraceLayer::new_for_http());
 
     let listener = TcpListener::bind(cfg.bind_addr).await?;
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+// Native desktop origins and local development UIs may reach the local daemon.
+// Remote websites must not read documents or exercise configured plugin credentials.
+fn trusted_ui_origin(origin: &axum::http::HeaderValue) -> bool {
+    let Ok(origin) = origin.to_str() else {
+        return false;
+    };
+    if origin == "tauri://localhost" {
+        return true;
+    }
+    let Ok(url) = url::Url::parse(origin) else {
+        return false;
+    };
+    matches!(url.scheme(), "http" | "https")
+        && url.username().is_empty()
+        && url.password().is_none()
+        && matches!(
+            url.host_str(),
+            Some("localhost" | "127.0.0.1" | "[::1]" | "tauri.localhost")
+        )
+}
+
+fn trusted_request_headers(headers: &HeaderMap) -> bool {
+    if headers
+        .get(axum::http::header::ORIGIN)
+        .is_some_and(|v| !trusted_ui_origin(v))
+    {
+        return false;
+    }
+    // Also block DNS rebinding: a same-origin attacker domain may resolve to loopback.
+    headers.get(axum::http::header::HOST).is_none_or(|value| {
+        value
+            .to_str()
+            .ok()
+            .and_then(|v| url::Url::parse(&format!("http://{v}")).ok())
+            .is_some_and(|u| {
+                u.username().is_empty()
+                    && u.password().is_none()
+                    && u.path() == "/"
+                    && u.query().is_none()
+                    && u.fragment().is_none()
+                    && matches!(
+                        u.host_str(),
+                        Some("localhost" | "127.0.0.1" | "[::1]" | "tauri.localhost")
+                    )
+            })
+    })
+}
+
+async fn local_request_guard(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    if !trusted_request_headers(request.headers()) {
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error":"Only local application origins and hosts may access this daemon"}))).into_response();
+    }
+    next.run(request).await
 }
 
 fn init_tracing() {
