@@ -17,6 +17,13 @@ A aba **Plugins** é a central de ferramentas: cada plugin pode ter backend WASM
 frontend HTML/CSS/JS e ferramentas disponíveis para a IA. O **Presentation Studio**
 vem incluído e abre na aba **Apresentações**.
 
+Para conhecer a arquitetura e ver o sistema funcionando, abra a
+[apresentação para sala de aula](docs/apresentacao-plugins/index.html). Copie a
+pasta [`docs/apresentacao-plugins/`](docs/apresentacao-plugins/) inteira e abra
+`index.html` no navegador: os 12 slides, capturas e três vídeos funcionam offline,
+sem instalação. O [guia de apresentação](docs/apresentacao-plugins/README.md)
+inclui atalhos, roteiro de fala e exemplos exportados pelo Studio.
+
 ### Adicionar, ativar, desativar e remover
 
 | Ação | Como fazer na interface |
