@@ -11,6 +11,7 @@ serde_json.workspace = true
 sha2.workspace = true
 extism = { version = "=1.13.0", default-features = false }
 jsonschema = "0.29"
+url = "2"
 
 [dev-dependencies]
 wat = "1"
