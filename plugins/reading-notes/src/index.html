@@ -1,0 +1,35 @@
+<main>
+  <p class="eyebrow">OPEN LIBRARY × PRESENTATION STUDIO</p>
+  <h1>Uma boa apresentação começa com boas referências.</h1>
+  <p>
+    Pesquise livros e transforme os dados do catálogo em um briefing com fontes
+    para o seu próximo projeto.
+  </p>
+  <form id="search-form">
+    <label for="query">Tema da pesquisa</label>
+    <input
+      id="query"
+      name="query"
+      maxlength="160"
+      placeholder="Ex.: design sustentável"
+      required
+    />
+    <div class="actions">
+      <button type="submit">Pesquisar livros</button
+      ><button id="create" type="button" class="secondary">
+        Criar briefing
+      </button>
+    </div>
+  </form>
+  <p id="status" role="status" aria-live="polite"></p>
+  <section id="results" aria-label="Livros encontrados"></section>
+  <footer>
+    <button id="projects" class="secondary" type="button">
+      Ver projetos permitidos
+    </button>
+    <p>
+      Para criar um briefing, permita a criação de documentos nas configurações
+      deste plugin.
+    </p>
+  </footer>
+</main>

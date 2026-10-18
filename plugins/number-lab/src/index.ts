@@ -2,7 +2,7 @@ import { definePlugin, defineTool } from "@mlx-pilot/plugin-sdk";
 export default definePlugin({
   id: "number_lab",
   name: "number-lab",
-  version: "1.0.0",
+  version: "1.1.0",
   frontend: {
     html: "src/index.html",
     script: "src/frontend.ts",

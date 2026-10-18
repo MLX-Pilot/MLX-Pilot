@@ -8,5 +8,6 @@
   },
   "dependencies": {
     "@mlx-pilot/plugin-sdk": "file:../../packages/plugin-sdk"
-  }
+  },
+  "version": "1.1.0"
 }
