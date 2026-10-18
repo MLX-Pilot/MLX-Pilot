@@ -316,6 +316,13 @@ code { font-family: var(--font-mono); }
 .brand-icon {
   flex-shrink: 0;
 }
+.brand-wordmark {
+  display: block;
+  flex-shrink: 0;
+  width: 144px;
+  height: 32px;
+  object-fit: contain;
+}
 .brand-text {
   font-family: var(--font-heading);
   font-size: 18px;
