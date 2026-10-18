@@ -4,6 +4,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { build } from "esbuild";
+import assert from "node:assert/strict";
+import { installFixtureHost } from "./testing.mjs";
 const [command, arg] = process.argv.slice(2),
   cwd = process.cwd(),
   sdk = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -82,6 +84,7 @@ document.getElementById('calculate')!.onclick = async () => {
       name: plugin.name,
       version: plugin.version,
       permissions: plugin.permissions,
+      services: plugin.services,
       tools: plugin.tools.map(({ execute, ...t }) => ({
         ...t,
         export: t.name,
@@ -127,7 +130,7 @@ document.getElementById('calculate')!.onclick = async () => {
     });
     await writeFile(
       "dist/guest.d.ts",
-      `declare module "main" {${plugin.tools.map((t) => `export function ${t.name}(): I32;`).join("\n")}}`,
+      `declare module "main" {${plugin.tools.map((t) => `export function ${t.name}(): I32;`).join("\n")}}\ndeclare module "extism:host" { interface user { mlx_host_call(ptr: I64): I64; } }\n`,
     );
     const r = spawnSync(
       "extism-js",
@@ -173,9 +176,28 @@ document.getElementById('calculate')!.onclick = async () => {
     for (const fixture of fixtures) {
       const tool = plugin.tools.find((t) => t.name === fixture.tool);
       if (!tool) throw new Error("Unknown fixture tool");
-      const actual = tool.execute(fixture.input);
-      if (JSON.stringify(actual) !== JSON.stringify(fixture.expected))
-        throw new Error(`Fixture failed: ${fixture.tool}`);
+      const host = installFixtureHost(fixture.host_calls || []);
+      try {
+        if (typeof fixture.expected_error === "string") {
+          assert.throws(() => tool.execute(fixture.input), {
+            message: fixture.expected_error,
+          });
+        } else {
+          const actual = tool.execute(fixture.input);
+          assert.ok(
+            !actual || typeof actual.then !== "function",
+            "Tool execute must be synchronous",
+          );
+          assert.deepEqual(
+            actual,
+            fixture.expected,
+            `Fixture failed: ${fixture.tool}`,
+          );
+        }
+        host.verify();
+      } finally {
+        host.restore();
+      }
     }
     console.log(`${fixtures.length} fixtures passed`);
     return;

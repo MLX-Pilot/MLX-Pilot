@@ -1,1 +1,16 @@
-{"name":"@mlx-pilot/plugin-sdk","version":"1.0.0","type":"module","main":"src/index.js","types":"src/index.d.ts","bin":{"mlx-plugin":"src/cli.mjs"},"dependencies":{"esbuild":"0.25.12"},"scripts":{"test":"node --test test/*.test.mjs"}}
+{
+  "name": "@mlx-pilot/plugin-sdk",
+  "version": "2.0.0",
+  "type": "module",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "bin": {
+    "mlx-plugin": "src/cli.mjs"
+  },
+  "dependencies": {
+    "esbuild": "0.25.12"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}
