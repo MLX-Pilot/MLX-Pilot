@@ -2,7 +2,7 @@
   max-width: 1200px;
   margin: 0 auto;
   padding: 36px;
-  color: var(--text-primary, #e6eaf2);
+  color: var(--text-primary, #e8edf5);
 }
 .pm-header {
   display: flex;
@@ -18,13 +18,13 @@
 .pm-header p,
 .pm-card p,
 .pm-shell footer {
-  color: var(--text-secondary, #99a4b8);
+  color: var(--text-secondary, #8899b0);
   line-height: 1.6;
 }
 .pm-kicker {
   font-size: 10px;
   letter-spacing: 2px;
-  color: #baf66d;
+  color: var(--cyan, #00d4ff);
 }
 .pm-grid {
   display: grid;
@@ -32,7 +32,7 @@
   gap: 18px;
 }
 .pm-card {
-  background: var(--bg-secondary, #151d2b);
+  background: var(--bg-surface, #0f1520);
   border: 1px solid var(--border-color, #303b50);
   border-radius: 18px;
   padding: 24px;
@@ -55,7 +55,7 @@
 }
 .pm-icon {
   font-size: 28px;
-  color: #baf66d;
+  color: var(--cyan, #00d4ff);
 }
 .pm-badge {
   border-radius: 30px;
@@ -64,8 +64,8 @@
   font-size: 11px;
 }
 .pm-badge.on {
-  background: #203820;
-  color: #baf66d;
+  background: var(--cyan-soft, rgba(0, 212, 255, .12));
+  color: var(--cyan, #00d4ff);
 }
 .pm-permissions {
   display: flex;
@@ -102,12 +102,12 @@
   cursor: not-allowed;
 }
 .pm-shell :is(button, input):focus-visible {
-  outline: 2px solid #baf66d;
+  outline: 2px solid var(--cyan, #00d4ff);
   outline-offset: 3px;
 }
 .pm-shell .pm-primary {
-  background: #baf66d;
-  color: #12200d;
+  background: var(--cyan, #00d4ff);
+  color: var(--text-inverse, #06090f);
   font-weight: 700;
   border: 0;
   display: inline-block;
@@ -125,7 +125,7 @@
 }
 #pm-status {
   min-height: 30px;
-  color: #baf66d;
+  color: var(--cyan, #00d4ff);
 }
 #pm-status.error {
   color: #ffaaaa;
@@ -133,7 +133,7 @@
 .pm-review {
   margin: 24px 0;
   padding: 24px;
-  border: 1px solid #baf66d;
+  border: 1px solid var(--cyan, #00d4ff);
   border-radius: 12px;
 }
 .pm-review label {
@@ -162,7 +162,7 @@
   padding: 28px;
   border: 1px solid #ffffff24;
   border-radius: 18px;
-  background: var(--bg-secondary, #151d2b);
+  background: var(--bg-surface, #0f1520);
 }
 .pm-configuration-header,
 .pm-service-header {
@@ -180,7 +180,7 @@
   max-width: 740px;
 }
 .pm-configuration p {
-  color: var(--text-secondary, #99a4b8);
+  color: var(--text-secondary, #8899b0);
   line-height: 1.6;
 }
 .pm-config-section {
@@ -213,7 +213,7 @@
   margin: 3px 0 0;
   width: 17px;
   height: 17px;
-  accent-color: #baf66d;
+  accent-color: var(--cyan, #00d4ff);
 }
 .pm-check span {
   min-width: 0;
@@ -221,7 +221,7 @@
 }
 .pm-check small {
   display: block;
-  color: var(--text-secondary, #99a4b8);
+  color: var(--text-secondary, #8899b0);
   font-size: 11px;
   line-height: 1.6;
   margin-top: 2px;
@@ -256,7 +256,7 @@
   line-height: 1.6;
 }
 .pm-service-details dt {
-  color: var(--text-secondary, #99a4b8);
+  color: var(--text-secondary, #8899b0);
 }
 .pm-service-details dd {
   margin: 0;
@@ -277,8 +277,8 @@
   padding: 11px 12px;
   border: 1px solid #ffffff2a;
   border-radius: 8px;
-  background: var(--bg-primary, #101621);
-  color: var(--text-primary, #e6eaf2);
+  background: var(--bg-deep, #06090f);
+  color: var(--text-primary, #e8edf5);
   font: inherit;
 }
 .pm-field input:disabled {
