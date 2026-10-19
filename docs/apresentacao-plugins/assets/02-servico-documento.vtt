@@ -1,13 +1,22 @@
 WEBVTT
 
-00:00.000 --> 00:03.900
-Abra Reading Notes e pesquise livros sobre “urban gardens”.
+00:00.000 --> 00:02.942
+Pesquise livros sobre “urban gardens” na interface do Reading Notes.
 
-00:03.900 --> 00:07.800
-O broker consulta a Open Library real e retorna cinco obras.
+00:02.942 --> 00:06.448
+O broker consulta a Open Library por HTTPS e retorna metadados reais.
 
-00:07.800 --> 00:10.600
-Crie um briefing no Studio com os metadados e as fontes.
+00:06.448 --> 00:09.132
+Crie um caderno de leitura com capa, referências e fontes preservadas.
 
-00:10.600 --> 00:14.833
-Abra o documento criado. Ele pode continuar sendo editado no Studio.
+00:09.132 --> 00:12.402
+Abra o projeto recém-criado: o resultado já tem cinco slides editáveis.
+
+00:12.402 --> 00:17.072
+Confira títulos, autoria, anos e referências nas páginas diagramadas.
+
+00:17.072 --> 00:19.501
+O roteiro de leitura orienta a continuação do trabalho no mesmo documento.
+
+00:19.501 --> 00:26.500
+Apresente com animações no HTML e continue a edição no Studio.

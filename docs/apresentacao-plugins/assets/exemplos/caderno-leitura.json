@@ -1,0 +1,1619 @@
+{
+  "assets": [],
+  "brief": "Prepare uma apresentação sobre leituras relacionadas a urban gardens.\n\nOs itens abaixo são metadados de catálogo fornecidos pela Open Library, na ordem retornada pela pesquisa. Não invente o conteúdo, conclusões ou citações dos livros. O ano é o da primeira publicação registrada, não necessariamente o da edição consultada. A consulta não é uma recomendação ou avaliação das obras.\n\n1. City gardening\nAutoria: Deirdre Colby\nPrimeira publicação: 1987\nFonte: https://openlibrary.org/works/OL15825666W\n\n2. Rebel Gardening\nAutoria: Alessandro Vitale\nPrimeira publicação: 2022\nFonte: https://openlibrary.org/works/OL27298671W\n\n3. Urban Gardening for Dummies\nAutoria: Dummies Press Staff, Charlie Nardozzi, National Gardening Association\nPrimeira publicação: 2013\nFonte: https://openlibrary.org/works/OL21040588W\n\n4. Urban Gardens\nAutoria: Ann-Marie Powell\nPrimeira publicação: 2005\nFonte: https://openlibrary.org/works/OL9028256W\n\n5. Urban Gardener\nAutoria: Elspeth Thompson\nPrimeira publicação: 1999\nFonte: https://openlibrary.org/works/OL8349578W",
+  "css": "",
+  "id": "dde17c73-7096-4813-ada2-e262b272c821",
+  "revision": 2,
+  "schema_version": 1,
+  "script": "",
+  "slides": [
+    {
+      "background": "#0a0e17",
+      "elements": [
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 4,
+          "id": "reading-cover-rule",
+          "kind": "shape",
+          "style": {
+            "fill": "#00d4ff",
+            "radius": 0
+          },
+          "text": "",
+          "w": 48,
+          "x": 72,
+          "y": 48
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 32,
+          "id": "reading-cover-eyebrow",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#00d4ff",
+            "fontSize": 18
+          },
+          "text": "CADERNO DE PESQUISA",
+          "w": 1000,
+          "x": 136,
+          "y": 34
+        },
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 1,
+          "id": "reading-cover-footer-rule",
+          "kind": "shape",
+          "style": {
+            "fill": "#344157",
+            "radius": 0
+          },
+          "text": "",
+          "w": 1136,
+          "x": 72,
+          "y": 644
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 28,
+          "id": "reading-cover-footer",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 18
+          },
+          "text": "READING NOTES / OPEN LIBRARY",
+          "w": 940,
+          "x": 72,
+          "y": 665
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 28,
+          "id": "reading-cover-page",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 18
+          },
+          "text": "01 / 05",
+          "w": 100,
+          "x": 1108,
+          "y": 665
+        },
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 250,
+          "id": "cover-orbit",
+          "kind": "shape",
+          "style": {
+            "fill": "#141c2b",
+            "radius": 24
+          },
+          "text": "",
+          "w": 200,
+          "x": 1008,
+          "y": 136
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 248,
+          "id": "cover-query",
+          "kind": "text",
+          "style": {
+            "bold": true,
+            "color": "#e8edf5",
+            "fontSize": 58
+          },
+          "text": "urban gardens",
+          "w": 872,
+          "x": 72,
+          "y": 136
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 152,
+          "id": "cover-count",
+          "kind": "text",
+          "style": {
+            "bold": true,
+            "color": "#00d4ff",
+            "fontSize": 112
+          },
+          "text": "05",
+          "w": 148,
+          "x": 1040,
+          "y": 152
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 64,
+          "id": "cover-count-label",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 22
+          },
+          "text": "obras\nlocalizadas",
+          "w": 142,
+          "x": 1040,
+          "y": 304
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 100,
+          "id": "cover-purpose",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#e8edf5",
+            "fontSize": 32
+          },
+          "text": "Referências para orientar sua próxima leitura.",
+          "w": 790,
+          "x": 72,
+          "y": 420
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 30,
+          "id": "cover-source-label",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a391ff",
+            "fontSize": 18
+          },
+          "text": "CATÁLOGO CONSULTADO",
+          "w": 292,
+          "x": 916,
+          "y": 440
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 52,
+          "id": "cover-source",
+          "kind": "text",
+          "style": {
+            "bold": true,
+            "color": "#e8edf5",
+            "fontSize": 36
+          },
+          "text": "Open Library",
+          "w": 292,
+          "x": 916,
+          "y": 482
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 54,
+          "id": "cover-scope",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 22
+          },
+          "text": "Metadados bibliográficos. Ideias, resumos e citações exigem consulta às obras.",
+          "w": 1136,
+          "x": 72,
+          "y": 562
+        }
+      ],
+      "id": "reading-cover",
+      "notes": "Prepare uma apresentação sobre leituras relacionadas a urban gardens.\n\nOs itens abaixo são metadados de catálogo fornecidos pela Open Library, na ordem retornada pela pesquisa. Não invente o conteúdo, conclusões ou citações dos livros. O ano é o da primeira publicação registrada, não necessariamente o da edição consultada. A consulta não é uma recomendação ou avaliação das obras.\n\n1. City gardening\nAutoria: Deirdre Colby\nPrimeira publicação: 1987\nFonte: https://openlibrary.org/works/OL15825666W\n\n2. Rebel Gardening\nAutoria: Alessandro Vitale\nPrimeira publicação: 2022\nFonte: https://openlibrary.org/works/OL27298671W\n\n3. Urban Gardening for Dummies\nAutoria: Dummies Press Staff, Charlie Nardozzi, National Gardening Association\nPrimeira publicação: 2013\nFonte: https://openlibrary.org/works/OL21040588W\n\n4. Urban Gardens\nAutoria: Ann-Marie Powell\nPrimeira publicação: 2005\nFonte: https://openlibrary.org/works/OL9028256W\n\n5. Urban Gardener\nAutoria: Elspeth Thompson\nPrimeira publicação: 1999\nFonte: https://openlibrary.org/works/OL8349578W\n\nConsulta: urban gardens",
+      "transition": "fade"
+    },
+    {
+      "background": "#0a0e17",
+      "elements": [
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 4,
+          "id": "reading-sources-1-rule",
+          "kind": "shape",
+          "style": {
+            "fill": "#00d4ff",
+            "radius": 0
+          },
+          "text": "",
+          "w": 48,
+          "x": 72,
+          "y": 48
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 32,
+          "id": "reading-sources-1-eyebrow",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#00d4ff",
+            "fontSize": 18
+          },
+          "text": "REFERÊNCIAS BIBLIOGRÁFICAS",
+          "w": 1000,
+          "x": 136,
+          "y": 34
+        },
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 1,
+          "id": "reading-sources-1-footer-rule",
+          "kind": "shape",
+          "style": {
+            "fill": "#344157",
+            "radius": 0
+          },
+          "text": "",
+          "w": 1136,
+          "x": 72,
+          "y": 644
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 28,
+          "id": "reading-sources-1-footer",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 18
+          },
+          "text": "READING NOTES / OPEN LIBRARY",
+          "w": 940,
+          "x": 72,
+          "y": 665
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 28,
+          "id": "reading-sources-1-page",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 18
+          },
+          "text": "02 / 05",
+          "w": 100,
+          "x": 1108,
+          "y": 665
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 62,
+          "id": "reading-sources-1-title",
+          "kind": "text",
+          "style": {
+            "bold": true,
+            "color": "#e8edf5",
+            "fontSize": 44
+          },
+          "text": "Um repertório para explorar",
+          "w": 1136,
+          "x": 72,
+          "y": 92
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 36,
+          "id": "reading-sources-1-range",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 20
+          },
+          "text": "Registros 1–2 de 5 · ordem retornada pelo catálogo",
+          "w": 1136,
+          "x": 72,
+          "y": 159
+        },
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 402,
+          "id": "reading-sources-1-book-1-panel",
+          "kind": "shape",
+          "style": {
+            "fill": "#141c2b",
+            "radius": 18
+          },
+          "text": "",
+          "w": 552,
+          "x": 72,
+          "y": 216
+        },
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 48,
+          "id": "reading-sources-1-book-1-accent",
+          "kind": "shape",
+          "style": {
+            "fill": "#00d4ff",
+            "radius": 0
+          },
+          "text": "",
+          "w": 4,
+          "x": 72,
+          "y": 240
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 28,
+          "id": "reading-sources-1-book-1-number",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#00d4ff",
+            "fontSize": 18
+          },
+          "text": "REFERÊNCIA 01",
+          "w": 504,
+          "x": 96,
+          "y": 238
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 174,
+          "id": "reading-sources-1-book-1-title",
+          "kind": "text",
+          "style": {
+            "bold": true,
+            "color": "#e8edf5",
+            "fontSize": 34
+          },
+          "text": "City gardening",
+          "w": 504,
+          "x": 96,
+          "y": 282
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 82,
+          "id": "reading-sources-1-book-1-author",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 22
+          },
+          "text": "Deirdre Colby",
+          "w": 504,
+          "x": 96,
+          "y": 466
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 28,
+          "id": "reading-sources-1-book-1-year",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 18
+          },
+          "text": "Primeira publicação: 1987",
+          "w": 504,
+          "x": 96,
+          "y": 555
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 26,
+          "id": "reading-sources-1-book-1-source",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#00d4ff",
+            "fontSize": 18
+          },
+          "text": "openlibrary.org · OL15825666W",
+          "w": 504,
+          "x": 96,
+          "y": 586
+        },
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 402,
+          "id": "reading-sources-1-book-2-panel",
+          "kind": "shape",
+          "style": {
+            "fill": "#141c2b",
+            "radius": 18
+          },
+          "text": "",
+          "w": 552,
+          "x": 656,
+          "y": 216
+        },
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 48,
+          "id": "reading-sources-1-book-2-accent",
+          "kind": "shape",
+          "style": {
+            "fill": "#a391ff",
+            "radius": 0
+          },
+          "text": "",
+          "w": 4,
+          "x": 656,
+          "y": 240
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 28,
+          "id": "reading-sources-1-book-2-number",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a391ff",
+            "fontSize": 18
+          },
+          "text": "REFERÊNCIA 02",
+          "w": 504,
+          "x": 680,
+          "y": 238
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 174,
+          "id": "reading-sources-1-book-2-title",
+          "kind": "text",
+          "style": {
+            "bold": true,
+            "color": "#e8edf5",
+            "fontSize": 34
+          },
+          "text": "Rebel Gardening",
+          "w": 504,
+          "x": 680,
+          "y": 282
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 82,
+          "id": "reading-sources-1-book-2-author",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 22
+          },
+          "text": "Alessandro Vitale",
+          "w": 504,
+          "x": 680,
+          "y": 466
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 28,
+          "id": "reading-sources-1-book-2-year",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 18
+          },
+          "text": "Primeira publicação: 2022",
+          "w": 504,
+          "x": 680,
+          "y": 555
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 26,
+          "id": "reading-sources-1-book-2-source",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#00d4ff",
+            "fontSize": 18
+          },
+          "text": "openlibrary.org · OL27298671W",
+          "w": 504,
+          "x": 680,
+          "y": 586
+        }
+      ],
+      "id": "reading-sources-1",
+      "notes": "1. City gardening\nAutoria: Deirdre Colby\nPrimeira publicação: 1987\nFonte: https://openlibrary.org/works/OL15825666W\n\n2. Rebel Gardening\nAutoria: Alessandro Vitale\nPrimeira publicação: 2022\nFonte: https://openlibrary.org/works/OL27298671W",
+      "transition": "fade"
+    },
+    {
+      "background": "#0a0e17",
+      "elements": [
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 4,
+          "id": "reading-sources-2-rule",
+          "kind": "shape",
+          "style": {
+            "fill": "#00d4ff",
+            "radius": 0
+          },
+          "text": "",
+          "w": 48,
+          "x": 72,
+          "y": 48
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 32,
+          "id": "reading-sources-2-eyebrow",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#00d4ff",
+            "fontSize": 18
+          },
+          "text": "REFERÊNCIAS BIBLIOGRÁFICAS",
+          "w": 1000,
+          "x": 136,
+          "y": 34
+        },
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 1,
+          "id": "reading-sources-2-footer-rule",
+          "kind": "shape",
+          "style": {
+            "fill": "#344157",
+            "radius": 0
+          },
+          "text": "",
+          "w": 1136,
+          "x": 72,
+          "y": 644
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 28,
+          "id": "reading-sources-2-footer",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 18
+          },
+          "text": "READING NOTES / OPEN LIBRARY",
+          "w": 940,
+          "x": 72,
+          "y": 665
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 28,
+          "id": "reading-sources-2-page",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 18
+          },
+          "text": "03 / 05",
+          "w": 100,
+          "x": 1108,
+          "y": 665
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 62,
+          "id": "reading-sources-2-title",
+          "kind": "text",
+          "style": {
+            "bold": true,
+            "color": "#e8edf5",
+            "fontSize": 44
+          },
+          "text": "Um repertório para explorar",
+          "w": 1136,
+          "x": 72,
+          "y": 92
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 36,
+          "id": "reading-sources-2-range",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 20
+          },
+          "text": "Registros 3–4 de 5 · ordem retornada pelo catálogo",
+          "w": 1136,
+          "x": 72,
+          "y": 159
+        },
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 402,
+          "id": "reading-sources-2-book-1-panel",
+          "kind": "shape",
+          "style": {
+            "fill": "#141c2b",
+            "radius": 18
+          },
+          "text": "",
+          "w": 552,
+          "x": 72,
+          "y": 216
+        },
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 48,
+          "id": "reading-sources-2-book-1-accent",
+          "kind": "shape",
+          "style": {
+            "fill": "#00d4ff",
+            "radius": 0
+          },
+          "text": "",
+          "w": 4,
+          "x": 72,
+          "y": 240
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 28,
+          "id": "reading-sources-2-book-1-number",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#00d4ff",
+            "fontSize": 18
+          },
+          "text": "REFERÊNCIA 03",
+          "w": 504,
+          "x": 96,
+          "y": 238
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 174,
+          "id": "reading-sources-2-book-1-title",
+          "kind": "text",
+          "style": {
+            "bold": true,
+            "color": "#e8edf5",
+            "fontSize": 34
+          },
+          "text": "Urban Gardening for\nDummies",
+          "w": 504,
+          "x": 96,
+          "y": 282
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 82,
+          "id": "reading-sources-2-book-1-author",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 22
+          },
+          "text": "Dummies Press Staff, Charlie Nardozzi,\nNational Gardening Association",
+          "w": 504,
+          "x": 96,
+          "y": 466
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 28,
+          "id": "reading-sources-2-book-1-year",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 18
+          },
+          "text": "Primeira publicação: 2013",
+          "w": 504,
+          "x": 96,
+          "y": 555
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 26,
+          "id": "reading-sources-2-book-1-source",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#00d4ff",
+            "fontSize": 18
+          },
+          "text": "openlibrary.org · OL21040588W",
+          "w": 504,
+          "x": 96,
+          "y": 586
+        },
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 402,
+          "id": "reading-sources-2-book-2-panel",
+          "kind": "shape",
+          "style": {
+            "fill": "#141c2b",
+            "radius": 18
+          },
+          "text": "",
+          "w": 552,
+          "x": 656,
+          "y": 216
+        },
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 48,
+          "id": "reading-sources-2-book-2-accent",
+          "kind": "shape",
+          "style": {
+            "fill": "#a391ff",
+            "radius": 0
+          },
+          "text": "",
+          "w": 4,
+          "x": 656,
+          "y": 240
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 28,
+          "id": "reading-sources-2-book-2-number",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a391ff",
+            "fontSize": 18
+          },
+          "text": "REFERÊNCIA 04",
+          "w": 504,
+          "x": 680,
+          "y": 238
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 174,
+          "id": "reading-sources-2-book-2-title",
+          "kind": "text",
+          "style": {
+            "bold": true,
+            "color": "#e8edf5",
+            "fontSize": 34
+          },
+          "text": "Urban Gardens",
+          "w": 504,
+          "x": 680,
+          "y": 282
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 82,
+          "id": "reading-sources-2-book-2-author",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 22
+          },
+          "text": "Ann-Marie Powell",
+          "w": 504,
+          "x": 680,
+          "y": 466
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 28,
+          "id": "reading-sources-2-book-2-year",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 18
+          },
+          "text": "Primeira publicação: 2005",
+          "w": 504,
+          "x": 680,
+          "y": 555
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 26,
+          "id": "reading-sources-2-book-2-source",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#00d4ff",
+            "fontSize": 18
+          },
+          "text": "openlibrary.org · OL9028256W",
+          "w": 504,
+          "x": 680,
+          "y": 586
+        }
+      ],
+      "id": "reading-sources-2",
+      "notes": "1. Urban Gardening for Dummies\nAutoria: Dummies Press Staff, Charlie Nardozzi, National Gardening Association\nPrimeira publicação: 2013\nFonte: https://openlibrary.org/works/OL21040588W\n\n2. Urban Gardens\nAutoria: Ann-Marie Powell\nPrimeira publicação: 2005\nFonte: https://openlibrary.org/works/OL9028256W",
+      "transition": "fade"
+    },
+    {
+      "background": "#0a0e17",
+      "elements": [
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 4,
+          "id": "reading-sources-3-rule",
+          "kind": "shape",
+          "style": {
+            "fill": "#00d4ff",
+            "radius": 0
+          },
+          "text": "",
+          "w": 48,
+          "x": 72,
+          "y": 48
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 32,
+          "id": "reading-sources-3-eyebrow",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#00d4ff",
+            "fontSize": 18
+          },
+          "text": "REFERÊNCIAS BIBLIOGRÁFICAS",
+          "w": 1000,
+          "x": 136,
+          "y": 34
+        },
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 1,
+          "id": "reading-sources-3-footer-rule",
+          "kind": "shape",
+          "style": {
+            "fill": "#344157",
+            "radius": 0
+          },
+          "text": "",
+          "w": 1136,
+          "x": 72,
+          "y": 644
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 28,
+          "id": "reading-sources-3-footer",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 18
+          },
+          "text": "READING NOTES / OPEN LIBRARY",
+          "w": 940,
+          "x": 72,
+          "y": 665
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 28,
+          "id": "reading-sources-3-page",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 18
+          },
+          "text": "04 / 05",
+          "w": 100,
+          "x": 1108,
+          "y": 665
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 62,
+          "id": "reading-sources-3-title",
+          "kind": "text",
+          "style": {
+            "bold": true,
+            "color": "#e8edf5",
+            "fontSize": 44
+          },
+          "text": "Um repertório para explorar",
+          "w": 1136,
+          "x": 72,
+          "y": 92
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 36,
+          "id": "reading-sources-3-range",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 20
+          },
+          "text": "Registros 5 de 5 · ordem retornada pelo catálogo",
+          "w": 1136,
+          "x": 72,
+          "y": 159
+        },
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 402,
+          "id": "reading-sources-3-book-1-panel",
+          "kind": "shape",
+          "style": {
+            "fill": "#141c2b",
+            "radius": 18
+          },
+          "text": "",
+          "w": 1136,
+          "x": 72,
+          "y": 216
+        },
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 48,
+          "id": "reading-sources-3-book-1-accent",
+          "kind": "shape",
+          "style": {
+            "fill": "#00d4ff",
+            "radius": 0
+          },
+          "text": "",
+          "w": 4,
+          "x": 72,
+          "y": 240
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 28,
+          "id": "reading-sources-3-book-1-number",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#00d4ff",
+            "fontSize": 18
+          },
+          "text": "REFERÊNCIA 05",
+          "w": 1088,
+          "x": 96,
+          "y": 238
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 174,
+          "id": "reading-sources-3-book-1-title",
+          "kind": "text",
+          "style": {
+            "bold": true,
+            "color": "#e8edf5",
+            "fontSize": 40
+          },
+          "text": "Urban Gardener",
+          "w": 1088,
+          "x": 96,
+          "y": 282
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 82,
+          "id": "reading-sources-3-book-1-author",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 22
+          },
+          "text": "Elspeth Thompson",
+          "w": 1088,
+          "x": 96,
+          "y": 466
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 28,
+          "id": "reading-sources-3-book-1-year",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 18
+          },
+          "text": "Primeira publicação: 1999",
+          "w": 1088,
+          "x": 96,
+          "y": 555
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 26,
+          "id": "reading-sources-3-book-1-source",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#00d4ff",
+            "fontSize": 18
+          },
+          "text": "openlibrary.org · OL8349578W",
+          "w": 1088,
+          "x": 96,
+          "y": 586
+        }
+      ],
+      "id": "reading-sources-3",
+      "notes": "1. Urban Gardener\nAutoria: Elspeth Thompson\nPrimeira publicação: 1999\nFonte: https://openlibrary.org/works/OL8349578W",
+      "transition": "fade"
+    },
+    {
+      "background": "#0a0e17",
+      "elements": [
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 4,
+          "id": "reading-next-rule",
+          "kind": "shape",
+          "style": {
+            "fill": "#00d4ff",
+            "radius": 0
+          },
+          "text": "",
+          "w": 48,
+          "x": 72,
+          "y": 48
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 32,
+          "id": "reading-next-eyebrow",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#00d4ff",
+            "fontSize": 18
+          },
+          "text": "PRÓXIMAS LEITURAS",
+          "w": 1000,
+          "x": 136,
+          "y": 34
+        },
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 1,
+          "id": "reading-next-footer-rule",
+          "kind": "shape",
+          "style": {
+            "fill": "#344157",
+            "radius": 0
+          },
+          "text": "",
+          "w": 1136,
+          "x": 72,
+          "y": 644
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 28,
+          "id": "reading-next-footer",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 18
+          },
+          "text": "READING NOTES / OPEN LIBRARY",
+          "w": 940,
+          "x": 72,
+          "y": 665
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 28,
+          "id": "reading-next-page",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 18
+          },
+          "text": "05 / 05",
+          "w": 100,
+          "x": 1108,
+          "y": 665
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 76,
+          "id": "next-title",
+          "kind": "text",
+          "style": {
+            "bold": true,
+            "color": "#e8edf5",
+            "fontSize": 48
+          },
+          "text": "Da referência à leitura crítica",
+          "w": 1136,
+          "x": 72,
+          "y": 102
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 74,
+          "id": "next-intro",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 26
+          },
+          "text": "Transforme a pesquisa em anotações próprias, com contexto e fontes.",
+          "w": 1136,
+          "x": 72,
+          "y": 192
+        },
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 310,
+          "id": "next-0-panel",
+          "kind": "shape",
+          "style": {
+            "fill": "#141c2b",
+            "radius": 18
+          },
+          "text": "",
+          "w": 360,
+          "x": 72,
+          "y": 296
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 46,
+          "id": "next-0-number",
+          "kind": "text",
+          "style": {
+            "bold": true,
+            "color": "#00d4ff",
+            "fontSize": 32
+          },
+          "text": "01",
+          "w": 312,
+          "x": 96,
+          "y": 320
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 76,
+          "id": "next-0-title",
+          "kind": "text",
+          "style": {
+            "bold": true,
+            "color": "#e8edf5",
+            "fontSize": 28
+          },
+          "text": "Escolha uma obra",
+          "w": 312,
+          "x": 96,
+          "y": 382
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 112,
+          "id": "next-0-body",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 22
+          },
+          "text": "Abra o registro no catálogo\ne confirme a edição\ndisponível para leitura.",
+          "w": 312,
+          "x": 96,
+          "y": 474
+        },
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 310,
+          "id": "next-1-panel",
+          "kind": "shape",
+          "style": {
+            "fill": "#141c2b",
+            "radius": 18
+          },
+          "text": "",
+          "w": 360,
+          "x": 460,
+          "y": 296
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 46,
+          "id": "next-1-number",
+          "kind": "text",
+          "style": {
+            "bold": true,
+            "color": "#a391ff",
+            "fontSize": 32
+          },
+          "text": "02",
+          "w": 312,
+          "x": 484,
+          "y": 320
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 76,
+          "id": "next-1-title",
+          "kind": "text",
+          "style": {
+            "bold": true,
+            "color": "#e8edf5",
+            "fontSize": 28
+          },
+          "text": "Registre evidências",
+          "w": 312,
+          "x": 484,
+          "y": 382
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 112,
+          "id": "next-1-body",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 22
+          },
+          "text": "Ao ler, anote ideias,\npáginas e citações com o\ncontexto original.",
+          "w": 312,
+          "x": 484,
+          "y": 474
+        },
+        {
+          "animation": "none",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 0,
+          "h": 310,
+          "id": "next-2-panel",
+          "kind": "shape",
+          "style": {
+            "fill": "#141c2b",
+            "radius": 18
+          },
+          "text": "",
+          "w": 360,
+          "x": 848,
+          "y": 296
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 46,
+          "id": "next-2-number",
+          "kind": "text",
+          "style": {
+            "bold": true,
+            "color": "#00d4ff",
+            "fontSize": 32
+          },
+          "text": "03",
+          "w": 312,
+          "x": 872,
+          "y": 320
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 76,
+          "id": "next-2-title",
+          "kind": "text",
+          "style": {
+            "bold": true,
+            "color": "#e8edf5",
+            "fontSize": 28
+          },
+          "text": "Construa sua\nsíntese",
+          "w": 312,
+          "x": 872,
+          "y": 382
+        },
+        {
+          "animation": "rise",
+          "asset_id": null,
+          "data": null,
+          "delay_ms": 80,
+          "h": 112,
+          "id": "next-2-body",
+          "kind": "text",
+          "style": {
+            "bold": false,
+            "color": "#a4b3c9",
+            "fontSize": 22
+          },
+          "text": "Compare o que você leu e\nacrescente suas\nconclusões às notas.",
+          "w": 312,
+          "x": 872,
+          "y": 474
+        }
+      ],
+      "id": "reading-next",
+      "notes": "Roteiro de trabalho sugerido. Não descreve nem avalia o conteúdo das obras. Consulte as referências completas nas notas das páginas anteriores.",
+      "transition": "fade"
+    }
+  ],
+  "theme": {
+    "accent": "#00d4ff",
+    "background": "#0a0e17",
+    "font": "Arial",
+    "foreground": "#e8edf5",
+    "muted": "#a4b3c9"
+  },
+  "title": "Leituras: urban gardens"
+}
