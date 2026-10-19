@@ -25,7 +25,10 @@ Para conhecer a arquitetura e ver o sistema funcionando, abra a
 pasta [`docs/apresentacao-plugins/`](docs/apresentacao-plugins/) inteira e abra
 `index.html` no navegador: os 12 slides, capturas e três vídeos funcionam offline,
 sem instalação. O [guia de apresentação](docs/apresentacao-plugins/README.md)
-inclui atalhos, roteiro de fala e exemplos exportados pelo Studio.
+inclui atalhos, roteiro de fala e exemplos exportados pelo Studio em JSON, PDF,
+PPTX e HTML. As gravações mostram o Reading Notes 1.1.0 criando um caderno de
+leitura com cinco slides e, em um projeto separado, a edição e exportação de um
+exemplo editorial com duas imagens ilustrativas geradas.
 
 ### Adicionar, ativar, desativar e remover
 
@@ -116,10 +119,13 @@ de extrair elementos de um PDF já rasterizado.
 
 ### Modelo local recomendado para Mac M4 com 24 GB
 
-O perfil usado nesta demonstração é **Qwen 3.5 9B**, com contexto de **8192 tokens**
+O perfil de referência para o chat local é **Qwen 3.5 9B**, com contexto de **8192 tokens**
 e raciocínio estendido desativado no chat do Studio. O modelo padrão ocupa cerca de
 6,6 GB, deixando espaço para macOS, editor e exportação. O consumo total varia
 com contexto, imagens e concorrência. Consulte o [modelo oficial](https://ollama.com/library/qwen3.5).
+Os vídeos da apresentação documentam plugins, edição e exportação; não mostram
+uma nova inferência desse modelo. O exemplo editorial do terceiro vídeo foi
+preparado por direção de arte assistida e tem procedência registrada no material.
 
 Com o MLX-Pilot aberto e seu Ollama gerenciado em execução:
 
@@ -384,13 +390,18 @@ configurado do daemon caso tenha alterado a porta; a rota revalida ativação,
 grants e schema. No frontend de um plugin, use a ponte do SDK em vez dessa rota.
 
 O exemplo [`plugins/number-lab`](plugins/number-lab) reúne cálculo WASM e frontend.
-O [`Reading Notes`](plugins/reading-notes) consulta o catálogo público da Open
-Library, sem credenciais, e cria um projeto com briefing e fontes. Compile e
-empacote com `npm ci --prefix plugins/reading-notes`, `npm run build --prefix
+O [`Reading Notes 1.1.0`](plugins/reading-notes) consulta o catálogo público da Open
+Library, sem credenciais, e cria um **caderno de leitura editável**: capa,
+referências bibliográficas e próximos passos, com fontes no briefing e nas notas.
+Compile e empacote com `npm ci --prefix plugins/reading-notes`, `npm run build --prefix
 plugins/reading-notes` e `npm run pack --prefix plugins/reading-notes`. Depois de
 instalar, autorize o serviço **Open Library** e a criação de documentos em
-**Configurar**. A busca retorna metadados de livros; não inventa resumos de seu
-conteúdo. O projeto criado pode ser desenvolvido e exportado no
+**Configurar**. No frontend, use **Pesquisar livros** e **Criar caderno de leitura**.
+A criação consulta o catálogo novamente e compõe entre três e sete slides para
+uma a cinco obras, sem depender de um modelo. A captura de `urban gardens` mostra
+cinco slides reais. Título, autoria e ano são metadados de catálogo; não há leitura
+integral nem resumo inventado das obras. O projeto criado pode ser editado pelo
+mouse, pelo código ou pelo chat com um modelo disponível e exportado no
 [`Presentation Studio`](plugins/presentation-studio).
 
 Consulte o [guia de arquitetura, SDK, permissões e API](docs/plugin-platform.md).

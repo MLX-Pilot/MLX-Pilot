@@ -1,0 +1,167 @@
+{
+  "captured_on": "2026-10-18T21:50:28-03:00",
+  "application_revision": "b0b6718ed1fc5a81b19f987f8a794a7bbf5662a2",
+  "capture": "Aplicativo e daemon reais, ambiente isolado, sem cortes ou aceleração. Não há nova inferência de modelo nas gravações.",
+  "videos": [
+    {
+      "file": "01-instalar-configurar.mp4",
+      "title": "Instalação e configuração",
+      "duration": 16.0,
+      "width": 1440,
+      "height": 900,
+      "fps": "30/1",
+      "codec": "h264",
+      "pixel_format": "yuv420p",
+      "sha256": "6c9f2773c56a5fff94adbf8d7a4f18313f6ebfd04b291ff6ca8bf78b84a939d6",
+      "cues": [
+        {
+          "start": 0,
+          "end": 3.637,
+          "text": "Adicione o pacote Reading Notes e revise as permissões e o serviço declarado."
+        },
+        {
+          "start": 3.637,
+          "end": 7.461,
+          "text": "Conceda as permissões de rede e documentos e instale o plugin."
+        },
+        {
+          "start": 7.461,
+          "end": 9.275,
+          "text": "Abra Configurar e autorize a Open Library para consultas HTTPS."
+        },
+        {
+          "start": 9.275,
+          "end": 11.839,
+          "text": "Selecione o projeto permitido e autorize a criação de novas apresentações."
+        },
+        {
+          "start": 11.839,
+          "end": 16.0,
+          "text": "Salve a configuração. O acesso permanece sob controle do usuário."
+        }
+      ]
+    },
+    {
+      "file": "02-servico-documento.mp4",
+      "title": "Pesquisa real, documento editável",
+      "duration": 26.5,
+      "width": 1440,
+      "height": 900,
+      "fps": "30/1",
+      "codec": "h264",
+      "pixel_format": "yuv420p",
+      "sha256": "1c2278b26ad17e7adc9809165d4a3d1c1d6f2be9f04bcf5238ed544fd851d29e",
+      "cues": [
+        {
+          "start": 0,
+          "end": 2.942,
+          "text": "Pesquise livros sobre “urban gardens” na interface do Reading Notes."
+        },
+        {
+          "start": 2.942,
+          "end": 6.448,
+          "text": "O broker consulta a Open Library por HTTPS e retorna metadados reais."
+        },
+        {
+          "start": 6.448,
+          "end": 9.132,
+          "text": "Crie um caderno de leitura com capa, referências e fontes preservadas."
+        },
+        {
+          "start": 9.132,
+          "end": 12.402,
+          "text": "Abra o projeto recém-criado: o resultado já tem cinco slides editáveis."
+        },
+        {
+          "start": 12.402,
+          "end": 17.072,
+          "text": "Confira títulos, autoria, anos e referências nas páginas diagramadas."
+        },
+        {
+          "start": 17.072,
+          "end": 19.501,
+          "text": "O roteiro de leitura orienta a continuação do trabalho no mesmo documento."
+        },
+        {
+          "start": 19.501,
+          "end": 26.5,
+          "text": "Apresente com animações no HTML e continue a edição no Studio."
+        }
+      ]
+    },
+    {
+      "file": "03-studio-exportar.mp4",
+      "title": "Edição pelo mouse e exportação real",
+      "duration": 33.733333,
+      "width": 1440,
+      "height": 900,
+      "fps": "30/1",
+      "codec": "h264",
+      "pixel_format": "yuv420p",
+      "sha256": "d431faed02c0466868a3f9603271f48b3470e46250d8de782f07add11e13da86",
+      "cues": [
+        {
+          "start": 0,
+          "end": 4.114,
+          "text": "No Studio, selecione um texto com o mouse e edite pelo inspetor."
+        },
+        {
+          "start": 4.114,
+          "end": 8.123,
+          "text": "O projeto usa cinco slides editáveis e duas imagens incorporadas."
+        },
+        {
+          "start": 8.123,
+          "end": 21.186,
+          "text": "Apresentar abre o player HTML com transições e animações de entrada."
+        },
+        {
+          "start": 21.186,
+          "end": 25.721,
+          "text": "PDF estático: a exportação preserva a composição visual."
+        },
+        {
+          "start": 25.721,
+          "end": 28.166,
+          "text": "PPTX nativo: textos, imagens e formas continuam editáveis."
+        },
+        {
+          "start": 28.166,
+          "end": 30.458,
+          "text": "HTML animado: imagens e player ficam incorporados para abrir offline."
+        },
+        {
+          "start": 30.458,
+          "end": 33.733333,
+          "text": "Projeto JSON: reimporte no Studio para continuar a autoria."
+        }
+      ]
+    }
+  ],
+  "screenshots": [
+    {
+      "file": "plugins-central.png",
+      "sha256": "e5b1ce2c8f954e2b02e9ae59c9fce9b66844e4d5a530f526b8471dbb61008370"
+    },
+    {
+      "file": "plugin-configuracao.png",
+      "sha256": "580f9599d83f51a6f8078d77f9e80a8c23de437364fb8da9f9f1277424449104"
+    },
+    {
+      "file": "credenciais.png",
+      "sha256": "046ca147ef5ea190e93e04e37478f4b951730de2f11cca294dfa49d5b5f41d2c"
+    },
+    {
+      "file": "reading-notes.png",
+      "sha256": "43a51cabce6a8fe763757012a619e8f4fbb9493c6decd3033164155807b8288c"
+    },
+    {
+      "file": "studio.png",
+      "sha256": "3d2488884b10e9021360d207e1532d20d0a1fe73105d94fd9fc26cc22afe72d7"
+    },
+    {
+      "file": "caderno-leitura.png",
+      "sha256": "8b01496d00c5d939167e620cc6aacbd41cb8552042d2dd621a726646a44ac830"
+    }
+  ]
+}

@@ -119,3 +119,7 @@ dialog { border-radius:16px;background:var(--bg-surface); }
   .slide { print-color-adjust:exact;-webkit-print-color-adjust:exact; }
   .cover h1 em,.closing h2 em,.agent-slide h2 em { background:none;color:var(--cyan); }
 }
+
+.demo-example-links { display:flex;justify-content:center;gap:22px;flex-wrap:wrap;margin-top:6px;color:var(--cyan);font-size:.95cqw; }
+.demo-example-links a { text-underline-offset:3px; }
+@media screen and (max-width:700px) and (orientation:portrait) { .demo-example-links { justify-content:flex-start;gap:12px;font-size:12px;margin-top:10px; } }

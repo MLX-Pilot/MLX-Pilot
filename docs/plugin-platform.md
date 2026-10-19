@@ -220,10 +220,12 @@ Presentation Studio; não recebe HTML livre nem substitui arquivos arbitrários.
 
 ### Exemplo completo: Reading Notes
 
-[`plugins/reading-notes`](../plugins/reading-notes) inclui ferramenta WASM,
-frontend e fixtures. Declara Open Library em HTTPS/GET, sem credenciais, consulta
-até cinco livros e pode criar uma apresentação com briefing, metadados e fontes.
-Não infere o conteúdo dos livros a partir do catálogo.
+[`plugins/reading-notes`](../plugins/reading-notes), versão **1.1.0**, inclui
+ferramenta WASM, frontend e fixtures. Declara Open Library em HTTPS/GET, sem
+credenciais, consulta até cinco livros e cria um **caderno de leitura editável**
+no Studio: capa, páginas de referências e fechamento. O briefing e as notas
+preservam metadados e URLs. A composição é determinística e não depende de IA;
+não infere o conteúdo dos livros a partir do catálogo.
 
 ```sh
 npm ci --prefix packages/plugin-sdk
@@ -233,11 +235,22 @@ npm run build --prefix plugins/reading-notes
 npm run pack --prefix plugins/reading-notes
 ```
 
-Instale `plugins/reading-notes/reading_notes-1.0.0.mlxplugin.json`. Abra
-**Configurar**, autorize Open Library e, para gerar o briefing, permita criar
-apresentações. A tela pesquisa livros e lista projetos autorizados. O agente pode
+Instale `plugins/reading-notes/reading_notes-1.1.0.mlxplugin.json`. Abra
+**Configurar**, autorize Open Library e permita criar apresentações. A tela oferece
+**Pesquisar livros**, **Criar caderno de leitura** e a lista de projetos
+autorizados. Criar faz uma nova consulta, então os registros podem mudar entre a
+pesquisa e a criação. A composição produz entre três e sete slides para uma a cinco
+obras; a captura de `urban gardens` contém cinco slides. O agente pode
 usar `reading_notes__search_books`; `reading_notes__create_reading_brief` é mutante
-e requer Full. Abra o projeto resultante no Studio para compor e exportar.
+e requer Full. A ferramenta monta os slides antes de criar o projeto e os aplica
+em um lote com revisão otimista. Criação e edição são chamadas separadas: uma
+falha posterior à criação pode deixar o projeto padrão. Abra o resultado no
+Studio para editar e exportar JSON, PDF, PPTX ou HTML.
+
+Títulos e autorias são limitados a 160 pontos de código, com até três autores, e
+o ano é a primeira publicação registrada no catálogo. Campos ausentes ficam
+identificados. Isso não constitui ranking, recomendação de leitura ou resumo das
+obras. Acrescente evidências de uma leitura real antes de pedir uma síntese ao chat.
 
 As fixtures podem declarar `host_calls` com `{operation, input, result}` ou
 `{operation, input, error}`. O transportador de teste confere a sequência e as
@@ -344,6 +357,24 @@ use os testes e o roteiro de integração acima para essa versão.
 - PDF com seis páginas, renderização visual conferida; PPTX inspecionado como pacote OOXML com texto, gráfico e tabela nativos. Não foi executado Microsoft PowerPoint para verificação visual do PPTX.
 - SDK: scaffold TypeScript compilado com Extism JS PDK 1.7.0/Binaryen 133, empacotado, instalado e invocado pelo daemon; entrada `[2,4,8]` retornou contagem 3 e soma 14.
 - Qwen 2.5 0.5B executado localmente, por CPU, produziu operação válida a partir das instruções com exemplos completos; o WASM aplicou a alteração e o host persistiu a revisão. Posteriormente, o Ollama foi atualizado para 0.30.7 e a inferência pelo daemon foi validada.
+
+### Atualização da demonstração e Reading Notes 1.1.0 (18/10/2026)
+
+A [apresentação local](apresentacao-plugins/README.md) mostra a interface Orbital
+atualizada e dois documentos distintos: o caderno de cinco slides criado pelo
+Reading Notes a partir de uma pesquisa real, e um exemplo editorial de cinco
+slides preparado para demonstrar o Studio, com duas ilustrações geradas. O segundo
+projeto acompanha exports JSON/PDF/PPTX/HTML e não representa uma nova inferência
+do modelo local.
+
+O registro histórico anterior de **311 testes Rust, 85 testes JavaScript e
+4 fixtures**, com o CI 39166027511 aprovado, permanece como evidência daquela
+base. Para esta atualização foram executados **67 testes do Studio**, **3 fixtures
+e 8 testes do Reading Notes**, além de chamadas ao **WASM compilado pelo daemon
+real** para `urban gardens` e `café`; ambas criaram documentos de cinco slides.
+As contagens têm escopos diferentes e não devem ser somadas como uma medida de
+cobertura. A [procedência da demonstração](apresentacao-plugins/FONTES-E-CREDITOS.md)
+identifica as revisões, a captura e os limites dessas verificações.
 
 ## Frontend no SDK
 

@@ -23,29 +23,29 @@
     "title": "Instalação e configuração",
     "cues": [
       {
-        "start": 0.0,
-        "end": 3.8,
-        "text": "Abra o pacote Reading Notes e confira as permissões solicitadas."
+        "start": 0,
+        "end": 3.637,
+        "text": "Adicione o pacote Reading Notes e revise as permissões e o serviço declarado."
       },
       {
-        "start": 3.8,
-        "end": 7.0,
-        "text": "Conceda acesso à rede e aos documentos; instale o plugin."
+        "start": 3.637,
+        "end": 7.461,
+        "text": "Conceda as permissões de rede e documentos e instale o plugin."
       },
       {
-        "start": 7.0,
-        "end": 10.5,
-        "text": "Em Configurar, autorize o serviço HTTPS da Open Library."
+        "start": 7.461,
+        "end": 9.275,
+        "text": "Abra Configurar e autorize a Open Library para consultas HTTPS."
       },
       {
-        "start": 10.5,
-        "end": 14.5,
-        "text": "Selecione um documento e permita criar novas apresentações."
+        "start": 9.275,
+        "end": 11.839,
+        "text": "Selecione o projeto permitido e autorize a criação de novas apresentações."
       },
       {
-        "start": 14.5,
-        "end": 19.266,
-        "text": "Salve as autorizações. O plugin está disponível na central."
+        "start": 11.839,
+        "end": 16.0,
+        "text": "Salve a configuração. O acesso permanece sob controle do usuário."
       }
     ]
   },
@@ -53,24 +53,39 @@
     "title": "Pesquisa real, documento editável",
     "cues": [
       {
-        "start": 0.0,
-        "end": 3.9,
-        "text": "Abra Reading Notes e pesquise livros sobre “urban gardens”."
+        "start": 0,
+        "end": 2.942,
+        "text": "Pesquise livros sobre “urban gardens” na interface do Reading Notes."
       },
       {
-        "start": 3.9,
-        "end": 7.8,
-        "text": "O broker consulta a Open Library real e retorna cinco obras."
+        "start": 2.942,
+        "end": 6.448,
+        "text": "O broker consulta a Open Library por HTTPS e retorna metadados reais."
       },
       {
-        "start": 7.8,
-        "end": 10.6,
-        "text": "Crie um briefing no Studio com os metadados e as fontes."
+        "start": 6.448,
+        "end": 9.132,
+        "text": "Crie um caderno de leitura com capa, referências e fontes preservadas."
       },
       {
-        "start": 10.6,
-        "end": 14.833,
-        "text": "Abra o documento criado. Ele pode continuar sendo editado no Studio."
+        "start": 9.132,
+        "end": 12.402,
+        "text": "Abra o projeto recém-criado: o resultado já tem cinco slides editáveis."
+      },
+      {
+        "start": 12.402,
+        "end": 17.072,
+        "text": "Confira títulos, autoria, anos e referências nas páginas diagramadas."
+      },
+      {
+        "start": 17.072,
+        "end": 19.501,
+        "text": "O roteiro de leitura orienta a continuação do trabalho no mesmo documento."
+      },
+      {
+        "start": 19.501,
+        "end": 26.5,
+        "text": "Apresente com animações no HTML e continue a edição no Studio."
       }
     ]
   },
@@ -78,34 +93,39 @@
     "title": "Edição pelo mouse e exportação real",
     "cues": [
       {
-        "start": 0.0,
-        "end": 4.2,
-        "text": "Selecione o título com o mouse e altere o texto no inspetor."
+        "start": 0,
+        "end": 4.114,
+        "text": "No Studio, selecione um texto com o mouse e edite pelo inspetor."
       },
       {
-        "start": 4.2,
-        "end": 6.0,
-        "text": "Navegue pelos slides do documento previamente preparado."
+        "start": 4.114,
+        "end": 8.123,
+        "text": "O projeto usa cinco slides editáveis e duas imagens incorporadas."
       },
       {
-        "start": 6.0,
-        "end": 11.6,
-        "text": "Abra Apresentar para reproduzir as animações do player HTML."
+        "start": 8.123,
+        "end": 21.186,
+        "text": "Apresentar abre o player HTML com transições e animações de entrada."
       },
       {
-        "start": 11.6,
-        "end": 14.8,
-        "text": "Exporte um PDF estático com a aparência dos slides."
+        "start": 21.186,
+        "end": 25.721,
+        "text": "PDF estático: a exportação preserva a composição visual."
       },
       {
-        "start": 14.8,
-        "end": 17.3,
-        "text": "Exporte um PPTX com elementos editáveis."
+        "start": 25.721,
+        "end": 28.166,
+        "text": "PPTX nativo: textos, imagens e formas continuam editáveis."
       },
       {
-        "start": 17.3,
-        "end": 19.9,
-        "text": "Exporte também o HTML animado, que abre offline no navegador."
+        "start": 28.166,
+        "end": 30.458,
+        "text": "HTML animado: imagens e player ficam incorporados para abrir offline."
+      },
+      {
+        "start": 30.458,
+        "end": 33.733333,
+        "text": "Projeto JSON: reimporte no Studio para continuar a autoria."
       }
     ]
   }
@@ -363,7 +383,7 @@
       const synchronizeCaptions = () => {
         const cue = description.cues.find((entry) => video.currentTime >= entry.start && video.currentTime < entry.end);
         const nativeCaptionsVisible = Array.from(video.textTracks).some((track) => track.mode === 'showing');
-        caption.hidden = !captionsEnabled || !cue || nativeCaptionsVisible;
+        caption.hidden = !captionsEnabled || !cue || nativeCaptionsVisible || (video.paused && video.currentTime === 0);
         captionText.textContent = cue?.text || '';
       };
       cc.addEventListener('click', () => {
