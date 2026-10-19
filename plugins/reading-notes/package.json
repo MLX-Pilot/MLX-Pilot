@@ -1,12 +1,14 @@
 {
   "name": "reading-notes",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "mlx-plugin build",
     "pack": "mlx-plugin pack",
-    "test": "mlx-plugin test"
+    "test": "mlx-plugin test && node --test test/*.test.mjs"
   },
-  "dependencies": { "@mlx-pilot/plugin-sdk": "file:../../packages/plugin-sdk" }
+  "dependencies": {
+    "@mlx-pilot/plugin-sdk": "file:../../packages/plugin-sdk"
+  }
 }

@@ -3,6 +3,7 @@ import {
   definePlugin,
   defineTool,
 } from "@mlx-pilot/plugin-sdk";
+import { createReadingBrief, type Book } from "./brief";
 
 const host = createHostClient();
 const querySchema = {
@@ -12,12 +13,8 @@ const querySchema = {
   additionalProperties: false,
 };
 
-type Book = {
-  title: string;
-  author: string;
-  year: number | null;
-  source: string;
-};
+const catalogText = (value: string, fallback: string) =>
+  [...value].slice(0, 160).join("") || fallback;
 
 function search(query: string): Book[] {
   query = query.trim();
@@ -33,14 +30,16 @@ function search(query: string): Book[] {
   return response.body.docs.slice(0, 5).map((book) => ({
     title:
       typeof book.title === "string"
-        ? book.title.slice(0, 160)
+        ? catalogText(book.title, "Título não informado")
         : "Título não informado",
     author: Array.isArray(book.author_name)
-      ? book.author_name
-          .filter((value) => typeof value === "string")
-          .slice(0, 3)
-          .join(", ")
-          .slice(0, 160)
+      ? catalogText(
+          book.author_name
+            .filter((value) => typeof value === "string")
+            .slice(0, 3)
+            .join(", "),
+          "Autoria não informada",
+        )
       : "Autoria não informada",
     year:
       typeof book.first_publish_year === "number" &&
@@ -57,7 +56,7 @@ function search(query: string): Book[] {
 export default definePlugin({
   id: "reading_notes",
   name: "Reading Notes",
-  version: "1.0.0",
+  version: "1.1.0",
   permissions: ["network:request", "documents:read", "documents:write"],
   services: [
     {
@@ -85,31 +84,28 @@ export default definePlugin({
     defineTool({
       name: "create_reading_brief",
       description:
-        "Create a Presentation Studio project whose briefing cites books from Open Library. Requires permission to create documents; does not infer book contents.",
+        "Create an editable, visually composed reading notebook in Presentation Studio from Open Library metadata. Includes catalog references and source notes, never inferred book summaries. Requires permission to create documents.",
       parameters: querySchema,
       mutating: true,
       execute({ query }: { query: string }) {
         const books = search(query);
         if (!books.length)
           throw new Error("Nenhum livro encontrado. Tente outro tema.");
-        const title = `Leituras: ${query.trim().slice(0, 80)}`;
-        const notes = books
-          .map(
-            (book, index) =>
-              `${index + 1}. ${book.title} — ${book.author}${book.year === null ? "" : ` (${book.year})`}\nFonte: ${book.source}`,
-          )
-          .join("\n\n");
-        const brief = `Prepare uma apresentação sobre leituras relacionadas a ${query.trim()}.\n\nOs itens abaixo são metadados de catálogo fornecidos pela Open Library. Não invente o conteúdo, conclusões ou citações dos livros.\n\n${notes}`;
+        // Compose before creating a project: layout failure must not leave a blank notebook.
+        const { title, brief, theme, slides } = createReadingBrief(
+          query,
+          books,
+        );
         const document = host.documents.create({ title });
         const operations: Record<string, unknown>[] = [
           { type: "set_brief", text: brief },
+          { type: "set_theme", theme },
+          ...slides.map((slide) => ({ type: "add_slide", slide })),
+          ...document.slides.map((slide) => ({
+            type: "remove_slide",
+            slide_id: slide.id,
+          })),
         ];
-        if (typeof document.slides?.[0]?.id === "string")
-          operations.push({
-            type: "set_notes",
-            slide_id: document.slides[0].id,
-            text: notes,
-          });
         const result = host.documents.edit({
           id: document.id,
           base_revision: document.revision,

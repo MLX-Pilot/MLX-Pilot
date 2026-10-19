@@ -73,7 +73,7 @@ document.querySelector<HTMLButtonElement>("#create")!.onclick = () => {
       { query: query.value.trim() },
     );
     showBooks(response.books);
-    status.textContent = `Briefing criado: ${response.title}. Abra o projeto no Presentation Studio para compor sua apresentação.`;
+    status.textContent = `Caderno criado: ${response.title}. Abra o projeto no Presentation Studio: capa, referências e roteiro de leitura já estão diagramados. Edite pelo mouse, código ou chat; as fontes completas estão nas notas.`;
   });
 };
 document.querySelector<HTMLButtonElement>("#projects")!.onclick = () => {
