@@ -1,19 +1,22 @@
 WEBVTT
 
-00:00.000 --> 00:04.200
-Selecione o título com o mouse e altere o texto no inspetor.
+00:00.000 --> 00:04.114
+No Studio, selecione um texto com o mouse e edite pelo inspetor.
 
-00:04.200 --> 00:06.000
-Navegue pelos slides do documento previamente preparado.
+00:04.114 --> 00:08.123
+O projeto usa cinco slides editáveis e duas imagens incorporadas.
 
-00:06.000 --> 00:11.600
-Abra Apresentar para reproduzir as animações do player HTML.
+00:08.123 --> 00:21.186
+Apresentar abre o player HTML com transições e animações de entrada.
 
-00:11.600 --> 00:14.800
-Exporte um PDF estático com a aparência dos slides.
+00:21.186 --> 00:25.721
+PDF estático: a exportação preserva a composição visual.
 
-00:14.800 --> 00:17.300
-Exporte um PPTX com elementos editáveis.
+00:25.721 --> 00:28.166
+PPTX nativo: textos, imagens e formas continuam editáveis.
 
-00:17.300 --> 00:19.900
-Exporte também o HTML animado, que abre offline no navegador.
+00:28.166 --> 00:30.458
+HTML animado: imagens e player ficam incorporados para abrir offline.
+
+00:30.458 --> 00:33.733
+Projeto JSON: reimporte no Studio para continuar a autoria.

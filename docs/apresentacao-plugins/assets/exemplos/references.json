@@ -1,0 +1,60 @@
+{
+  "query": "urban gardens",
+  "retrieved_on": "2026-10-18",
+  "source": "https://openlibrary.org/search.json?q=urban%20gardens&limit=5&fields=key,title,author_name,first_publish_year",
+  "records": [
+    {
+      "author_name": [
+        "Deirdre Colby"
+      ],
+      "first_publish_year": 1987,
+      "key": "/works/OL15825666W",
+      "title": "City gardening",
+      "url": "https://openlibrary.org/works/OL15825666W"
+    },
+    {
+      "author_name": [
+        "Ann-Marie Powell"
+      ],
+      "first_publish_year": 2005,
+      "key": "/works/OL9028256W",
+      "title": "Urban Gardens",
+      "url": "https://openlibrary.org/works/OL9028256W"
+    }
+  ],
+  "bibliographic_scope": "Título, autoria e primeira publicação foram copiados literalmente do catálogo. As obras não foram lidas ou resumidas para este exemplo; não sustentam alegações de benefícios ambientais ou de saúde.",
+  "authorship": "Exemplo preparado por direção de arte assistida nesta tarefa. Não foi gerado automaticamente pelo Reading Notes nem por uma nova inferência do Qwen local.",
+  "integration": "O vídeo da pesquisa mostra o documento real do Reading Notes. O projeto Jardins urbanos é um segundo exemplo editorial, importado separadamente para demonstrar edição, animação e exportação.",
+  "images": [
+    {
+      "slide": 1,
+      "credit": "Imagem ilustrativa gerada com a ferramenta integrada image_gen em 18/10/2026. Jardim fictício, sem pessoas ou localização real identificada; não é fotografia documental. A geração é separada da execução local do Qwen e dos metadados do Open Library.",
+      "generation_mode": "image_gen integrado",
+      "prompt": "Create one photorealistic-natural editorial illustration of a fictional small urban community garden. Landscape composition, 16:9 aspect ratio. An eye-level architectural photograph with a quiet diagonal path between carefully maintained raised vegetable beds, aromatic herbs and soft perennial grasses, mature leafy trees, warm stone paving, simple timber edges. In the distance modest city buildings establish an urban context; no famous or recognizable location. No people. Natural fresh green foliage, pale morning light after rain, deep navy shadows and subtle warm sunlight, sophisticated restrained color grading and realistic organic detail. Compose the most interesting garden beds in the center and right, while the left has quieter soft-focus greenery; clear visual depth and excellent natural texture. The image should feel like an award-winning landscape architecture editorial photograph, not a futuristic render or fantasy park. No signage, labels, logos, typography, numbers, diagrams, watermarks, impossible plants, exaggerated saturation or glowing effects. This will be openly credited as an AI-generated illustrative scene, not documentary evidence of a real garden.",
+      "third_party_photo_license": null,
+      "licensing_note": "Ilustração gerada para esta tarefa; não é fotografia licenciada de terceiros e não foi atribuída uma licença Creative Commons.",
+      "source_file_name": "jardim-urbano-ilustracao-gerada.png",
+      "embedded_in": "jardins-urbanos.json",
+      "asset_id": "jardim-urbano-ilustracao"
+    },
+    {
+      "slide": 2,
+      "credit": "Imagem ilustrativa gerada com a ferramenta integrada image_gen em 18/10/2026. Jardim fictício, sem pessoas ou localização real identificada; não é fotografia documental. A geração é separada da execução local do Qwen e dos metadados do Open Library.",
+      "generation_mode": "image_gen integrado",
+      "prompt": "Generate a photorealistic-natural editorial illustration of a fictional small urban community garden seen from a raised rooftop viewpoint looking down at a gentle angle. Very wide panoramic composition, aspect ratio approximately 2.46:1, suitable for a landscape architecture presentation. Show the overall layout clearly: several modest timber raised garden beds with leafy vegetables and herbs, a quiet pale stone path, a small accessible gathering area, mature tree canopies at the edges, and a restrained glimpse of ordinary city buildings. Fresh natural green foliage and realistic plant structure, soft morning light after rain, navy shadows and subtle warm sunlight; sophisticated restrained colors. Beautiful believable detail with a calm architectural photography aesthetic, not a technical diagram, fantasy park, futuristic render or aerial map. No people, no cars, no signage, text, labels, numbers, arrows, logos, watermarks or overlaid graphics. This is an openly credited generated illustration of a fictional place, not documentary evidence of a real site.",
+      "third_party_photo_license": null,
+      "licensing_note": "Segunda ilustração gerada para esta tarefa, em vista elevada. Não documenta um terreno real nem constitui uma planta técnica.",
+      "source_file_name": "jardim-vista-elevada-ilustracao-gerada.png",
+      "embedded_in": "jardins-urbanos.json",
+      "asset_id": "jardim-vista-elevada-ilustracao"
+    }
+  ],
+  "typography": "Helvetica, compatível com o schema editável do Presentation Studio. A UI do aplicativo usa Outfit e Manrope; não se declara que essas fontes estejam embutidas no projeto.",
+  "palette": {
+    "background": "#06090f",
+    "foreground": "#e8edf5",
+    "accent": "#00d4ff",
+    "muted": "#9baac0",
+    "font": "Helvetica"
+  }
+}
