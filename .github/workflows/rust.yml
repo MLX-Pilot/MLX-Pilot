@@ -37,6 +37,22 @@ jobs:
         run: cargo build --workspace --verbose
       - name: Test
         run: cargo test --workspace --verbose
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Smoke test native workflows against the real daemon
+        run: node scripts/smoke-native-workflows.mjs target/debug/mlx-ollama-daemon
+
+  preview-servers:
+    name: Preview Servers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test isolated previews and invalid request paths
+        run: node --test scripts/tests/preview-servers.test.mjs
 
   offline-presentation:
     name: Offline Presentation
@@ -65,7 +81,8 @@ jobs:
       - run: npm test --prefix plugins/presentation-studio
       - run: npm test --prefix packages/plugin-sdk
       - run: node --check apps/desktop-ui/ui/plugin-manager.js
-      - run: node --test apps/desktop-ui/e2e/plugin-manager.test.js
+      - name: Test desktop workflows and plugin integration
+        run: node --test apps/desktop-ui/e2e/*.test.js
       - run: npm ci --prefix plugins/reading-notes
       - name: Test connected plugin example
         working-directory: plugins/reading-notes
