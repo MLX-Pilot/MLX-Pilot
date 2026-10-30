@@ -1,0 +1,58 @@
+TAP version 13
+# Subtest: disabled plugins can configure individual permissions, services and document access
+ok 1 - disabled plugins can configure individual permissions, services and document access
+  ---
+  duration_ms: 131.0532
+  type: 'test'
+  ...
+# Subtest: saving without a replacement leaves credentials untouched and explicit removal clears them
+ok 2 - saving without a replacement leaves credentials untouched and explicit removal clears them
+  ---
+  duration_ms: 54.2587
+  type: 'test'
+  ...
+# Subtest: pending writes lock configuration controls and reject duplicate submissions
+ok 3 - pending writes lock configuration controls and reject duplicate submissions
+  ---
+  duration_ms: 33.6046
+  type: 'test'
+  ...
+# Subtest: write errors cannot echo supplied secrets into status messages
+ok 4 - write errors cannot echo supplied secrets into status messages
+  ---
+  duration_ms: 25.5109
+  type: 'test'
+  ...
+# Subtest: installation review shows service destinations, methods and credential delivery before consent
+ok 5 - installation review shows service destinations, methods and credential delivery before consent
+  ---
+  duration_ms: 20.2154
+  type: 'test'
+  ...
+# Subtest: saving reloads an open authorized frontend and closes it after revocation
+ok 6 - saving reloads an open authorized frontend and closes it after revocation
+  ---
+  duration_ms: 59.4214
+  type: 'test'
+  ...
+# Subtest: the isolated bridge accepts only scoped broker operations and preserves tool calls
+ok 7 - the isolated bridge accepts only scoped broker operations and preserves tool calls
+  ---
+  duration_ms: 26.4187
+  type: 'test'
+  ...
+# Subtest: navigation disconnects the bridge and reopening issues a new document token
+ok 8 - navigation disconnects the bridge and reopening issues a new document token
+  ---
+  duration_ms: 23.5188
+  type: 'test'
+  ...
+1..8
+# tests 8
+# suites 0
+# pass 8
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1035.0804

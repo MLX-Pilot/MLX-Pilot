@@ -1,0 +1,1803 @@
+{
+  "block": "plugin_security_smoke",
+  "title": "Plugin broker and bridge security",
+  "status": "pass",
+  "blockers": [],
+  "findings": [],
+  "cases": [
+    {
+      "id": "plugin_document_isolation",
+      "status": "pass",
+      "evidence": {
+        "plugins": [
+          "release_alpha",
+          "release_beta"
+        ],
+        "documents": [
+          "a07c1e84-1290-41b1-88dc-22a64be81514",
+          "b0fbc41c-57c3-47f1-a852-819072359b61"
+        ],
+        "positive_controls": 2,
+        "denied_cross_plugin_and_document_access": true,
+        "requests": [
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "documents.get",
+            "response": {
+              "result": {
+                "assets": [],
+                "brief": "",
+                "css": "",
+                "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+                "revision": 1,
+                "schema_version": 1,
+                "script": "",
+                "slides": [
+                  {
+                    "background": null,
+                    "elements": [
+                      {
+                        "animation": "fade",
+                        "asset_id": null,
+                        "data": null,
+                        "delay_ms": 0,
+                        "h": 180,
+                        "id": "title-1",
+                        "kind": "text",
+                        "style": {
+                          "bold": true,
+                          "fontSize": 64
+                        },
+                        "text": "Alpha authorized",
+                        "w": 1050,
+                        "x": 90,
+                        "y": 220
+                      }
+                    ],
+                    "id": "slide-1",
+                    "notes": "",
+                    "transition": "fade"
+                  }
+                ],
+                "theme": {
+                  "accent": "#baf66d",
+                  "background": "#101b2d",
+                  "font": "Arial",
+                  "foreground": "#f6f3eb",
+                  "muted": "#a5b1c2"
+                },
+                "title": "Alpha authorized"
+              }
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_beta/tools/broker",
+            "status": 200,
+            "operation": "documents.get",
+            "response": {
+              "result": {
+                "assets": [],
+                "brief": "",
+                "css": "",
+                "id": "b0fbc41c-57c3-47f1-a852-819072359b61",
+                "revision": 1,
+                "schema_version": 1,
+                "script": "",
+                "slides": [
+                  {
+                    "background": null,
+                    "elements": [
+                      {
+                        "animation": "fade",
+                        "asset_id": null,
+                        "data": null,
+                        "delay_ms": 0,
+                        "h": 180,
+                        "id": "title-1",
+                        "kind": "text",
+                        "style": {
+                          "bold": true,
+                          "fontSize": 64
+                        },
+                        "text": "Beta authorized",
+                        "w": 1050,
+                        "x": 90,
+                        "y": 220
+                      }
+                    ],
+                    "id": "slide-1",
+                    "notes": "",
+                    "transition": "fade"
+                  }
+                ],
+                "theme": {
+                  "accent": "#baf66d",
+                  "background": "#101b2d",
+                  "font": "Arial",
+                  "foreground": "#f6f3eb",
+                  "muted": "#a5b1c2"
+                },
+                "title": "Beta authorized"
+              }
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "documents.get",
+            "response": {
+              "error": "Document not authorized for this plugin"
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_beta/host",
+            "status": 400,
+            "operation": "documents.get",
+            "response": {
+              "error": "Document not authorized for this plugin"
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/host",
+            "status": 200,
+            "operation": "documents.list",
+            "response": [
+              {
+                "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+                "revision": 1,
+                "slides": 1,
+                "title": "Alpha authorized"
+              }
+            ]
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_beta/tools/broker",
+            "status": 200,
+            "operation": "documents.get",
+            "response": {
+              "error": "Invalid plugin host request"
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/host",
+            "status": 400,
+            "operation": "documents.create",
+            "response": {
+              "error": "Document creation is not authorized for this plugin"
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/reader",
+            "status": 200,
+            "operation": "documents.create",
+            "response": {
+              "error": "Document writes require a mutating tool in full execution mode"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "plugin_grant_revocation",
+      "status": "pass",
+      "evidence": {
+        "revoked_grants_and_disabled_plugin_denied": true,
+        "restored_positive_control": true,
+        "requests": [
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/host",
+            "status": 200,
+            "operation": "documents.get",
+            "response": {
+              "assets": [],
+              "brief": "",
+              "css": "",
+              "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+              "revision": 1,
+              "schema_version": 1,
+              "script": "",
+              "slides": [
+                {
+                  "background": null,
+                  "elements": [
+                    {
+                      "animation": "fade",
+                      "asset_id": null,
+                      "data": null,
+                      "delay_ms": 0,
+                      "h": 180,
+                      "id": "title-1",
+                      "kind": "text",
+                      "style": {
+                        "bold": true,
+                        "fontSize": 64
+                      },
+                      "text": "Alpha authorized",
+                      "w": 1050,
+                      "x": 90,
+                      "y": 220
+                    }
+                  ],
+                  "id": "slide-1",
+                  "notes": "",
+                  "transition": "fade"
+                }
+              ],
+              "theme": {
+                "accent": "#baf66d",
+                "background": "#101b2d",
+                "font": "Arial",
+                "foreground": "#f6f3eb",
+                "muted": "#a5b1c2"
+              },
+              "title": "Alpha authorized"
+            }
+          },
+          {
+            "method": "PUT",
+            "route": "/agent/wasm-plugins/release_alpha/configuration",
+            "status": 200,
+            "response": {
+              "available_documents": [
+                {
+                  "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+                  "revision": 1,
+                  "slides": 1,
+                  "title": "Alpha authorized"
+                },
+                {
+                  "id": "b0fbc41c-57c3-47f1-a852-819072359b61",
+                  "revision": 1,
+                  "slides": 1,
+                  "title": "Beta authorized"
+                }
+              ],
+              "documents": {
+                "allow_create": false,
+                "ids": [
+                  "a07c1e84-1290-41b1-88dc-22a64be81514"
+                ]
+              },
+              "grants": [
+                "compute"
+              ],
+              "services": {
+                "api": {
+                  "allow_private_network": false,
+                  "base_url": "http://127.0.0.1:56208",
+                  "credential_set": false,
+                  "enabled": false
+                }
+              }
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 400,
+            "operation": "documents.get",
+            "response": {
+              "error": "Plugin permissions not granted"
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/host",
+            "status": 400,
+            "operation": "documents.list",
+            "response": {
+              "error": "Plugin permissions not granted"
+            }
+          },
+          {
+            "method": "PUT",
+            "route": "/agent/wasm-plugins/release_alpha/configuration",
+            "status": 200,
+            "response": {
+              "available_documents": [
+                {
+                  "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+                  "revision": 1,
+                  "slides": 1,
+                  "title": "Alpha authorized"
+                },
+                {
+                  "id": "b0fbc41c-57c3-47f1-a852-819072359b61",
+                  "revision": 1,
+                  "slides": 1,
+                  "title": "Beta authorized"
+                }
+              ],
+              "documents": {
+                "allow_create": false,
+                "ids": [
+                  "a07c1e84-1290-41b1-88dc-22a64be81514"
+                ]
+              },
+              "grants": [
+                "compute",
+                "credentials:use",
+                "documents:read",
+                "documents:write",
+                "network:request"
+              ],
+              "services": {
+                "api": {
+                  "allow_private_network": false,
+                  "base_url": "http://127.0.0.1:56208",
+                  "credential_set": false,
+                  "enabled": false
+                }
+              }
+            }
+          },
+          {
+            "method": "PATCH",
+            "route": "/agent/wasm-plugins/release_alpha",
+            "status": 200,
+            "response": [
+              {
+                "bundled": true,
+                "enabled": true,
+                "grants": [
+                  "documents:read",
+                  "documents:write"
+                ],
+                "has_frontend": true,
+                "manifest": {
+                  "api_version": 1,
+                  "id": "presentation",
+                  "name": "Presentation Studio",
+                  "permissions": [
+                    "documents:read",
+                    "documents:write"
+                  ],
+                  "tools": [
+                    {
+                      "description": "Apply validated, atomic presentation operations to a versioned document.",
+                      "export": "edit",
+                      "mutating": true,
+                      "name": "edit",
+                      "parameters": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "document": {
+                            "type": "object"
+                          },
+                          "operations": {
+                            "items": {
+                              "type": "object"
+                            },
+                            "maxItems": 100,
+                            "minItems": 1,
+                            "type": "array"
+                          }
+                        },
+                        "required": [
+                          "document",
+                          "operations"
+                        ],
+                        "type": "object"
+                      }
+                    }
+                  ],
+                  "version": "1.0.0"
+                },
+                "sha256": "5850a6df3109b653f8a73dd372e126e04fe9f51143b32541864028c754ec9194"
+              },
+              {
+                "bundled": false,
+                "enabled": false,
+                "grants": [
+                  "compute",
+                  "credentials:use",
+                  "documents:read",
+                  "documents:write",
+                  "network:request"
+                ],
+                "has_frontend": false,
+                "manifest": {
+                  "api_version": 1,
+                  "id": "release_alpha",
+                  "name": "Release gate release_alpha",
+                  "permissions": [
+                    "compute",
+                    "documents:read",
+                    "documents:write",
+                    "network:request",
+                    "credentials:use"
+                  ],
+                  "services": [
+                    {
+                      "base_url": "http://127.0.0.1:1",
+                      "credential": {
+                        "header": "Authorization",
+                        "id": "token",
+                        "prefix": "Bearer "
+                      },
+                      "id": "api",
+                      "methods": [
+                        "GET",
+                        "POST"
+                      ],
+                      "name": "Isolated local fixture"
+                    }
+                  ],
+                  "tools": [
+                    {
+                      "description": "Release-gate adversarial fixture",
+                      "export": "broker",
+                      "mutating": true,
+                      "name": "broker",
+                      "parameters": {
+                        "type": "object"
+                      }
+                    },
+                    {
+                      "description": "Release-gate adversarial fixture",
+                      "export": "broker",
+                      "mutating": false,
+                      "name": "reader",
+                      "parameters": {
+                        "type": "object"
+                      }
+                    },
+                    {
+                      "description": "Release-gate adversarial fixture",
+                      "export": "quota",
+                      "mutating": false,
+                      "name": "quota",
+                      "parameters": {
+                        "type": "object"
+                      }
+                    },
+                    {
+                      "description": "Release-gate adversarial fixture",
+                      "export": "spin",
+                      "mutating": false,
+                      "name": "spin",
+                      "parameters": {
+                        "type": "object"
+                      }
+                    }
+                  ],
+                  "version": "1.0.0"
+                },
+                "sha256": "4a71f8c31b9d2cdfb420c70407b6e5c25ecc069cc379cf5758c642f75a6bb3a8"
+              },
+              {
+                "bundled": false,
+                "enabled": true,
+                "grants": [
+                  "compute",
+                  "credentials:use",
+                  "documents:read",
+                  "documents:write",
+                  "network:request"
+                ],
+                "has_frontend": false,
+                "manifest": {
+                  "api_version": 1,
+                  "id": "release_beta",
+                  "name": "Release gate release_beta",
+                  "permissions": [
+                    "compute",
+                    "documents:read",
+                    "documents:write",
+                    "network:request",
+                    "credentials:use"
+                  ],
+                  "services": [
+                    {
+                      "base_url": "http://127.0.0.1:1",
+                      "credential": {
+                        "header": "Authorization",
+                        "id": "token",
+                        "prefix": "Bearer "
+                      },
+                      "id": "api",
+                      "methods": [
+                        "GET",
+                        "POST"
+                      ],
+                      "name": "Isolated local fixture"
+                    }
+                  ],
+                  "tools": [
+                    {
+                      "description": "Release-gate adversarial fixture",
+                      "export": "broker",
+                      "mutating": true,
+                      "name": "broker",
+                      "parameters": {
+                        "type": "object"
+                      }
+                    },
+                    {
+                      "description": "Release-gate adversarial fixture",
+                      "export": "broker",
+                      "mutating": false,
+                      "name": "reader",
+                      "parameters": {
+                        "type": "object"
+                      }
+                    },
+                    {
+                      "description": "Release-gate adversarial fixture",
+                      "export": "quota",
+                      "mutating": false,
+                      "name": "quota",
+                      "parameters": {
+                        "type": "object"
+                      }
+                    },
+                    {
+                      "description": "Release-gate adversarial fixture",
+                      "export": "spin",
+                      "mutating": false,
+                      "name": "spin",
+                      "parameters": {
+                        "type": "object"
+                      }
+                    }
+                  ],
+                  "version": "1.0.0"
+                },
+                "sha256": "4a71f8c31b9d2cdfb420c70407b6e5c25ecc069cc379cf5758c642f75a6bb3a8"
+              }
+            ]
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 400,
+            "operation": "documents.list",
+            "response": {
+              "error": "Plugin disabled"
+            }
+          },
+          {
+            "method": "PATCH",
+            "route": "/agent/wasm-plugins/release_alpha",
+            "status": 200,
+            "response": [
+              {
+                "bundled": true,
+                "enabled": true,
+                "grants": [
+                  "documents:read",
+                  "documents:write"
+                ],
+                "has_frontend": true,
+                "manifest": {
+                  "api_version": 1,
+                  "id": "presentation",
+                  "name": "Presentation Studio",
+                  "permissions": [
+                    "documents:read",
+                    "documents:write"
+                  ],
+                  "tools": [
+                    {
+                      "description": "Apply validated, atomic presentation operations to a versioned document.",
+                      "export": "edit",
+                      "mutating": true,
+                      "name": "edit",
+                      "parameters": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "document": {
+                            "type": "object"
+                          },
+                          "operations": {
+                            "items": {
+                              "type": "object"
+                            },
+                            "maxItems": 100,
+                            "minItems": 1,
+                            "type": "array"
+                          }
+                        },
+                        "required": [
+                          "document",
+                          "operations"
+                        ],
+                        "type": "object"
+                      }
+                    }
+                  ],
+                  "version": "1.0.0"
+                },
+                "sha256": "5850a6df3109b653f8a73dd372e126e04fe9f51143b32541864028c754ec9194"
+              },
+              {
+                "bundled": false,
+                "enabled": true,
+                "grants": [
+                  "compute",
+                  "credentials:use",
+                  "documents:read",
+                  "documents:write",
+                  "network:request"
+                ],
+                "has_frontend": false,
+                "manifest": {
+                  "api_version": 1,
+                  "id": "release_alpha",
+                  "name": "Release gate release_alpha",
+                  "permissions": [
+                    "compute",
+                    "documents:read",
+                    "documents:write",
+                    "network:request",
+                    "credentials:use"
+                  ],
+                  "services": [
+                    {
+                      "base_url": "http://127.0.0.1:1",
+                      "credential": {
+                        "header": "Authorization",
+                        "id": "token",
+                        "prefix": "Bearer "
+                      },
+                      "id": "api",
+                      "methods": [
+                        "GET",
+                        "POST"
+                      ],
+                      "name": "Isolated local fixture"
+                    }
+                  ],
+                  "tools": [
+                    {
+                      "description": "Release-gate adversarial fixture",
+                      "export": "broker",
+                      "mutating": true,
+                      "name": "broker",
+                      "parameters": {
+                        "type": "object"
+                      }
+                    },
+                    {
+                      "description": "Release-gate adversarial fixture",
+                      "export": "broker",
+                      "mutating": false,
+                      "name": "reader",
+                      "parameters": {
+                        "type": "object"
+                      }
+                    },
+                    {
+                      "description": "Release-gate adversarial fixture",
+                      "export": "quota",
+                      "mutating": false,
+                      "name": "quota",
+                      "parameters": {
+                        "type": "object"
+                      }
+                    },
+                    {
+                      "description": "Release-gate adversarial fixture",
+                      "export": "spin",
+                      "mutating": false,
+                      "name": "spin",
+                      "parameters": {
+                        "type": "object"
+                      }
+                    }
+                  ],
+                  "version": "1.0.0"
+                },
+                "sha256": "4a71f8c31b9d2cdfb420c70407b6e5c25ecc069cc379cf5758c642f75a6bb3a8"
+              },
+              {
+                "bundled": false,
+                "enabled": true,
+                "grants": [
+                  "compute",
+                  "credentials:use",
+                  "documents:read",
+                  "documents:write",
+                  "network:request"
+                ],
+                "has_frontend": false,
+                "manifest": {
+                  "api_version": 1,
+                  "id": "release_beta",
+                  "name": "Release gate release_beta",
+                  "permissions": [
+                    "compute",
+                    "documents:read",
+                    "documents:write",
+                    "network:request",
+                    "credentials:use"
+                  ],
+                  "services": [
+                    {
+                      "base_url": "http://127.0.0.1:1",
+                      "credential": {
+                        "header": "Authorization",
+                        "id": "token",
+                        "prefix": "Bearer "
+                      },
+                      "id": "api",
+                      "methods": [
+                        "GET",
+                        "POST"
+                      ],
+                      "name": "Isolated local fixture"
+                    }
+                  ],
+                  "tools": [
+                    {
+                      "description": "Release-gate adversarial fixture",
+                      "export": "broker",
+                      "mutating": true,
+                      "name": "broker",
+                      "parameters": {
+                        "type": "object"
+                      }
+                    },
+                    {
+                      "description": "Release-gate adversarial fixture",
+                      "export": "broker",
+                      "mutating": false,
+                      "name": "reader",
+                      "parameters": {
+                        "type": "object"
+                      }
+                    },
+                    {
+                      "description": "Release-gate adversarial fixture",
+                      "export": "quota",
+                      "mutating": false,
+                      "name": "quota",
+                      "parameters": {
+                        "type": "object"
+                      }
+                    },
+                    {
+                      "description": "Release-gate adversarial fixture",
+                      "export": "spin",
+                      "mutating": false,
+                      "name": "spin",
+                      "parameters": {
+                        "type": "object"
+                      }
+                    }
+                  ],
+                  "version": "1.0.0"
+                },
+                "sha256": "4a71f8c31b9d2cdfb420c70407b6e5c25ecc069cc379cf5758c642f75a6bb3a8"
+              }
+            ]
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "documents.get",
+            "response": {
+              "result": {
+                "assets": [],
+                "brief": "",
+                "css": "",
+                "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+                "revision": 1,
+                "schema_version": 1,
+                "script": "",
+                "slides": [
+                  {
+                    "background": null,
+                    "elements": [
+                      {
+                        "animation": "fade",
+                        "asset_id": null,
+                        "data": null,
+                        "delay_ms": 0,
+                        "h": 180,
+                        "id": "title-1",
+                        "kind": "text",
+                        "style": {
+                          "bold": true,
+                          "fontSize": 64
+                        },
+                        "text": "Alpha authorized",
+                        "w": 1050,
+                        "x": 90,
+                        "y": 220
+                      }
+                    ],
+                    "id": "slide-1",
+                    "notes": "",
+                    "transition": "fade"
+                  }
+                ],
+                "theme": {
+                  "accent": "#baf66d",
+                  "background": "#101b2d",
+                  "font": "Arial",
+                  "foreground": "#f6f3eb",
+                  "muted": "#a5b1c2"
+                },
+                "title": "Alpha authorized"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "plugin_revision_conflict",
+      "status": "pass",
+      "evidence": {
+        "original_revision": 1,
+        "final_revision": 2,
+        "rejected_status": 409,
+        "rejected_write_preserved_document": true,
+        "requests": [
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/host",
+            "status": 200,
+            "operation": "documents.get",
+            "response": {
+              "assets": [],
+              "brief": "",
+              "css": "",
+              "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+              "revision": 1,
+              "schema_version": 1,
+              "script": "",
+              "slides": [
+                {
+                  "background": null,
+                  "elements": [
+                    {
+                      "animation": "fade",
+                      "asset_id": null,
+                      "data": null,
+                      "delay_ms": 0,
+                      "h": 180,
+                      "id": "title-1",
+                      "kind": "text",
+                      "style": {
+                        "bold": true,
+                        "fontSize": 64
+                      },
+                      "text": "Alpha authorized",
+                      "w": 1050,
+                      "x": 90,
+                      "y": 220
+                    }
+                  ],
+                  "id": "slide-1",
+                  "notes": "",
+                  "transition": "fade"
+                }
+              ],
+              "theme": {
+                "accent": "#baf66d",
+                "background": "#101b2d",
+                "font": "Arial",
+                "foreground": "#f6f3eb",
+                "muted": "#a5b1c2"
+              },
+              "title": "Alpha authorized"
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "documents.edit",
+            "response": {
+              "result": {
+                "diagnostics": [],
+                "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+                "revision": 2,
+                "slides": 1
+              }
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/host",
+            "status": 409,
+            "operation": "documents.edit",
+            "response": {
+              "error": "REVISION_CONFLICT: reload the project before editing"
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/host",
+            "status": 200,
+            "operation": "documents.get",
+            "response": {
+              "assets": [],
+              "brief": "",
+              "css": "",
+              "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+              "revision": 2,
+              "schema_version": 1,
+              "script": "",
+              "slides": [
+                {
+                  "background": null,
+                  "elements": [
+                    {
+                      "animation": "fade",
+                      "asset_id": null,
+                      "data": null,
+                      "delay_ms": 0,
+                      "h": 180,
+                      "id": "title-1",
+                      "kind": "text",
+                      "style": {
+                        "bold": true,
+                        "fontSize": 64
+                      },
+                      "text": "Authorized revision",
+                      "w": 1050,
+                      "x": 90,
+                      "y": 220
+                    }
+                  ],
+                  "id": "slide-1",
+                  "notes": "",
+                  "transition": "fade"
+                }
+              ],
+              "theme": {
+                "accent": "#baf66d",
+                "background": "#101b2d",
+                "font": "Arial",
+                "foreground": "#f6f3eb",
+                "muted": "#a5b1c2"
+              },
+              "title": "Alpha authorized"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "plugin_network_authorization",
+      "status": "pass",
+      "evidence": {
+        "denied_requests_reached_service": 0,
+        "authorized_requests": 1,
+        "credential_injected_by_host": true,
+        "metadata_target_blocked": true,
+        "requests": [
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "http.request",
+            "response": {
+              "error": "Enable this service in the plugin configuration first"
+            }
+          },
+          {
+            "method": "PUT",
+            "route": "/agent/wasm-plugins/release_alpha/configuration",
+            "status": 400,
+            "response": {
+              "error": "HTTPS required; HTTP is allowed only with explicit local-network access"
+            }
+          },
+          {
+            "method": "PUT",
+            "route": "/agent/wasm-plugins/release_alpha/configuration",
+            "status": 200,
+            "response": {
+              "available_documents": [
+                {
+                  "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+                  "revision": 2,
+                  "slides": 1,
+                  "title": "Alpha authorized"
+                },
+                {
+                  "id": "b0fbc41c-57c3-47f1-a852-819072359b61",
+                  "revision": 1,
+                  "slides": 1,
+                  "title": "Beta authorized"
+                }
+              ],
+              "documents": {
+                "allow_create": false,
+                "ids": [
+                  "a07c1e84-1290-41b1-88dc-22a64be81514"
+                ]
+              },
+              "grants": [
+                "compute",
+                "credentials:use",
+                "documents:read",
+                "documents:write",
+                "network:request"
+              ],
+              "services": {
+                "api": {
+                  "allow_private_network": true,
+                  "base_url": "https://169.254.169.254",
+                  "credential_set": false,
+                  "enabled": true
+                }
+              }
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "http.request",
+            "response": {
+              "error": "Service resolves to a prohibited address; local addresses require explicit permission"
+            }
+          },
+          {
+            "method": "PUT",
+            "route": "/agent/wasm-plugins/release_alpha/configuration",
+            "status": 200,
+            "response": {
+              "available_documents": [
+                {
+                  "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+                  "revision": 2,
+                  "slides": 1,
+                  "title": "Alpha authorized"
+                },
+                {
+                  "id": "b0fbc41c-57c3-47f1-a852-819072359b61",
+                  "revision": 1,
+                  "slides": 1,
+                  "title": "Beta authorized"
+                }
+              ],
+              "documents": {
+                "allow_create": false,
+                "ids": [
+                  "a07c1e84-1290-41b1-88dc-22a64be81514"
+                ]
+              },
+              "grants": [
+                "compute",
+                "credentials:use",
+                "documents:read",
+                "documents:write",
+                "network:request"
+              ],
+              "services": {
+                "api": {
+                  "allow_private_network": false,
+                  "base_url": "http://127.0.0.1:56208",
+                  "credential_set": false,
+                  "enabled": false
+                }
+              }
+            }
+          },
+          {
+            "method": "PUT",
+            "route": "/agent/wasm-plugins/release_alpha/configuration",
+            "status": 200,
+            "response": {
+              "available_documents": [
+                {
+                  "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+                  "revision": 2,
+                  "slides": 1,
+                  "title": "Alpha authorized"
+                },
+                {
+                  "id": "b0fbc41c-57c3-47f1-a852-819072359b61",
+                  "revision": 1,
+                  "slides": 1,
+                  "title": "Beta authorized"
+                }
+              ],
+              "documents": {
+                "allow_create": false,
+                "ids": [
+                  "a07c1e84-1290-41b1-88dc-22a64be81514"
+                ]
+              },
+              "grants": [
+                "compute",
+                "credentials:use",
+                "documents:read",
+                "documents:write",
+                "network:request"
+              ],
+              "services": {
+                "api": {
+                  "allow_private_network": true,
+                  "base_url": "http://127.0.0.1:56208",
+                  "credential_set": true,
+                  "enabled": true
+                }
+              }
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "http.request",
+            "response": {
+              "error": "Use a relative service path starting with a single slash"
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "http.request",
+            "response": {
+              "error": "Use a relative service path starting with a single slash"
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "http.request",
+            "response": {
+              "error": "HTTP method not declared by plugin"
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "http.request",
+            "response": {
+              "error": "Unknown plugin service"
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "http.request",
+            "response": {
+              "error": "Reserved request header"
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/reader",
+            "status": 200,
+            "operation": "http.request",
+            "response": {
+              "error": "HTTP writes require a mutating tool in full execution mode"
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "http.request",
+            "response": {
+              "result": {
+                "body": {
+                  "echo": "Bearer [REDACTED]",
+                  "nested": {
+                    "[REDACTED]": [
+                      "[REDACTED]"
+                    ]
+                  },
+                  "value": 42
+                },
+                "encoding": "json",
+                "headers": {
+                  "content-type": "application/json; echoed=[REDACTED]"
+                },
+                "status": 200
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "plugin_credentials_redaction",
+      "status": "pass",
+      "evidence": {
+        "write_only_configuration": true,
+        "separate_plugin_credential": true,
+        "success_and_error_redacted": true,
+        "protected_binary_response_denied": true,
+        "scanned_file_count": 15,
+        "leaked_files": [],
+        "requests": [
+          {
+            "method": "PUT",
+            "route": "/agent/wasm-plugins/release_alpha/configuration",
+            "status": 200,
+            "response": {
+              "available_documents": [
+                {
+                  "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+                  "revision": 2,
+                  "slides": 1,
+                  "title": "Alpha authorized"
+                },
+                {
+                  "id": "b0fbc41c-57c3-47f1-a852-819072359b61",
+                  "revision": 1,
+                  "slides": 1,
+                  "title": "Beta authorized"
+                }
+              ],
+              "documents": {
+                "allow_create": false,
+                "ids": [
+                  "a07c1e84-1290-41b1-88dc-22a64be81514"
+                ]
+              },
+              "grants": [
+                "compute",
+                "credentials:use",
+                "documents:read",
+                "documents:write",
+                "network:request"
+              ],
+              "services": {
+                "api": {
+                  "allow_private_network": true,
+                  "base_url": "http://127.0.0.1:56208",
+                  "credential_set": true,
+                  "enabled": true
+                }
+              }
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "credentials.status",
+            "response": {
+              "result": {
+                "configured": true
+              }
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_beta/tools/broker",
+            "status": 200,
+            "operation": "credentials.status",
+            "response": {
+              "result": {
+                "configured": false
+              }
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "credentials.read",
+            "response": {
+              "error": "Unsupported plugin host operation"
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "http.request",
+            "response": {
+              "result": {
+                "body": {
+                  "echo": "Bearer [REDACTED]",
+                  "nested": {
+                    "[REDACTED]": [
+                      "[REDACTED]"
+                    ]
+                  },
+                  "value": 42
+                },
+                "encoding": "json",
+                "headers": {
+                  "content-type": "application/json; echoed=[REDACTED]"
+                },
+                "status": 200
+              }
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "http.request",
+            "response": {
+              "result": {
+                "body": {
+                  "error": "echo [REDACTED]"
+                },
+                "encoding": "json",
+                "headers": {
+                  "content-type": "application/json"
+                },
+                "status": 500
+              }
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "http.request",
+            "response": {
+              "error": "Service response contains protected credentials"
+            }
+          },
+          {
+            "method": "PUT",
+            "route": "/agent/wasm-plugins/release_alpha/configuration",
+            "status": 400,
+            "response": {
+              "error": "Invalid credential"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "plugin_workspace_isolation",
+      "status": "pass",
+      "evidence": {
+        "same_plugin_store": true,
+        "distinct_workspace": true,
+        "grants_and_credentials_not_inherited": true,
+        "original_workspace_restored": true,
+        "requests": [
+          {
+            "method": "GET",
+            "route": "/agent/wasm-plugins/release_alpha/configuration",
+            "status": 200,
+            "response": {
+              "available_documents": [],
+              "documents": {
+                "allow_create": false,
+                "ids": []
+              },
+              "grants": [
+                "compute",
+                "credentials:use",
+                "documents:read",
+                "documents:write",
+                "network:request"
+              ],
+              "services": {
+                "api": {
+                  "allow_private_network": false,
+                  "base_url": "http://127.0.0.1:1",
+                  "credential_set": false,
+                  "enabled": false
+                }
+              }
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "documents.list",
+            "response": {
+              "result": []
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "documents.get",
+            "response": {
+              "error": "Document not authorized for this plugin"
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/host",
+            "status": 400,
+            "operation": "documents.create",
+            "response": {
+              "error": "Document creation is not authorized for this plugin"
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "documents.get",
+            "response": {
+              "result": {
+                "assets": [],
+                "brief": "",
+                "css": "",
+                "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+                "revision": 2,
+                "schema_version": 1,
+                "script": "",
+                "slides": [
+                  {
+                    "background": null,
+                    "elements": [
+                      {
+                        "animation": "fade",
+                        "asset_id": null,
+                        "data": null,
+                        "delay_ms": 0,
+                        "h": 180,
+                        "id": "title-1",
+                        "kind": "text",
+                        "style": {
+                          "bold": true,
+                          "fontSize": 64
+                        },
+                        "text": "Authorized revision",
+                        "w": 1050,
+                        "x": 90,
+                        "y": 220
+                      }
+                    ],
+                    "id": "slide-1",
+                    "notes": "",
+                    "transition": "fade"
+                  }
+                ],
+                "theme": {
+                  "accent": "#baf66d",
+                  "background": "#101b2d",
+                  "font": "Arial",
+                  "foreground": "#f6f3eb",
+                  "muted": "#a5b1c2"
+                },
+                "title": "Alpha authorized"
+              }
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/host",
+            "status": 200,
+            "operation": "credentials.status",
+            "response": {
+              "configured": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "plugin_request_quota",
+      "status": "pass",
+      "evidence": {
+        "wasm_attempts": 4,
+        "service_requests": 3,
+        "fourth_request_denied": true,
+        "requests": [
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/quota",
+            "status": 200,
+            "operation": "http.request",
+            "response": {
+              "error": "At most three service requests per invocation"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "plugin_response_limit",
+      "status": "pass",
+      "evidence": {
+        "served_body_bytes": 1048577,
+        "runtime_response_limit_bytes": 1048576,
+        "rejected": true,
+        "requests": [
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "http.request",
+            "response": {
+              "error": "Service response exceeds 1 MiB"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "plugin_wasm_limit",
+      "status": "pass",
+      "evidence": {
+        "elapsed_ms": 64,
+        "infinite_guest_rejected": true,
+        "daemon_and_next_guest_healthy": true,
+        "requests": [
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/spin",
+            "status": 400,
+            "response": {
+              "error": "plugin ran out of fuel"
+            }
+          },
+          {
+            "method": "GET",
+            "route": "/health",
+            "status": 200,
+            "response": {
+              "status": "starting",
+              "provider": "ollama",
+              "provider_ready": false,
+              "degraded": false
+            }
+          },
+          {
+            "method": "POST",
+            "route": "/agent/wasm-plugins/release_alpha/tools/broker",
+            "status": 200,
+            "operation": "documents.get",
+            "response": {
+              "result": {
+                "assets": [],
+                "brief": "",
+                "css": "",
+                "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+                "revision": 2,
+                "schema_version": 1,
+                "script": "",
+                "slides": [
+                  {
+                    "background": null,
+                    "elements": [
+                      {
+                        "animation": "fade",
+                        "asset_id": null,
+                        "data": null,
+                        "delay_ms": 0,
+                        "h": 180,
+                        "id": "title-1",
+                        "kind": "text",
+                        "style": {
+                          "bold": true,
+                          "fontSize": 64
+                        },
+                        "text": "Authorized revision",
+                        "w": 1050,
+                        "x": 90,
+                        "y": 220
+                      }
+                    ],
+                    "id": "slide-1",
+                    "notes": "",
+                    "transition": "fade"
+                  }
+                ],
+                "theme": {
+                  "accent": "#baf66d",
+                  "background": "#101b2d",
+                  "font": "Arial",
+                  "foreground": "#f6f3eb",
+                  "muted": "#a5b1c2"
+                },
+                "title": "Alpha authorized"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "bridge_ui_contract",
+      "status": "pass",
+      "evidence": {
+        "execution": "DOM/jsdom UI and Node SDK contract suites; not real-browser E2E",
+        "suite": "apps/desktop-ui/e2e/plugin-manager.test.js",
+        "command": [
+          "node",
+          "--test",
+          "--test-reporter=tap",
+          "apps/desktop-ui/e2e/plugin-manager.test.js"
+        ],
+        "startedAt": "2026-10-30T21:21:26.909Z",
+        "finishedAt": "2026-10-30T21:21:28.527Z",
+        "exitCode": 0,
+        "signal": null,
+        "requiredTests": [
+          "the isolated bridge accepts only scoped broker operations and preserves tool calls",
+          "navigation disconnects the bridge and reopening issues a new document token",
+          "saving reloads an open authorized frontend and closes it after revocation"
+        ],
+        "counts": {
+          "tests": 8,
+          "pass": 8,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        "executedTests": [
+          "disabled plugins can configure individual permissions, services and document access",
+          "saving without a replacement leaves credentials untouched and explicit removal clears them",
+          "pending writes lock configuration controls and reject duplicate submissions",
+          "write errors cannot echo supplied secrets into status messages",
+          "installation review shows service destinations, methods and credential delivery before consent",
+          "saving reloads an open authorized frontend and closes it after revocation",
+          "the isolated bridge accepts only scoped broker operations and preserves tool calls",
+          "navigation disconnects the bridge and reopening issues a new document token"
+        ],
+        "problems": [],
+        "stdoutPath": "docs/release-gate/evidence/2026-10-30/bridge_ui_contract.tap",
+        "stderrPath": "docs/release-gate/evidence/2026-10-30/bridge_ui_contract.stderr.log"
+      }
+    },
+    {
+      "id": "sdk_bridge_contract",
+      "status": "pass",
+      "evidence": {
+        "execution": "DOM/jsdom UI and Node SDK contract suites; not real-browser E2E",
+        "suite": "packages/plugin-sdk/test/sdk.test.mjs",
+        "command": [
+          "node",
+          "--test",
+          "--test-reporter=tap",
+          "packages/plugin-sdk/test/sdk.test.mjs"
+        ],
+        "startedAt": "2026-10-30T21:21:28.528Z",
+        "finishedAt": "2026-10-30T21:21:28.848Z",
+        "exitCode": 0,
+        "signal": null,
+        "requiredTests": [
+          "frontend bridge ignores impersonated replies and correlates host responses",
+          "independent frontend clients cannot consume each other's replies",
+          "frontend capability calls use operation envelopes and reject calls after disposal",
+          "closing a frontend rejects pending calls and releases its listener"
+        ],
+        "counts": {
+          "tests": 10,
+          "pass": 10,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        "executedTests": [
+          "definitions preserve schemas and expose pure functions",
+          "WASM host client forwards scoped operations synchronously and frees all memory",
+          "host errors are surfaced without leaking request or response allocations",
+          "standalone pages report the missing frontend bridge clearly",
+          "frontend capability calls use operation envelopes and reject calls after disposal",
+          "independent frontend clients cannot consume each other's replies",
+          "CLI fixtures exercise imported createHostClient through deterministic mock responses",
+          "invalid contracts are rejected",
+          "frontend bridge ignores impersonated replies and correlates host responses",
+          "closing a frontend rejects pending calls and releases its listener"
+        ],
+        "problems": [],
+        "stdoutPath": "docs/release-gate/evidence/2026-10-30/sdk_bridge_contract.tap",
+        "stderrPath": "docs/release-gate/evidence/2026-10-30/sdk_bridge_contract.stderr.log"
+      }
+    }
+  ],
+  "observations": {
+    "execution": "Real daemon HTTP and Extism WASM; deterministic loopback service",
+    "output_dir": "docs/release-gate/evidence/2026-10-30",
+    "runtime": {
+      "git_revision": "47d941d398f44d4a99d89c3c3dc87de5313c6e62",
+      "git_dirty": true,
+      "started_at": "2026-10-30T21:21:21.349Z",
+      "platform": "win32",
+      "architecture": "x64",
+      "node": "v22.19.0",
+      "daemon_command": "target/debug/mlx-ollama-daemon.exe",
+      "daemon_arguments": [],
+      "daemon_sha256": "3e803c4044a138b4ea7af7c19e9d9f1c9cb9e7f339ddc0f5bbcf37905a20aac0"
+    },
+    "fixture": {
+      "sha256": "4a71f8c31b9d2cdfb420c70407b6e5c25ecc069cc379cf5758c642f75a6bb3a8",
+      "command": [
+        "cargo",
+        "run",
+        "--locked",
+        "--quiet",
+        "-p",
+        "mlx-plugin-runtime",
+        "--example",
+        "plugin_security_fixture",
+        "--",
+        "docs/release-gate/evidence/2026-10-30/plugin-security-fixture.json"
+      ],
+      "path": "docs/release-gate/evidence/2026-10-30/plugin-security-fixture.json"
+    },
+    "final_credential_scan": {
+      "scanned_file_count": 17,
+      "leaked_files": []
+    },
+    "bridge": {
+      "status": "pass",
+      "execution": "DOM/jsdom UI and Node SDK contract suites; not real-browser E2E"
+    },
+    "daemon_logs": [
+      "docs/release-gate/evidence/2026-10-30/daemon-1.log",
+      "docs/release-gate/evidence/2026-10-30/daemon-2.log",
+      "docs/release-gate/evidence/2026-10-30/daemon-3.log"
+    ],
+    "service_requests": [
+      {
+        "method": "GET",
+        "url": "/data",
+        "credential_received": true
+      },
+      {
+        "method": "GET",
+        "url": "/data",
+        "credential_received": true
+      },
+      {
+        "method": "GET",
+        "url": "/error",
+        "credential_received": true
+      },
+      {
+        "method": "GET",
+        "url": "/data",
+        "credential_received": true
+      },
+      {
+        "method": "GET",
+        "url": "/quota",
+        "credential_received": true
+      },
+      {
+        "method": "GET",
+        "url": "/quota",
+        "credential_received": true
+      },
+      {
+        "method": "GET",
+        "url": "/quota",
+        "credential_received": true
+      },
+      {
+        "method": "GET",
+        "url": "/oversize",
+        "credential_received": true
+      }
+    ],
+    "temporary_state_removed": true
+  },
+  "commands": [
+    "node scripts/release-gate/plugin-security-smoke.mjs"
+  ],
+  "artifacts": {
+    "report": "docs/release-gate/evidence/2026-10-30/plugin-security-report.json",
+    "daemon_logs": [
+      "docs/release-gate/evidence/2026-10-30/daemon-1.log",
+      "docs/release-gate/evidence/2026-10-30/daemon-2.log",
+      "docs/release-gate/evidence/2026-10-30/daemon-3.log"
+    ]
+  },
+  "executed": true
+}
