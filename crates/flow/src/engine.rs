@@ -18,6 +18,7 @@ use chrono::{DateTime, Utc};
 use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use tokio::time::Instant;
 use tracing::{debug, warn};
 
 use crate::expr::NodeView;
@@ -43,7 +44,9 @@ pub enum EngineError {
 impl std::fmt::Display for EngineError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Invalid(report) => write!(formatter, "fluxo invalido: {}", report.error_summary()),
+            Self::Invalid(report) => {
+                write!(formatter, "fluxo invalido: {}", report.error_summary())
+            }
             Self::NoEntryNode(message) => write!(formatter, "{message}"),
             Self::UnknownNode(id) => write!(formatter, "no inexistente: {id}"),
         }
@@ -141,8 +144,7 @@ impl FlowEngine {
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let started_at = Utc::now();
-        let deadline = started_at
-            + chrono::Duration::seconds(flow.settings.effective_timeout_secs() as i64);
+        let deadline = Instant::now() + Duration::from_secs(flow.settings.effective_timeout_secs());
         let max_parallel = flow.settings.effective_max_parallel();
 
         // Ramos nao alcancaveis a partir do no inicial nunca executam.
@@ -163,7 +165,7 @@ impl FlowEngine {
         let mut run_error: Option<String> = None;
 
         'levels: for level in graph.levels() {
-            if Utc::now() >= deadline {
+            if Instant::now() >= deadline {
                 run_status = RunStatus::TimedOut;
                 run_error = Some(format!(
                     "a execucao passou do limite de {}s",
@@ -218,9 +220,8 @@ impl FlowEngine {
                 continue;
             }
 
-            let remaining = (deadline - Utc::now()).num_milliseconds().max(0) as u64;
-            let results: Vec<NodeAttempt> = stream::iter(runnable.into_iter().map(
-                |(index, items)| {
+            let results: Vec<NodeAttempt> =
+                stream::iter(runnable.into_iter().map(|(index, items)| {
                     let node_views = &node_views;
                     let options_ref = &options;
                     let run_id = run_id.as_str();
@@ -232,16 +233,16 @@ impl FlowEngine {
                             node_views,
                             options_ref,
                             run_id,
-                            Duration::from_millis(remaining),
+                            deadline,
                         )
                         .await
                     }
-                },
-            ))
-            .buffer_unordered(max_parallel)
-            .collect()
-            .await;
+                }))
+                .buffer_unordered(max_parallel)
+                .collect()
+                .await;
 
+            let mut stop_after_level = false;
             for attempt in results {
                 let index = attempt.index;
                 let node = &flow.nodes[index];
@@ -270,6 +271,13 @@ impl FlowEngine {
                         record.error = Some(error.message.clone());
                         record.error_details = error.details.clone();
 
+                        if attempt.timed_out {
+                            run_status = RunStatus::TimedOut;
+                            run_error = Some(error.message);
+                            stop_after_level = true;
+                            continue;
+                        }
+
                         match node.on_error {
                             crate::model::OnError::Continue => {
                                 // Segue o fluxo com os itens que entraram.
@@ -291,16 +299,21 @@ impl FlowEngine {
                                 outputs.insert(index, NodeOutput::main(passthrough));
                             }
                             crate::model::OnError::Stop => {
-                                run_status = RunStatus::Failed;
-                                run_error = Some(format!(
-                                    "no \"{}\" falhou: {}",
-                                    node.name, error.message
-                                ));
-                                break 'levels;
+                                if run_status == RunStatus::Success {
+                                    run_status = RunStatus::Failed;
+                                    run_error = Some(format!(
+                                        "no \"{}\" falhou: {}",
+                                        node.name, error.message
+                                    ));
+                                }
+                                stop_after_level = true;
                             }
                         }
                     }
                 }
+            }
+            if stop_after_level {
+                break 'levels;
             }
         }
 
@@ -332,7 +345,7 @@ impl FlowEngine {
         node_views: &HashMap<String, NodeView>,
         options: &RunOptions,
         run_id: &str,
-        budget: Duration,
+        deadline: Instant,
     ) -> NodeAttempt {
         let node = &flow.nodes[index];
         let started_at = Utc::now();
@@ -349,8 +362,14 @@ impl FlowEngine {
 
         let mut attempts = 0u32;
         let mut last_error = NodeError::new("no nao executou");
+        let mut timed_out = false;
 
         while attempts < attempts_allowed {
+            if Instant::now() >= deadline {
+                last_error = NodeError::new("tempo da execucao esgotado");
+                timed_out = true;
+                break;
+            }
             attempts += 1;
 
             let ctx = NodeContext {
@@ -365,15 +384,11 @@ impl FlowEngine {
                 host: self.host.clone(),
             };
 
-            let outcome = if budget.is_zero() {
-                Err(NodeError::new("tempo da execucao esgotado"))
-            } else {
-                match tokio::time::timeout(budget, executor.execute(&ctx)).await {
-                    Ok(result) => result,
-                    Err(_) => Err(NodeError::new(format!(
-                        "o no passou do tempo limite de {}s da execucao",
-                        budget.as_secs()
-                    ))),
+            let outcome = match tokio::time::timeout_at(deadline, executor.execute(&ctx)).await {
+                Ok(result) => result,
+                Err(_) => {
+                    timed_out = true;
+                    Err(NodeError::new("tempo da execucao esgotado"))
                 }
             };
 
@@ -386,14 +401,28 @@ impl FlowEngine {
                         attempts,
                         started_at,
                         finished_at: Utc::now(),
+                        timed_out: false,
                         result: Ok(output),
                     }
                 }
                 Err(error) => {
                     debug!(node = %node.name, attempt = attempts, error = %error.message, "tentativa falhou");
                     last_error = error;
-                    if attempts < attempts_allowed && policy.delay_ms > 0 {
-                        tokio::time::sleep(Duration::from_millis(policy.delay_ms)).await;
+                    if timed_out {
+                        break;
+                    }
+                    if attempts < attempts_allowed
+                        && policy.delay_ms > 0
+                        && tokio::time::timeout_at(
+                            deadline,
+                            tokio::time::sleep(Duration::from_millis(policy.delay_ms)),
+                        )
+                        .await
+                        .is_err()
+                    {
+                        last_error = NodeError::new("tempo da execucao esgotado");
+                        timed_out = true;
+                        break;
                     }
                 }
             }
@@ -406,6 +435,7 @@ impl FlowEngine {
             attempts,
             started_at,
             finished_at: Utc::now(),
+            timed_out,
             result: Err(last_error),
         }
     }
@@ -477,6 +507,7 @@ struct NodeAttempt {
     attempts: u32,
     started_at: DateTime<Utc>,
     finished_at: DateTime<Utc>,
+    timed_out: bool,
     result: Result<NodeOutput, NodeError>,
 }
 
@@ -608,6 +639,9 @@ mod tests {
 
         async fn execute(&self, ctx: &NodeContext<'_>) -> Result<NodeOutput, NodeError> {
             let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            if let Some(delay_ms) = ctx.node.parameters["delay_ms"].as_u64() {
+                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            }
             if call < self.fail_times {
                 return Err(NodeError::new("falha proposital"));
             }
@@ -831,6 +865,115 @@ mod tests {
         assert_eq!(record.status, RunStatus::Success);
         assert_eq!(record.node("flaky").unwrap().attempts, 3);
         assert_eq!(calls.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failed_sibling_does_not_hide_completed_node_records() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let engine = engine_with(Some(Arc::new(Flaky {
+            fail_times: 1,
+            calls: calls.clone(),
+        })));
+        let mut flow = Flow::new("Historico da camada");
+        flow.nodes.push(node("start", "trigger.manual", json!({})));
+        flow.nodes.push(node("failure", "test.flaky", json!({})));
+        flow.nodes
+            .push(node("success", "test.flaky", json!({ "delay_ms": 50 })));
+        flow.nodes.push(node("next", "debug.log", json!({})));
+        flow.edges.push(Edge::new("start", "failure"));
+        flow.edges.push(Edge::new("start", "success"));
+        flow.edges.push(Edge::new("success", "next"));
+
+        let record = engine.run(&flow, RunOptions::default()).await.unwrap();
+
+        assert_eq!(record.status, RunStatus::Failed);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(record.node("failure").unwrap().status, NodeStatus::Failed);
+        let success = record.node("success").unwrap();
+        assert_eq!(success.status, NodeStatus::Success);
+        assert_eq!(success.attempts, 1);
+        assert_eq!(success.output_count, 1);
+        assert!(success.finished_at.is_some());
+        assert_eq!(record.node("next").unwrap().status, NodeStatus::Pending);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn queued_nodes_share_the_flow_deadline() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let engine = engine_with(Some(Arc::new(Flaky {
+            fail_times: 0,
+            calls: calls.clone(),
+        })));
+        let mut flow = Flow::new("Deadline da fila");
+        flow.settings.timeout_secs = 1;
+        flow.settings.max_parallel = 1;
+        flow.nodes.push(node("start", "trigger.manual", json!({})));
+        for id in ["first", "second", "third"] {
+            let mut slow = node(id, "test.flaky", json!({ "delay_ms": 750 }));
+            slow.on_error = OnError::Continue;
+            flow.nodes.push(slow);
+            flow.edges.push(Edge::new("start", id));
+        }
+
+        let started = Instant::now();
+        let record = engine.run(&flow, RunOptions::default()).await.unwrap();
+
+        assert_eq!(record.status, RunStatus::TimedOut);
+        assert_eq!(started.elapsed(), Duration::from_secs(1));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(record.node("first").unwrap().status, NodeStatus::Success);
+        assert_eq!(record.node("second").unwrap().status, NodeStatus::Failed);
+        assert_eq!(record.node("third").unwrap().attempts, 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retries_share_the_flow_deadline() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let engine = engine_with(Some(Arc::new(Flaky {
+            fail_times: usize::MAX,
+            calls: calls.clone(),
+        })));
+        let mut flow = Flow::new("Deadline das tentativas");
+        flow.settings.timeout_secs = 1;
+        let mut slow = node("slow", "test.flaky", json!({ "delay_ms": 700 }));
+        slow.retry = Some(RetryPolicy {
+            max_attempts: 3,
+            delay_ms: 0,
+        });
+        flow.nodes.push(slow);
+
+        let started = Instant::now();
+        let record = engine.run(&flow, RunOptions::default()).await.unwrap();
+
+        assert_eq!(record.status, RunStatus::TimedOut);
+        assert_eq!(started.elapsed(), Duration::from_secs(1));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(record.node("slow").unwrap().attempts, 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retry_delay_stops_at_the_flow_deadline() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let engine = engine_with(Some(Arc::new(Flaky {
+            fail_times: usize::MAX,
+            calls: calls.clone(),
+        })));
+        let mut flow = Flow::new("Deadline da espera");
+        flow.settings.timeout_secs = 1;
+        let mut slow = node("slow", "test.flaky", json!({ "delay_ms": 700 }));
+        slow.retry = Some(RetryPolicy {
+            max_attempts: 3,
+            delay_ms: 400,
+        });
+        flow.nodes.push(slow);
+
+        let started = Instant::now();
+        let record = engine.run(&flow, RunOptions::default()).await.unwrap();
+
+        assert_eq!(record.status, RunStatus::TimedOut);
+        assert_eq!(started.elapsed(), Duration::from_secs(1));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(record.node("slow").unwrap().attempts, 1);
     }
 
     #[tokio::test]
