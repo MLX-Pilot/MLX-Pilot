@@ -99,6 +99,8 @@ pub struct McpNodeResult {
 }
 
 /// Capacidades que o motor pede ao processo hospedeiro.
+// async-trait generates #[must_use] on future-returning methods.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait FlowHost: Send + Sync {
     /// Executa uma volta do agente e devolve a resposta final.
