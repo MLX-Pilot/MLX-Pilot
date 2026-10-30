@@ -2,10 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { TextDecoder, TextEncoder } from "node:util";
-import { JSDOM } from "jsdom";
+import { JSDOM, VirtualConsole } from "jsdom";
 
 const indexHtml = await readFile(new URL("../ui/index.html", import.meta.url), "utf8");
 const appJs = await readFile(new URL("../ui/app.js", import.meta.url), "utf8");
+const stylesCss = await readFile(new URL("../ui/styles.css", import.meta.url), "utf8");
 
 function jsonResponse(data, status = 200) {
   return {
@@ -60,6 +61,7 @@ function createFixture({
   environmentResponseHidden,
   environmentResponseRevealed,
   catalogModelsResponse,
+  mcpServersResponse,
   initialDownloads,
   startupResponse,
   useRealTimers = false,
@@ -380,33 +382,227 @@ function createFixture({
       return jsonResponse(hiddenEnvironment);
     }
 
-    if (path === "/integrations/n8n/workflows/list" && method === "POST") {
+    if (path === "/flows/node-types") {
       return jsonResponse({
-        workflows: {
-          data: [{ id: "workflow-1", name: "Workflow salvo", active: false }],
-        },
+        tools: ["read_file", "exec"],
+        mcp_servers: mcpServersResponse ?? [
+          {
+            name: "arquivos",
+            command: "npx",
+            args: ["-y", "@modelcontextprotocol/server-filesystem"],
+            enabled: true,
+            tools: [
+              { name: "read_text_file", description: "Le um arquivo", input_schema: {} },
+              { name: "write_file", description: "Escreve um arquivo", input_schema: {} },
+            ],
+          },
+          { name: "desligado", command: "node", args: [], enabled: false, tools: [] },
+        ],
+        nodes: [
+          {
+            kind: "trigger.manual",
+            label: "Gatilho manual",
+            group: "Gatilhos",
+            description: "Inicia o fluxo sob demanda.",
+            color: "#f2b84b",
+            glyph: "GO",
+            inputs: [],
+            outputs: ["main"],
+            defaults: { sample: "" },
+            fields: [{ key: "sample", label: "Payload de teste", kind: "json" }],
+          },
+          {
+            kind: "data.set",
+            label: "Editar campos",
+            group: "Dados",
+            description: "Define campos em cada item.",
+            color: "#2ec4b6",
+            glyph: "SET",
+            inputs: ["main"],
+            outputs: ["main"],
+            defaults: { assignments: [], keep_only_set: false },
+            fields: [
+              { key: "assignments", label: "Campos", kind: "json", required: true },
+              { key: "keep_only_set", label: "Descartar os outros campos", kind: "boolean" },
+            ],
+          },
+          {
+            kind: "flow.if",
+            label: "Condicional",
+            group: "Fluxo",
+            description: "Divide os itens em duas saidas.",
+            color: "#b38cff",
+            glyph: "IF",
+            inputs: ["main"],
+            outputs: ["true", "false"],
+            defaults: { condition: "{{ $json.ok }}" },
+            fields: [{ key: "condition", label: "Condicao", kind: "expression", required: true }],
+          },
+          {
+            kind: "debug.log",
+            label: "Log",
+            group: "Dados",
+            description: "Registra uma mensagem e repassa os itens.",
+            color: "#8d99ae",
+            glyph: "LOG",
+            inputs: ["main"],
+            outputs: ["main"],
+            defaults: { message: "{{ $json }}" },
+            fields: [{ key: "message", label: "Mensagem", kind: "expression" }],
+          },
+          {
+            kind: "agent.run",
+            label: "Agente MLX Pilot",
+            group: "MLX Pilot",
+            description: "Envia um prompt ao agente local.",
+            color: "#00d4ff",
+            glyph: "AI",
+            inputs: ["main"],
+            outputs: ["main"],
+            defaults: {
+              message: "Resuma: {{ $json.texto }}",
+              system_prompt: "",
+              provider: "",
+              model_id: "",
+              provider_profile_id: "",
+              base_url: "",
+              temperature: null,
+              max_iterations: 1,
+              tools: [],
+              output_key: "response",
+              parse_json: false,
+              keep_input: true,
+            },
+            fields: [
+              { key: "provider", label: "Provedor", kind: "select", options_source: "agent_providers" },
+              { key: "model_id", label: "Modelo", kind: "select", options_source: "agent_models" },
+              { key: "message", label: "Mensagem", kind: "textarea", required: true },
+              { key: "tools", label: "Ferramentas liberadas", kind: "json" },
+              { key: "max_iterations", label: "Iteracoes maximas", kind: "number" },
+              { key: "output_key", label: "Campo de saida", kind: "text", advanced: true },
+              { key: "base_url", label: "Base URL", kind: "text", advanced: true },
+            ],
+          },
+          {
+            kind: "mcp.call",
+            label: "Servidor MCP",
+            group: "MLX Pilot",
+            description: "Executa uma ferramenta de um servidor MCP.",
+            color: "#c77dff",
+            glyph: "MCP",
+            inputs: ["main"],
+            outputs: ["main"],
+            defaults: { server: "", tool: "", arguments: {}, output_key: "mcp_output", keep_input: true },
+            fields: [
+              { key: "server", label: "Servidor", kind: "select", options_source: "mcp_servers", required: true },
+              { key: "tool", label: "Ferramenta", kind: "select", options_source: "mcp_tools", required: true },
+              { key: "arguments", label: "Argumentos", kind: "json" },
+              { key: "output_key", label: "Campo de saida", kind: "text", advanced: true },
+              { key: "keep_input", label: "Manter os campos de entrada", kind: "boolean", advanced: true },
+            ],
+          },
+          {
+            kind: "tool.call",
+            label: "Ferramenta MLX Pilot",
+            group: "MLX Pilot",
+            description: "Roda uma ferramenta do agente.",
+            color: "#7bdff2",
+            glyph: "TL",
+            inputs: ["main"],
+            outputs: ["main"],
+            defaults: { tool: "read_file", params: {}, read_only: true, workspace_root: "" },
+            fields: [
+              { key: "tool", label: "Ferramenta", kind: "select", options_source: "flow_tools", required: true },
+              { key: "params", label: "Parametros", kind: "json" },
+              { key: "workspace_root", label: "Raiz do workspace", kind: "text", advanced: true },
+            ],
+          },
+        ],
       });
     }
 
-    if (path === "/integrations/n8n/workflows/save" && method === "POST") {
+    if (path === "/flows" && method === "GET") {
       return jsonResponse({
-        created: !body?.workflow_id,
-        workflow_id: body?.workflow_id || "workflow-1",
-        editor_url: "http://127.0.0.1:5678/workflow/workflow-1",
-        workflow: { id: body?.workflow_id || "workflow-1", ...body?.workflow },
+        flows: [
+          {
+            id: "flow-1",
+            name: "Fluxo salvo",
+            active: false,
+            node_count: 2,
+            edge_count: 1,
+            trigger_kinds: ["trigger.manual"],
+          },
+        ],
       });
     }
 
-    if (path === "/integrations/n8n/workflows/get" && method === "POST") {
+    if (path === "/flows" && method === "POST") {
       return jsonResponse({
-        workflow_id: body?.workflow_id,
-        workflow: {
-          id: body?.workflow_id,
-          name: "Workflow salvo",
-          nodes: [{ id: "manual-1", name: "Manual Trigger", type: "n8n-nodes-base.manualTrigger", typeVersion: 1, position: [400, 300], parameters: {} }],
-          connections: {},
-          settings: { executionOrder: "v1" },
-        },
+        flow: { ...body, id: body?.id || "flow-1" },
+        validation: { valid: true, issues: [] },
+      });
+    }
+
+    if (path === "/flows/flow-1" && method === "GET") {
+      return jsonResponse({
+        schema: "mlxflow.v1",
+        id: "flow-1",
+        name: "Fluxo salvo",
+        active: false,
+        nodes: [
+          { id: "manual-1", name: "Gatilho manual", kind: "trigger.manual", parameters: {}, position: { x: 280, y: 240 } },
+        ],
+        edges: [],
+        settings: { timeout_secs: 300, max_parallel: 8, save_runs: true },
+      });
+    }
+
+    if (path.startsWith("/flows/flow-1/runs")) {
+      return jsonResponse({ runs: [] });
+    }
+
+    if (path === "/flows/mcp/servers" && method === "POST") {
+      return jsonResponse({ servers: [body] });
+    }
+
+    if (/^\/flows\/mcp\/servers\/[^/]+\/probe$/.test(path)) {
+      return jsonResponse({
+        name: "arquivos",
+        command: "npx",
+        args: [],
+        enabled: true,
+        reachable: true,
+        tools: [
+          { name: "read_text_file", description: "Le um arquivo", input_schema: {} },
+          { name: "write_file", description: "Escreve um arquivo", input_schema: {} },
+        ],
+      });
+    }
+
+    if (path === "/flows/flow-1/run" && method === "POST") {
+      return jsonResponse({
+        id: "run-1",
+        flow_id: "flow-1",
+        flow_name: "Fluxo salvo",
+        status: "success",
+        trigger: "manual",
+        started_at: new Date().toISOString(),
+        duration_ms: 12,
+        output: [{ ok: true }],
+        nodes: [
+          {
+            node_id: "manual-1",
+            node_name: "Gatilho manual",
+            kind: "trigger.manual",
+            status: "success",
+            duration_ms: 3,
+            attempts: 1,
+            input_count: 1,
+            output_count: 1,
+            output: {},
+            logs: [],
+          },
+        ],
       });
     }
 
@@ -982,29 +1178,371 @@ test("sidebar global aparece apenas no chat e some nas outras abas", async () =>
   }
 });
 
-test("workflow editor cria nos e salva JSON compativel com n8n", async () => {
+test("folha de estilos preserva o layout do editor de fluxos", () => {
+  const errors = [];
+  const virtualConsole = new VirtualConsole().on("jsdomError", (error) => errors.push(error.message));
+  const dom = new JSDOM('<!doctype html><style></style><section class="workflow-builder flow-editor-primary"></section>', { virtualConsole });
+
+  try {
+    const style = dom.window.document.querySelector("style");
+    style.textContent = stylesCss;
+    assert.deepEqual(errors, [], "a folha de estilos deve ser aceita pelo parser");
+    assert.ok(style.sheet?.cssRules.length, "as regras de estilo devem estar disponíveis");
+    const builder = dom.window.document.querySelector(".workflow-builder");
+    const computed = dom.window.getComputedStyle(builder);
+    assert.equal(computed.minWidth, "0");
+    assert.equal(computed.overflow, "hidden");
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("editor de fluxos monta o grafo e salva no formato nativo", async () => {
   const fixture = createFixture();
 
   try {
     await flush(8);
     fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(6);
+
+    // A paleta vem do catalogo publicado pelo daemon.
+    assert.ok(fixture.document.querySelector('[data-flow-node-kind="data.set"]'));
+    assert.equal(fixture.document.querySelectorAll("#flow-nodes .workflow-node").length, 1);
+
+    fixture.document.querySelector('[data-flow-node-kind="data.set"]')?.click();
+    await flush(2);
+    assert.equal(fixture.document.querySelectorAll("#flow-nodes .workflow-node").length, 2);
+    assert.match(fixture.document.getElementById("flow-inspector")?.textContent || "", /Editar campos/);
+
+    fixture.document.getElementById("flow-save-btn")?.click();
+    await flush(6);
+
+    const saveCall = fixture.fetchCalls.find((entry) => entry.path === "/flows" && entry.method === "POST");
+    assert.ok(saveCall, "deveria ter chamado POST /flows");
+    assert.equal(saveCall.body.schema, "mlxflow.v1");
+    assert.equal(saveCall.body.nodes.length, 2);
+    assert.equal(saveCall.body.nodes[1].kind, "data.set");
+    assert.equal(fixture.document.getElementById("flow-save-state")?.textContent, "Salvo");
+    // Executar so libera com o fluxo gravado.
+    assert.equal(fixture.document.getElementById("flow-run-btn")?.disabled, false);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("no de agente nasce com o provedor e o modelo ativos do MLX Pilot", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(8);
+
+    fixture.document.querySelector('[data-flow-node-kind="agent.run"]')?.click();
     await flush(3);
 
-    assert.equal(fixture.document.querySelectorAll("#workflow-nodes .workflow-node").length, 1);
-    fixture.document.querySelector('[data-workflow-node-type="code"]')?.click();
-    assert.equal(fixture.document.querySelectorAll("#workflow-nodes .workflow-node").length, 2);
-    assert.match(fixture.document.getElementById("workflow-inspector")?.textContent || "", /Code/);
+    const provider = fixture.document.querySelector('[data-field-key="provider"]');
+    const model = fixture.document.querySelector('[data-field-key="model_id"]');
+    assert.ok(provider, "campo provedor deveria ser um select");
+    assert.equal(provider.tagName, "SELECT");
+    assert.equal(model.tagName, "SELECT");
 
-    fixture.document.getElementById("n8n-api-key").value = "test-api-key";
-    fixture.document.getElementById("workflow-save-btn")?.click();
-    await flush(5);
+    // Herda o que esta ativo no resto do app (agent config: ollama / qwen3.5:9b).
+    assert.equal(provider.value, "ollama");
+    assert.match(model.value, /qwen3\.5:9b/);
 
-    const saveCall = fixture.fetchCalls.find((entry) => entry.path === "/integrations/n8n/workflows/save");
-    assert.ok(saveCall);
-    assert.equal(saveCall.body.api_key, "test-api-key");
-    assert.equal(saveCall.body.workflow.nodes.length, 2);
-    assert.equal(fixture.document.getElementById("workflow-save-state")?.textContent, "Salvo");
-    assert.equal(fixture.document.getElementById("workflow-open-n8n-btn")?.hidden, false);
+    // Agrupado em Local / Cloud.
+    const groups = [...provider.querySelectorAll("optgroup")].map((group) => group.label);
+    assert.ok(groups.includes("Local (MLX Pilot)"), `grupos: ${groups.join(",")}`);
+
+    // Base URL e herdada: nao aparece entre os campos principais.
+    const mainFields = [...fixture.document.querySelectorAll("#flow-inspector .settings-field [data-field-key]")]
+      .filter((field) => !field.closest(".workflow-inspector-advanced"))
+      .map((field) => field.dataset.fieldKey);
+    assert.ok(!mainFields.includes("base_url"), `campos visiveis: ${mainFields.join(",")}`);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("escolher outro modelo sincroniza o provedor do no de agente", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(8);
+    fixture.document.querySelector('[data-flow-node-kind="agent.run"]')?.click();
+    await flush(3);
+
+    const model = fixture.document.querySelector('[data-field-key="model_id"]');
+    // Todos os modelos locais instalados aparecem no grupo local.
+    const localGroup = [...model.querySelectorAll("optgroup")].find((g) => g.label === "Local (MLX Pilot)");
+    const values = [...localGroup.querySelectorAll("option")].map((option) => option.value);
+    assert.equal(values.length, 3, `modelos locais: ${values.join(",")}`);
+
+    // Trocar para um modelo MLX deve mudar o provedor junto.
+    model.value = "mlx-community/Qwen3-4B-4bit";
+    model.dispatchEvent(new fixture.window.Event("change", { bubbles: true }));
+    await flush(3);
+
+    const provider = fixture.document.querySelector('[data-field-key="provider"]');
+    assert.equal(provider.value, "mlx");
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("arrastar da porta de saida ate outro no cria a conexao", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(8);
+
+    // Dois nos desconectados: adiciona o segundo numa posicao explicita para
+    // evitar a conexao automatica.
+    fixture.document.querySelector('[data-flow-node-kind="debug.log"]')?.click();
+    await flush(2);
+    const nodes = [...fixture.document.querySelectorAll("#flow-nodes .workflow-node")];
+    assert.equal(nodes.length, 2);
+
+    const before = fixture.document.querySelectorAll("#flow-connections .workflow-connection-group").length;
+
+    const source = nodes[0];
+    const outputPort = source.querySelector('[data-port="output"]');
+    const targetPort = nodes[1].querySelector('[data-port="input"]');
+    const pointer = (type, target, x) => target.dispatchEvent(
+      new fixture.window.MouseEvent(type, { bubbles: true, button: 0, clientX: x, clientY: 0 }),
+    );
+
+    pointer("pointerdown", outputPort, 0);
+    pointer("pointermove", fixture.document, 80);
+    pointer("pointerup", targetPort, 80);
+    await flush(3);
+
+    const after = fixture.document.querySelectorAll("#flow-connections .workflow-connection-group").length;
+    assert.ok(after > before, `conexoes antes=${before} depois=${after}`);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("clicar na saida e depois na entrada tambem conecta", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(8);
+    fixture.document.querySelector('[data-flow-node-kind="debug.log"]')?.click();
+    await flush(2);
+
+    const click = (element) => {
+      element.dispatchEvent(new fixture.window.MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: 0, clientY: 0 }));
+      element.dispatchEvent(new fixture.window.MouseEvent("pointerup", { bubbles: true, button: 0, clientX: 0, clientY: 0 }));
+      element.dispatchEvent(new fixture.window.MouseEvent("click", { bubbles: true, button: 0 }));
+    };
+
+    let nodes = [...fixture.document.querySelectorAll("#flow-nodes .workflow-node")];
+    click(nodes[0].querySelector('[data-port="output"]'));
+    await flush(2);
+
+    nodes = [...fixture.document.querySelectorAll("#flow-nodes .workflow-node")];
+    click(nodes[1].querySelector('[data-port="input"]'));
+    await flush(3);
+
+    assert.equal(fixture.document.querySelectorAll("#flow-connections .workflow-connection-group").length, 1);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("no MCP lista os servidores habilitados e as ferramentas do escolhido", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(8);
+
+    fixture.document.querySelector('[data-flow-node-kind="mcp.call"]')?.click();
+    await flush(3);
+
+    const server = fixture.document.querySelector('[data-field-key="server"]');
+    const values = [...server.querySelectorAll("option")].map((option) => option.value);
+    // O servidor desativado nao aparece.
+    assert.deepEqual(values, ["arquivos"]);
+
+    // Ja nasce apontando para o primeiro servidor habilitado e sua primeira
+    // ferramenta: o que a tela mostra e o que o no guarda.
+    assert.equal(server.value, "arquivos");
+    const tool = fixture.document.querySelector('[data-field-key="tool"]');
+    assert.equal(tool.value, "read_text_file");
+    const raw = JSON.parse(fixture.document.getElementById("flow-node-parameters").value);
+    assert.equal(raw.server, "arquivos");
+    assert.equal(raw.tool, "read_text_file");
+
+    const toolValues = [...tool.querySelectorAll("option")].map((option) => option.value);
+    assert.ok(toolValues.includes("write_file"), `ferramentas: ${toolValues.join(",")}`);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("select dinamico sem valor guardado mostra Selecione em vez de mentir", async () => {
+  // Sem servidor MCP configurado, o campo nao pode exibir uma escolha que o no
+  // nao tem — era isso que fazia o fluxo falhar em tempo de execucao.
+  const fixture = createFixture({ mcpServersResponse: [] });
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(8);
+    fixture.document.querySelector('[data-flow-node-kind="mcp.call"]')?.click();
+    await flush(3);
+
+    const server = fixture.document.querySelector('[data-field-key="server"]');
+    assert.equal(server.value, "");
+    assert.equal(
+      JSON.parse(fixture.document.getElementById("flow-node-parameters").value).server,
+      "",
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("servidor MCP pode ser cadastrado e sondado pela aba", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(8);
+
+    // A lista mostra os servidores e quantas ferramentas cada um expos.
+    const list = fixture.document.getElementById("mcp-server-list");
+    assert.match(list.textContent, /arquivos/);
+    assert.match(list.textContent, /2 ferramentas/);
+    assert.match(list.textContent, /Desativado/);
+
+    fixture.document.getElementById("mcp-server-name").value = "github";
+    fixture.document.getElementById("mcp-server-command").value = "npx";
+    fixture.document.getElementById("mcp-server-args").value = "-y\n@modelcontextprotocol/server-github";
+    fixture.document.getElementById("mcp-server-env").value = "GITHUB_TOKEN=abc";
+    fixture.document.getElementById("mcp-server-save-btn").click();
+    await flush(8);
+
+    const saveCall = fixture.fetchCalls.find(
+      (entry) => entry.path === "/flows/mcp/servers" && entry.method === "POST",
+    );
+    assert.ok(saveCall, "deveria ter chamado POST /flows/mcp/servers");
+    assert.equal(saveCall.body.name, "github");
+    assert.deepEqual(saveCall.body.args, ["-y", "@modelcontextprotocol/server-github"]);
+    assert.deepEqual(saveCall.body.env, { GITHUB_TOKEN: "abc" });
+
+    // Salvar ja sonda, senao o no ficaria sem lista de ferramentas.
+    assert.ok(fixture.fetchCalls.some((entry) => entry.path.endsWith("/probe")));
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("erro de JSON aparece ao lado do proprio campo", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(8);
+    fixture.document.querySelector('[data-flow-node-kind="data.set"]')?.click();
+    await flush(3);
+
+    const field = fixture.document.querySelector('[data-field-key="assignments"]');
+    field.value = "{nao json";
+    field.dispatchEvent(new fixture.window.Event("change", { bubbles: true }));
+    await flush(3);
+
+    const errorBox = fixture.document.querySelector('[data-field-error="assignments"]');
+    assert.ok(errorBox, "o campo deveria ter seu proprio espaco de erro");
+    assert.ok(errorBox.textContent.trim().length > 0, "o erro deveria estar preenchido");
+    // E fora da secao recolhida de avancado, senao ninguem ve.
+    assert.equal(errorBox.closest(".workflow-inspector-advanced"), null);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("secao avancada continua aberta entre edicoes", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(8);
+    fixture.document.querySelector('[data-flow-node-kind="agent.run"]')?.click();
+    await flush(3);
+
+    const details = fixture.document.querySelector(".workflow-inspector-advanced");
+    details.open = true;
+    details.dispatchEvent(new fixture.window.Event("toggle", { bubbles: true }));
+    await flush(2);
+
+    // Uma alteracao qualquer re-renderiza o inspetor.
+    const message = fixture.document.querySelector('[data-field-key="message"]');
+    message.value = "novo texto";
+    message.dispatchEvent(new fixture.window.Event("change", { bubbles: true }));
+    await flush(3);
+
+    assert.equal(fixture.document.querySelector(".workflow-inspector-advanced")?.open, true);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("condicional expoe as duas portas de saida no canvas", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(6);
+
+    fixture.document.querySelector('[data-flow-node-kind="flow.if"]')?.click();
+    await flush(2);
+
+    const ports = [...fixture.document.querySelectorAll("#flow-nodes .workflow-node-port.output")]
+      .map((port) => port.dataset.portName);
+    assert.ok(ports.includes("true"), `portas encontradas: ${ports.join(",")}`);
+    assert.ok(ports.includes("false"), `portas encontradas: ${ports.join(",")}`);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("executar um fluxo salvo mostra o resultado por no", async () => {
+  const fixture = createFixture();
+
+  try {
+    await flush(8);
+    fixture.document.querySelector('.tab[data-panel="workflows"]')?.click();
+    await flush(6);
+
+    fixture.document.querySelector('[data-flow-open="flow-1"]')?.click();
+    await flush(6);
+
+    fixture.document.getElementById("flow-run-btn")?.click();
+    await flush(6);
+
+    const runCall = fixture.fetchCalls.find((entry) => entry.path === "/flows/flow-1/run");
+    assert.ok(runCall, "deveria ter chamado POST /flows/{id}/run");
+
+    const result = fixture.document.getElementById("flow-run-result");
+    assert.equal(result?.hidden, false);
+    assert.match(result?.textContent || "", /Sucesso/);
+    assert.match(result?.textContent || "", /Gatilho manual/);
   } finally {
     fixture.cleanup();
   }
