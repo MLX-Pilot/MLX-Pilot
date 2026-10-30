@@ -1,3 +1,4 @@
+// Uso: node scripts/mock-daemon.mjs [diretorio-da-ui] [porta]
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -5,8 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { handleFlows } from './mock-flows.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const UI_DIR = path.join(__dirname, '..', 'apps', 'desktop-ui', 'ui');
-const PORT = 11435;
+const UI_DIR = path.resolve(process.argv[2] || path.join(__dirname, '..', 'apps', 'desktop-ui', 'ui'));
+const PORT = Number(process.argv[3] || 11435);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -16,6 +17,8 @@ const MIME = {
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
 };
 
 function json(res, code, data) {
@@ -207,14 +210,32 @@ const effectivePolicy = {
 // --- Server ---
 
 const server = http.createServer((req, res) => {
-  const url = new URL(req.url, `http://localhost:${PORT}`);
+  let url;
+  let pathname;
+  try {
+    url = new URL(req.url, 'http://localhost');
+    pathname = decodeURIComponent(url.pathname);
+    if (pathname.includes('\0')) throw new URIError('NUL in pathname');
+  } catch {
+    res.writeHead(400);
+    res.end('Bad request');
+    return;
+  }
   const method = req.method.toUpperCase();
-  const pathname = url.pathname;
 
   // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-channel-protocol-version');
+
+  const file = pathname === '/' ? 'index.html' : pathname.slice(1);
+  const target = path.resolve(UI_DIR, file);
+  const fromRoot = path.relative(UI_DIR, target);
+  if (fromRoot === '..' || fromRoot.startsWith(`..${path.sep}`) || path.isAbsolute(fromRoot)) {
+    res.writeHead(403);
+    res.end('Forbidden');
+    return;
+  }
 
   if (method === 'OPTIONS') {
     res.writeHead(204);
@@ -226,9 +247,7 @@ const server = http.createServer((req, res) => {
   // `/flows` fica de fora: e API, senao viraria busca de arquivo e devolveria
   // 404 em texto puro no lugar do JSON que a aba Workflows espera.
   if (method === 'GET' && !pathname.startsWith('/agent/') && !pathname.startsWith('/health') && !pathname.startsWith('/config') && !pathname.startsWith('/environment') && !pathname.startsWith('/chat') && !pathname.startsWith('/catalog') && !pathname.startsWith('/models') && !pathname.startsWith('/runtime') && pathname !== '/flows' && !pathname.startsWith('/flows/')) {
-    let file = pathname === '/' ? 'index.html' : pathname.slice(1);
-    file = path.normalize(file).replace(/^(\.\.(\/|\\|$))+/, '');
-    serveFile(res, path.join(UI_DIR, file));
+    serveFile(res, target);
     return;
   }
 
@@ -430,10 +449,7 @@ const server = http.createServer((req, res) => {
       default:
         // Serve static files that start with /agent/ but don't match endpoints (e.g., /agent/sessions/{id}/export)
         if (method === 'GET' && !pathname.startsWith('/chat') && !pathname.startsWith('/catalog')) {
-          let file = pathname.slice(1);
-          file = path.normalize(file).replace(/^(\.\.(\/|\\|$))+/, '');
-          const fp = path.join(UI_DIR, file);
-          if (fs.existsSync(fp)) return serveFile(res, fp);
+          if (fs.existsSync(target)) return serveFile(res, target);
         }
         json(res, 200, { echo: true, path: pathname, method, payload });
     }
@@ -441,6 +457,6 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`Mock daemon em http://127.0.0.1:${PORT}`);
+  console.log(`Mock daemon em http://127.0.0.1:${server.address().port}`);
   console.log(`UI servida de: ${UI_DIR}`);
 });

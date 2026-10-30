@@ -26,12 +26,21 @@ const MIME = {
 };
 
 const server = http.createServer((req, res) => {
-  const pathname = decodeURIComponent(new URL(req.url, "http://localhost").pathname);
+  let pathname;
+  try {
+    pathname = decodeURIComponent(new URL(req.url, "http://localhost").pathname);
+    if (pathname.includes("\0")) throw new URIError("NUL in pathname");
+  } catch {
+    res.writeHead(400);
+    res.end("Bad request");
+    return;
+  }
   const relative = pathname === "/" ? "index.html" : pathname.slice(1);
 
   // Barra travessia de diretorio: o caminho resolvido tem de ficar sob ROOT.
   const target = path.resolve(ROOT, relative);
-  if (!target.startsWith(ROOT)) {
+  const fromRoot = path.relative(ROOT, target);
+  if (fromRoot === ".." || fromRoot.startsWith(`..${path.sep}`) || path.isAbsolute(fromRoot)) {
     res.writeHead(403);
     res.end("Forbidden");
     return;
@@ -52,6 +61,6 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`UI estatica em http://127.0.0.1:${PORT}`);
+  console.log(`UI estatica em http://127.0.0.1:${server.address().port}`);
   console.log(`Servindo: ${ROOT}`);
 });
