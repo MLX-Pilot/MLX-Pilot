@@ -3137,6 +3137,8 @@ code { font-family: var(--font-mono); }
 .flow-editor-primary {
   margin-bottom: 16px;
 }
+.workflow-builder {
+  min-width: 0;
   overflow: hidden;
   border: 1px solid var(--border-hover);
   border-radius: var(--r-sm);
@@ -3594,7 +3596,6 @@ code { font-family: var(--font-mono); }
   min-height: 30px;
   margin: 0;
   padding: 5px 9px;
-}
 }
 
 /* Range input */
