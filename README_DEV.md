@@ -306,6 +306,11 @@ reprodução no navegador continuam necessárias; veja o
 
 ## Resumo rapido
 
+Para a auditoria de autorização, rede, documentos, WASM e ponte de plugins,
+consulte o [guia do release gate](scripts/release-gate/README.md). O comando
+`node scripts/release-gate/plugin-security-smoke.mjs` usa um daemon isolado;
+aprovar esse bloco não equivale a aprovar o release completo.
+
 - Backend: `crates/daemon`
 - Providers: `crates/providers/*`
 - UI desktop: `apps/desktop-ui`

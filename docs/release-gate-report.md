@@ -1,70 +1,81 @@
 # Release Gate Report
 
-- Generated at: 2026-03-07T01:29:23.366Z
-- Final decision: GO
-- Repo: /Users/kaike/mlx-ollama-pilot
+- Generated at: 2026-10-30T21:21:28.863Z
+- Final decision: NO-GO
+- Repo: .
+- Revision: 47d941d398f44d4a99d89c3c3dc87de5313c6e62; dirty: true
+- Environment: Node v22.19.0, win32/x64
+- Scope: partial (not a complete release gate)
 
 ## Executive Summary
 
-- Bloco 1 - Canais bridge/webhook: PASS.
-- Bloco 2 - Carga curta e concorrencia: PASS.
-- Bloco 3 - Upgrade e rollback de migracao: PASS.
-- Bloco 4 - Auditoria pratica de seguranca: PASS.
-- Bloco 5 - Recuperacao de falha: PASS.
-- Bloco 6 - Release dry-run: PASS.
+- channels_real_validation: NOT_RUN. Blockers: channels_real_validation: not selected by --only plugin_security_smoke
+- load_smoke: NOT_RUN. Blockers: load_smoke: not selected by --only plugin_security_smoke
+- migration_upgrade_rollback: NOT_RUN. Blockers: migration_upgrade_rollback: not selected by --only plugin_security_smoke
+- security_audit_smoke: NOT_RUN. Blockers: security_audit_smoke: not selected by --only plugin_security_smoke
+- crash_recovery_smoke: NOT_RUN. Blockers: crash_recovery_smoke: not selected by --only plugin_security_smoke
+- release_dry_run: NOT_RUN. Blockers: release_dry_run: not selected by --only plugin_security_smoke
+- Plugin broker and bridge security: PASS.
 
 ## Objective Criteria
 
-- no_release_blocking_security_findings: pass
-- no_state_loss_in_migration_or_restart: pass
-- no_crash_under_short_load: pass
-- pending_channels_tested_with_explicit_result: pass
-- dry_run_completed_or_checklist_validated: pass
+- all_required_blocks_executed_and_passed: fail
+- plugin_security_cases_executed_and_passed: pass
+- no_release_blocking_security_findings: fail
+- no_state_loss_in_migration_or_restart: fail
+- no_crash_under_short_load: fail
+- pending_channels_tested_with_explicit_result: fail
+- dry_run_completed_or_checklist_validated: fail
 
 ## Channels
 
-- bluebubbles: pass
-- feishu: pass
-- googlechat: pass
-- imessage: pass
-- line: pass
-- mattermost: pass
-- msteams: pass
-- nextcloud-talk: pass
-- nostr: pass
-- signal: pass
-- synology-chat: pass
-- tlon: pass
-- zalo: pass
-- zalouser: pass
+- Channel validation did not pass or was not executed; see block status.
 
 ## Load Smoke
 
-- /agent/run @ c=10: p50=34ms p95=49ms p99=50ms errors=0 timeouts=0
-- /agent/message/send @ c=10: p50=4ms p95=9ms p99=10ms errors=0.05 timeouts=0
-- /agent/channels/probe @ c=10: p50=5ms p95=7ms p99=8ms errors=0.1 timeouts=0
-- /agent/run @ c=25: p50=36ms p95=51ms p99=51ms errors=0 timeouts=0
-- /agent/message/send @ c=25: p50=13ms p95=18ms p99=20ms errors=0.06 timeouts=0
-- /agent/channels/probe @ c=25: p50=8ms p95=17ms p99=17ms errors=0.2 timeouts=0
-- /agent/run @ c=50: p50=63ms p95=101ms p99=105ms errors=0 timeouts=0
-- /agent/message/send @ c=50: p50=27ms p95=40ms p99=42ms errors=0.04 timeouts=0
-- /agent/channels/probe @ c=50: p50=23ms p95=30ms p99=31ms errors=0.03 timeouts=0
+- Load smoke did not pass or was not executed; see block status.
 
 ## Security Findings
 
-- No findings.
+- Security audit did not pass or was not executed; see blockers.
+
+## Plugin Security
+
+- Block: pass
+- plugin_document_isolation: PASS
+- plugin_workspace_isolation: PASS
+- plugin_grant_revocation: PASS
+- plugin_credentials_redaction: PASS
+- plugin_network_authorization: PASS
+- plugin_revision_conflict: PASS
+- plugin_wasm_limit: PASS
+- plugin_request_quota: PASS
+- plugin_response_limit: PASS
+- bridge_ui_contract: PASS
+- sdk_bridge_contract: PASS
 
 ## Blockers
 
-- Nenhum bloqueador.
+- channels_real_validation: not selected by --only plugin_security_smoke
+- load_smoke: not selected by --only plugin_security_smoke
+- migration_upgrade_rollback: not selected by --only plugin_security_smoke
+- security_audit_smoke: not selected by --only plugin_security_smoke
+- crash_recovery_smoke: not selected by --only plugin_security_smoke
+- release_dry_run: not selected by --only plugin_security_smoke
+- channels_real_validation: not_run (must execute and pass)
+- load_smoke: not_run (must execute and pass)
+- migration_upgrade_rollback: not_run (must execute and pass)
+- security_audit_smoke: not_run (must execute and pass)
+- crash_recovery_smoke: not_run (must execute and pass)
+- release_dry_run: not_run (must execute and pass)
 
 ## Reproduction
 
 ```bash
-cargo check -p mlx-ollama-daemon
-cargo test -p mlx-ollama-daemon
-cd apps/desktop-ui && npm run test:e2e:channels-smoke
-cd apps/desktop-ui && npm run test:e2e:skills-smoke
-node scripts/release-gate/run-all.mjs
+node scripts/release-gate/run-all.mjs --only plugin_security_smoke
 ```
 
+
+## Archived evidence
+
+[Logs, fixture and sanitization notes](release-gate/evidence/2026-10-30/README.md). Local paths were normalized for repository portability.

@@ -9,12 +9,13 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-export const repoRoot = "/Users/kaike/mlx-ollama-pilot";
+export const repoRoot = path.resolve(fileURLToPath(new URL("../../", import.meta.url)));
 export const releaseGateDir = path.join(repoRoot, "scripts", "release-gate");
 export const reportJsonPath = path.join(repoRoot, "docs", "release-gate-report.json");
 export const reportMarkdownPath = path.join(repoRoot, "docs", "release-gate-report.md");
+const spawnErrors = new WeakMap();
 
 export function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -76,7 +77,7 @@ export async function requestJson(baseUrl, method, route, body, options = {}) {
     const response = await fetch(`${baseUrl}${route}`, {
       method,
       headers: {
-        "Content-Type": "application/json",
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         ...headers,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -119,11 +120,12 @@ export async function assertOkJson(baseUrl, method, route, body, options = {}) {
 
 export async function waitForHealth(baseUrl, proc, name = "mlx-ollama-daemon", attempts = 180) {
   for (let index = 0; index < attempts; index += 1) {
-    if (proc.exitCode !== null) {
-      throw new Error(`${name} exited early with code ${proc.exitCode}`);
+    if (spawnErrors.has(proc)) throw spawnErrors.get(proc);
+    if (proc.exitCode !== null || proc.signalCode !== null) {
+      throw new Error(`${name} exited early (${proc.signalCode || proc.exitCode})`);
     }
     try {
-      const response = await fetch(`${baseUrl}/health`);
+      const response = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(2000) });
       if (response.ok) {
         return;
       }
@@ -133,21 +135,18 @@ export async function waitForHealth(baseUrl, proc, name = "mlx-ollama-daemon", a
   throw new Error(`Timed out waiting for ${name} health check`);
 }
 
-function daemonCommand() {
+export function daemonCommand({ root = repoRoot } = {}) {
   const override = process.env.RELEASE_GATE_DAEMON_BIN?.trim();
   if (override) {
-    return { command: override, args: [] };
+    return { command: path.isAbsolute(override) ? override : path.resolve(root, override), args: [] };
   }
 
-  const debugBin = path.join(repoRoot, "target", "debug", "mlx-ollama-daemon");
+  const debugBin = path.join(root, "target", "debug", `mlx-ollama-daemon${process.platform === "win32" ? ".exe" : ""}`);
   if (fsSync.existsSync(debugBin)) {
     return { command: debugBin, args: [] };
   }
 
-  return {
-    command: "cargo",
-    args: ["run", "-p", "mlx-ollama-daemon"],
-  };
+  throw new Error("Compiled daemon not found. Run cargo build -p mlx-ollama-daemon or set RELEASE_GATE_DAEMON_BIN.");
 }
 
 export function startDaemon({
@@ -158,23 +157,41 @@ export function startDaemon({
   env = {},
   name = "release-gate-daemon",
 }) {
-  const logPath = path.join(path.dirname(settingsPath), `${name}.log`);
+  const spec = daemonCommand();
+  const stateDir = path.dirname(settingsPath);
+  const logPath = path.join(stateDir, `${name}.log`);
+  fsSync.mkdirSync(path.join(stateDir, "models"), { recursive: true });
+  fsSync.mkdirSync(path.join(stateDir, "downloads"), { recursive: true });
   const stdout = fsSync.openSync(logPath, "w");
   const pathValue = [...pathPrefix, process.env.PATH || ""].filter(Boolean).join(path.delimiter);
-  const spec = daemonCommand();
-  const proc = spawn(spec.command, spec.args, {
-    cwd: repoRoot,
-    env: {
-      ...process.env,
-      APP_BIND_ADDR: `127.0.0.1:${port}`,
-      APP_SETTINGS_PATH: settingsPath,
-      APP_AGENT_WORKSPACE: workspace,
-      PATH: pathValue,
-      ...env,
-    },
-    stdio: ["ignore", stdout, stdout],
-  });
-  fsSync.closeSync(stdout);
+  let proc;
+  try {
+    proc = spawn(spec.command, spec.args, {
+      cwd: repoRoot,
+      windowsHide: true,
+      env: {
+        ...process.env,
+        ...env,
+        APP_BIND_ADDR: `127.0.0.1:${port}`,
+        APP_SETTINGS_PATH: settingsPath,
+        APP_AGENT_WORKSPACE: workspace,
+        APP_MODELS_DIR: path.join(stateDir, "models"),
+        APP_REMOTE_DOWNLOADS_DIR: path.join(stateDir, "downloads"),
+        APP_LOCAL_PROVIDER: "ollama",
+        APP_OLLAMA_BASE_URL: "http://127.0.0.1:1",
+        APP_LLAMACPP_BASE_URL: "http://127.0.0.1:1",
+        APP_OLLAMA_AUTO_START: "false",
+        APP_OLLAMA_AUTO_INSTALL: "false",
+        APP_LLAMACPP_AUTO_START: "false",
+        APP_LLAMACPP_AUTO_INSTALL: "false",
+        PATH: pathValue,
+      },
+      stdio: ["ignore", stdout, stdout],
+    });
+    proc.on("error", (error) => spawnErrors.set(proc, error));
+  } finally {
+    fsSync.closeSync(stdout);
+  }
 
   return {
     proc,
@@ -184,18 +201,22 @@ export function startDaemon({
 }
 
 export async function stopDaemon(instance, signal = "SIGTERM") {
-  if (!instance?.proc || instance.proc.exitCode !== null) {
+  if (!instance?.proc?.pid || instance.proc.exitCode !== null || instance.proc.signalCode !== null) {
     return;
   }
   instance.proc.kill(signal);
   for (let index = 0; index < 20; index += 1) {
-    if (instance.proc.exitCode !== null) {
+    if (instance.proc.exitCode !== null || instance.proc.signalCode !== null) {
       return;
     }
     await delay(250);
   }
   instance.proc.kill("SIGKILL");
-  await delay(250);
+  for (let index = 0; index < 20; index += 1) {
+    if (instance.proc.exitCode !== null || instance.proc.signalCode !== null) return;
+    await delay(250);
+  }
+  throw new Error(`Daemon did not terminate: ${instance.proc.pid}`);
 }
 
 export async function startJsonServer(handler, label = "json-server") {
@@ -660,10 +681,12 @@ export function canonicalChannelError(payloadOrText) {
 
 export function runReproductionCommands() {
   return [
-    "cargo check -p mlx-ollama-daemon",
+    "cargo build --locked -p mlx-ollama-daemon",
     "cargo test -p mlx-ollama-daemon",
-    "cd apps/desktop-ui && npm run test:e2e:channels-smoke",
-    "cd apps/desktop-ui && npm run test:e2e:skills-smoke",
+    "npm ci --prefix apps/desktop-ui",
+    "npm ci --prefix packages/plugin-sdk",
+    "npm run test:e2e:channels-smoke --prefix apps/desktop-ui",
+    "npm run test:e2e:skills-smoke --prefix apps/desktop-ui",
     "node scripts/release-gate/run-all.mjs",
   ];
 }
@@ -674,6 +697,8 @@ export function isDirectRun(metaUrl) {
 
 export function printStandaloneResult(result) {
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  const status = result.decision?.status ?? result.status;
+  if (status !== "GO" && status !== "pass") process.exitCode = 1;
 }
 
 export async function ensureHealthy(daemon) {

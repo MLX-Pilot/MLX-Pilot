@@ -1,0 +1,4 @@
+2026-10-30T21:21:25.543005Z  INFO mlx_ollama_daemon: starting daemon on 127.0.0.1:53544
+2026-10-30T21:21:25.543895Z  INFO mlx_ollama_daemon: chat provider mode selected: ollama
+2026-10-30T21:21:26.062307Z  WARN mlx_ollama_daemon::startup: llama.cpp runtime unavailable error=provider unavailable: llama-server nao encontrado em 'llama-server' e auto_install=false
+2026-10-30T21:21:26.067731Z  INFO mlx_ollama_daemon::flows: agendador de fluxos iniciado (tick de 30s)

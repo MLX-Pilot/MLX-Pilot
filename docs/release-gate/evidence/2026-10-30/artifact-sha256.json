@@ -1,0 +1,11 @@
+{
+  "bridge_ui_contract.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "bridge_ui_contract.tap": "2f1eb4cee7d12e8d6dd5ad01e030286b9a615c58168df8d344d045e18337783b",
+  "daemon-1.log": "abfa8064ee55f66fd89dc2e888e72ffdd88548b6570f51772623bd73d7fc2ab2",
+  "daemon-2.log": "ae97252c3e3d217292f7080fe0456bb861670a27ceb6164d62c5fb1a6d2246d1",
+  "daemon-3.log": "9ed7dbf770f28f192d8708839acb8b49eb16a7a619a8ac828b4a29b64ec30e25",
+  "fixture-build.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "plugin-security-fixture.json": "8fdf2ad4de637cf8e144768dd8c732f29f1659d192ca63f0b4e2992720a084a0",
+  "sdk_bridge_contract.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "sdk_bridge_contract.tap": "47abb14f45069b07ffd71cf6e57d11997799612365b17efa71788c1982f092d0"
+}
