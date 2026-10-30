@@ -156,6 +156,25 @@ o registro de **67 testes do Studio**, **3 fixtures e 8 testes do Reading Notes
 e `café`. As revisões e os escopos estão em [Fontes e créditos](FONTES-E-CREDITOS.md).
 Esses resultados não renovam o CI histórico nem formam um percentual de cobertura.
 
+## Verificação automática
+
+Na raiz do repositório, use Node.js 22 para verificar o pacote e executar os
+testes de regressão:
+
+```bash
+node docs/apresentacao-plugins/verify.mjs
+node --test scripts/tests/presentation-verifier.test.mjs
+```
+
+O job independente **Offline Presentation**, em `.github/workflows/rust.yml`,
+executa essas verificações em pushes e pull requests para `main`, sem instalar
+pacotes npm, compilar o projeto ou iniciar o MLX-Pilot. O verificador confere os
+recursos locais, as referências executáveis offline e as legendas VTT; falhas
+retornam código de saída diferente de zero. Os testes alteram cópias temporárias
+e preservam as mídias originais: cobrem o pacote válido, MP4 ausente, script remoto
+e tempo inválido de legenda. A revisão visual e a reprodução dos vídeos no
+navegador continuam necessárias antes de apresentar.
+
 ## Compartilhar
 
 Envie a pasta `apresentacao-plugins/` completa ou um ZIP dela. Preserve `assets/`,
