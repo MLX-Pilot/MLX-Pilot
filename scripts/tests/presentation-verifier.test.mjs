@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { appendFile, cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, cp, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -54,4 +54,19 @@ test("a remote executable script fails verification", async (t) => {
   const result = verify(directory);
   assert.equal(result.status, 1, result.stdout);
   assert.match(result.stderr, /<script>: use um caminho relativo local/);
+});
+
+test("an invalid subtitle interval fails verification", async (t) => {
+  const directory = await copyPresentation(t);
+  await writeFile(
+    path.join(directory, "assets", "01-instalar-configurar.vtt"),
+    "WEBVTT\n\n00:00:05.000 --> 00:00:02.000\nIntervalo invertido\n",
+  );
+
+  const result = verify(directory);
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(
+    result.stderr,
+    /01-instalar-configurar\.vtt: tempos de legenda inválidos/,
+  );
 });
