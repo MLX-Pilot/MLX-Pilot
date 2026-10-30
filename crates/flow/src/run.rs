@@ -239,7 +239,10 @@ mod tests {
         let preview = preview_items(&items);
         assert_eq!(preview["truncated"], json!(true));
         assert_eq!(preview["total"], json!(50));
-        assert_eq!(preview["items"].as_array().unwrap().len(), MAX_PREVIEW_ITEMS);
+        assert_eq!(
+            preview["items"].as_array().unwrap().len(),
+            MAX_PREVIEW_ITEMS
+        );
     }
 
     #[test]
@@ -247,11 +250,7 @@ mod tests {
         let big = json!({ "text": "x".repeat(MAX_PREVIEW_CHARS * 2) });
         let preview = preview_items(&[big]);
         assert_eq!(preview["items"][0]["_truncated"], json!(true));
-        assert!(preview["items"][0]["preview"]
-            .as_str()
-            .unwrap()
-            .len()
-            <= MAX_PREVIEW_CHARS);
+        assert!(preview["items"][0]["preview"].as_str().unwrap().len() <= MAX_PREVIEW_CHARS);
     }
 
     #[test]

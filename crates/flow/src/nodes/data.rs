@@ -236,7 +236,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(output.main_items()[0]["user"]["profile"]["name"], json!("Ana"));
+        assert_eq!(
+            output.main_items()[0]["user"]["profile"]["name"],
+            json!("Ana")
+        );
         assert_eq!(output.main_items()[0]["user"]["id"], json!(1));
     }
 

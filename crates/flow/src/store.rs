@@ -46,12 +46,8 @@ impl FlowStore {
 
     /// Todos os fluxos, do mais recente para o mais antigo.
     pub async fn list(&self) -> io::Result<Vec<FlowSummary>> {
-        let mut summaries: Vec<FlowSummary> = self
-            .read_all()
-            .await?
-            .iter()
-            .map(Flow::summary)
-            .collect();
+        let mut summaries: Vec<FlowSummary> =
+            self.read_all().await?.iter().map(Flow::summary).collect();
         summaries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         Ok(summaries)
     }
@@ -310,8 +306,7 @@ mod tests {
 
     fn sample_flow(name: &str) -> Flow {
         let mut flow = Flow::new(name);
-        flow.nodes
-            .push(Node::new("n1", "Start", "trigger.manual"));
+        flow.nodes.push(Node::new("n1", "Start", "trigger.manual"));
         flow
     }
 

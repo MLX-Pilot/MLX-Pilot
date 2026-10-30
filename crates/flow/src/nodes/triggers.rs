@@ -102,7 +102,10 @@ impl NodeExecutor for WebhookTrigger {
                 FieldSpec::new("response_mode", "Resposta", FieldKind::Select)
                     .options(vec![
                         SelectOption::new("last_node", "Devolver a saida do fluxo"),
-                        SelectOption::new("immediate", "Responder na hora e executar em segundo plano"),
+                        SelectOption::new(
+                            "immediate",
+                            "Responder na hora e executar em segundo plano",
+                        ),
                     ])
                     .help("`immediate` responde 202 e nao espera o fluxo terminar."),
             ],

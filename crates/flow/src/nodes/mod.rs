@@ -62,7 +62,9 @@ pub(crate) fn param_str_or(params: &Value, key: &str, fallback: &str) -> String 
 pub(crate) fn param_bool(params: &Value, key: &str, fallback: bool) -> bool {
     match params.get(key) {
         Some(Value::Bool(flag)) => *flag,
-        Some(Value::String(text)) => matches!(text.trim().to_lowercase().as_str(), "true" | "1" | "sim"),
+        Some(Value::String(text)) => {
+            matches!(text.trim().to_lowercase().as_str(), "true" | "1" | "sim")
+        }
         Some(Value::Number(number)) => number.as_f64().map(|n| n != 0.0).unwrap_or(fallback),
         _ => fallback,
     }
