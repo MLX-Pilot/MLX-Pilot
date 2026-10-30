@@ -6,6 +6,9 @@ fn main() -> anyhow::Result<()> {
     let wasm = wat::parse_str(include_str!(
         "../../../scripts/release-gate/fixtures/plugin-security/broker.wat"
     ))?;
-    std::fs::write(output, serde_json::to_vec(&serde_json::json!({ "wasm": wasm }))?)?;
+    std::fs::write(
+        output,
+        serde_json::to_vec(&serde_json::json!({ "wasm": wasm }))?,
+    )?;
     Ok(())
 }
