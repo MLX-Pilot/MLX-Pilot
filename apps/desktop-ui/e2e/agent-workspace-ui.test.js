@@ -2,10 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { TextDecoder, TextEncoder } from "node:util";
-import { JSDOM } from "jsdom";
+import { JSDOM, VirtualConsole } from "jsdom";
 
 const indexHtml = await readFile(new URL("../ui/index.html", import.meta.url), "utf8");
 const appJs = await readFile(new URL("../ui/app.js", import.meta.url), "utf8");
+const stylesCss = await readFile(new URL("../ui/styles.css", import.meta.url), "utf8");
 
 function jsonResponse(data, status = 200) {
   return {
@@ -1174,6 +1175,25 @@ test("sidebar global aparece apenas no chat e some nas outras abas", async () =>
     assert.equal(fixture.document.getElementById("app")?.classList.contains("chat-sidebar-visible"), true);
   } finally {
     fixture.cleanup();
+  }
+});
+
+test("folha de estilos preserva o layout do editor de fluxos", () => {
+  const errors = [];
+  const virtualConsole = new VirtualConsole().on("jsdomError", (error) => errors.push(error.message));
+  const dom = new JSDOM('<!doctype html><style></style><section class="workflow-builder flow-editor-primary"></section>', { virtualConsole });
+
+  try {
+    const style = dom.window.document.querySelector("style");
+    style.textContent = stylesCss;
+    assert.deepEqual(errors, [], "a folha de estilos deve ser aceita pelo parser");
+    assert.ok(style.sheet?.cssRules.length, "as regras de estilo devem estar disponíveis");
+    const builder = dom.window.document.querySelector(".workflow-builder");
+    const computed = dom.window.getComputedStyle(builder);
+    assert.equal(computed.minWidth, "0");
+    assert.equal(computed.overflow, "hidden");
+  } finally {
+    dom.window.close();
   }
 });
 
