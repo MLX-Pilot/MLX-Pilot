@@ -26,9 +26,7 @@ pub struct HttpRequestNode {
 impl Default for HttpRequestNode {
     fn default() -> Self {
         Self {
-            client: Client::builder()
-                .build()
-                .unwrap_or_else(|_| Client::new()),
+            client: Client::builder().build().unwrap_or_else(|_| Client::new()),
         }
     }
 }
@@ -80,13 +78,12 @@ impl NodeExecutor for HttpRequestNode {
                 FieldSpec::new("body", "Corpo", FieldKind::Json)
                     .help("Para JSON, aceita objeto ou string com JSON valido."),
                 FieldSpec::new("timeout_secs", "Timeout (s)", FieldKind::Number),
-                FieldSpec::new("response_format", "Formato da resposta", FieldKind::Select).options(
-                    vec![
+                FieldSpec::new("response_format", "Formato da resposta", FieldKind::Select)
+                    .options(vec![
                         SelectOption::new("auto", "Automatico pelo content-type"),
                         SelectOption::new("json", "Sempre JSON"),
                         SelectOption::new("text", "Sempre texto"),
-                    ],
-                ),
+                    ]),
                 FieldSpec::new(
                     "fail_on_error_status",
                     "Falhar em status 4xx/5xx",
@@ -152,7 +149,12 @@ impl NodeExecutor for HttpRequestNode {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
-            let raw = response.text().await.unwrap_or_default();
+            let raw = response.text().await.map_err(|error| {
+                NodeError::with_details(
+                    format!("a leitura da resposta de {} falhou: {error}", spec.url),
+                    json!({ "url": spec.url, "status": status.as_u16() }),
+                )
+            })?;
 
             let body = match spec.response_format.as_str() {
                 "text" => Value::String(raw),
@@ -269,6 +271,63 @@ impl RequestSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::UnavailableHost;
+    use crate::model::Node;
+    use chrono::Utc;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn truncated_response_body_fails_in_auto_and_text_modes() {
+        for format in ["auto", "text"] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    let mut chunk = [0; 1024];
+                    let read = stream.read(&mut chunk).await.unwrap();
+                    assert!(read > 0, "request ended before its headers");
+                    request.extend_from_slice(&chunk[..read]);
+                }
+                stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nshort")
+                    .await
+                    .unwrap();
+                stream.shutdown().await.unwrap();
+            });
+            let executor = HttpRequestNode {
+                client: Client::builder().no_proxy().build().unwrap(),
+            };
+            let mut node = Node::new("http", "HTTP", "http.request");
+            node.parameters = json!({
+                "url": format!("http://{address}"),
+                "response_format": format,
+            });
+            let ctx = NodeContext {
+                node: &node,
+                flow_id: "test",
+                run_id: "test",
+                items: vec![json!({})],
+                nodes: &HashMap::new(),
+                env: &Map::new(),
+                trigger_payload: &Value::Null,
+                now: Utc::now(),
+                host: Arc::new(UnavailableHost),
+            };
+
+            let error = tokio::time::timeout(Duration::from_secs(5), executor.execute(&ctx))
+                .await
+                .unwrap()
+                .unwrap_err();
+            server.await.unwrap();
+            assert!(error.message.contains("leitura da resposta"));
+            assert_eq!(error.details.unwrap()["status"], 200);
+        }
+    }
 
     #[test]
     fn spec_requires_an_absolute_url() {
@@ -357,7 +416,10 @@ mod tests {
             "query": { "page": 2 }
         }))
         .unwrap();
-        assert_eq!(spec.headers, vec![("x-token".to_string(), "123".to_string())]);
+        assert_eq!(
+            spec.headers,
+            vec![("x-token".to_string(), "123".to_string())]
+        );
         assert_eq!(spec.query, vec![("page".to_string(), "2".to_string())]);
     }
 }
