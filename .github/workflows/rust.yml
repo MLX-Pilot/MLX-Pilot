@@ -38,6 +38,17 @@ jobs:
       - name: Test
         run: cargo test --workspace --verbose
 
+  offline-presentation:
+    name: Offline Presentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify portable presentation
+        run: node docs/apresentacao-plugins/verify.mjs
+
   presentation-studio:
     name: Presentation Studio & Plugin SDK
     runs-on: ubuntu-latest
