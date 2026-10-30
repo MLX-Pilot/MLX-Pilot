@@ -244,10 +244,7 @@ impl NodeOutput {
 
     /// Itens da porta padrao.
     pub fn main_items(&self) -> &[Value] {
-        self.ports
-            .get(MAIN_PORT)
-            .map(Vec::as_slice)
-            .unwrap_or(&[])
+        self.ports.get(MAIN_PORT).map(Vec::as_slice).unwrap_or(&[])
     }
 
     /// Todos os itens de todas as portas, para o registro da execucao.

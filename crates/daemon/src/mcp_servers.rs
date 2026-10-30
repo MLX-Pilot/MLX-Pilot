@@ -266,7 +266,10 @@ mod tests {
         McpServerConfig {
             name: name.to_string(),
             command: "npx".to_string(),
-            args: vec!["-y".to_string(), "@modelcontextprotocol/server-filesystem".to_string()],
+            args: vec![
+                "-y".to_string(),
+                "@modelcontextprotocol/server-filesystem".to_string(),
+            ],
             env: HashMap::new(),
             cwd: None,
             enabled: true,

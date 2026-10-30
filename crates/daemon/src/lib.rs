@@ -698,7 +698,10 @@ pub async fn run() -> anyhow::Result<()> {
         .route("/flows/runs", get(flows::list_all_runs))
         .route("/flows/runs/{run_id}", get(flows::get_run))
         .route("/flows/webhook/{*path}", any(flows::webhook))
-        .route("/flows/{id}", get(flows::get_flow).delete(flows::delete_flow))
+        .route(
+            "/flows/{id}",
+            get(flows::get_flow).delete(flows::delete_flow),
+        )
         .route("/flows/{id}/run", post(flows::run_flow))
         .route("/flows/{id}/runs", get(flows::list_flow_runs))
         // ── Agent API ──

@@ -58,7 +58,9 @@ pub fn from_n8n(source: &Value) -> Result<ImportReport, String> {
 
     for (index, raw) in raw_nodes.iter().enumerate() {
         let Some(node_object) = raw.as_object() else {
-            warnings.push(format!("o no na posicao {index} nao e um objeto e foi ignorado."));
+            warnings.push(format!(
+                "o no na posicao {index} nao e um objeto e foi ignorado."
+            ));
             continue;
         };
 
@@ -102,7 +104,12 @@ pub fn from_n8n(source: &Value) -> Result<ImportReport, String> {
                 "o no \"{name}\" era do tipo `{n8n_type}`, que nao tem equivalente nativo: virou um `debug.log` com nota."
             ));
         }
-        warnings.extend(converted.warnings.into_iter().map(|warning| format!("\"{name}\": {warning}")));
+        warnings.extend(
+            converted
+                .warnings
+                .into_iter()
+                .map(|warning| format!("\"{name}\": {warning}")),
+        );
 
         let mut node = Node::new(id.clone(), name.clone(), converted.kind.clone());
         node.parameters = converted.parameters;
@@ -132,10 +139,7 @@ pub fn from_n8n(source: &Value) -> Result<ImportReport, String> {
                 ));
                 continue;
             };
-            let source_kind = kind_by_name
-                .get(source_name)
-                .cloned()
-                .unwrap_or_default();
+            let source_kind = kind_by_name.get(source_name).cloned().unwrap_or_default();
 
             let Some(main_outputs) = outputs.get("main").and_then(Value::as_array) else {
                 continue;
@@ -167,9 +171,8 @@ pub fn from_n8n(source: &Value) -> Result<ImportReport, String> {
         }
         // `connections` e um mapa sem ordem garantida; ordena para o import ser
         // reproduzivel.
-        flow.edges.sort_by(|a, b| {
-            (&a.from, &a.from_port, &a.to).cmp(&(&b.from, &b.from_port, &b.to))
-        });
+        flow.edges
+            .sort_by(|a, b| (&a.from, &a.from_port, &a.to).cmp(&(&b.from, &b.from_port, &b.to)));
     }
 
     let mut unsupported_kinds: Vec<String> = unsupported.into_iter().collect();

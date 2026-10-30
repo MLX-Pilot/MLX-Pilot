@@ -262,7 +262,10 @@ where
         if !node.parameters.is_object() {
             issues.push(ValidationIssue::error(
                 "node_parameters_invalid",
-                format!("Os parametros do no \"{}\" precisam ser um objeto.", node.name),
+                format!(
+                    "Os parametros do no \"{}\" precisam ser um objeto.",
+                    node.name
+                ),
                 vec![node.id.clone()],
             ));
         }
@@ -280,7 +283,10 @@ where
         if !valid_ids.contains(edge.from.as_str()) {
             issues.push(ValidationIssue::error(
                 "edge_source_unknown",
-                format!("Conexao aponta para um no de origem inexistente: \"{}\".", edge.from),
+                format!(
+                    "Conexao aponta para um no de origem inexistente: \"{}\".",
+                    edge.from
+                ),
                 Vec::new(),
             ));
             continue;
@@ -288,7 +294,10 @@ where
         if !valid_ids.contains(edge.to.as_str()) {
             issues.push(ValidationIssue::error(
                 "edge_target_unknown",
-                format!("Conexao aponta para um no de destino inexistente: \"{}\".", edge.to),
+                format!(
+                    "Conexao aponta para um no de destino inexistente: \"{}\".",
+                    edge.to
+                ),
                 Vec::new(),
             ));
             continue;
@@ -546,7 +555,10 @@ mod tests {
         flow.edges.push(Edge::new("a", "d"));
         let graph = FlowGraph::build(&flow, |_| true).unwrap();
         let last = graph.levels().last().unwrap();
-        assert_eq!(last.iter().map(|i| graph.node_id(*i)).collect::<Vec<_>>(), vec!["d"]);
+        assert_eq!(
+            last.iter().map(|i| graph.node_id(*i)).collect::<Vec<_>>(),
+            vec!["d"]
+        );
     }
 
     #[test]
@@ -602,7 +614,10 @@ mod tests {
         let flow = flow_with(&[("a", "trigger.manual")], &[("a", "fantasma")]);
         let report = validate(&flow, |_| true);
         assert!(!report.valid);
-        assert!(report.issues.iter().any(|i| i.code == "edge_target_unknown"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.code == "edge_target_unknown"));
     }
 
     #[test]
