@@ -362,3 +362,28 @@ cargo test -p mlx-flow
 ```bash
 npm --prefix apps/desktop-ui run test:e2e:agent-workspace-ui
 ```
+
+O smoke abaixo inicia um daemon real com configuracao, modelos e workspace em
+um diretorio temporario e uma porta local livre. Nao precisa de Ollama, modelo
+instalado, dependencias npm ou servico externo:
+
+```bash
+cargo build -p mlx-ollama-daemon
+node scripts/smoke-native-workflows.mjs target/debug/mlx-ollama-daemon
+```
+
+No Windows, acrescente `.exe` ao caminho do binario. O teste cobre persistencia,
+expressoes, os dois ramos de uma condicao, historico, rejeicao de ciclos,
+importacao de n8n, webhook, MCP por stdio e leitura de arquivo no workspace
+isolado. Ele remove os dados temporarios e encerra o daemon ao terminar.
+Inferencia com modelo real deve ser conferida separadamente.
+
+Para verificar os servidores de preview e a integracao da interface:
+
+```bash
+node --test scripts/tests/preview-servers.test.mjs
+npm ci --prefix apps/desktop-ui
+node --test apps/desktop-ui/e2e/*.test.js
+```
+
+O CI executa essas verificacoes junto com os testes Rust, Clippy e formatacao.
