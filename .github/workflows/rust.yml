@@ -42,6 +42,22 @@ jobs:
           node-version: '22'
       - name: Smoke test native workflows against the real daemon
         run: node scripts/smoke-native-workflows.mjs target/debug/mlx-ollama-daemon
+      - name: Install plugin bridge audit dependencies
+        run: |
+          npm ci --prefix apps/desktop-ui
+          npm ci --prefix packages/plugin-sdk
+      - name: Audit plugin broker, WASM limits and bridge contracts
+        env:
+          RELEASE_GATE_DAEMON_BIN: ${{ github.workspace }}/target/debug/mlx-ollama-daemon
+          RELEASE_GATE_OUTPUT_DIR: ${{ runner.temp }}/plugin-security-audit
+        run: node scripts/release-gate/plugin-security-smoke.mjs
+      - name: Preserve plugin security audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-security-audit
+          path: ${{ runner.temp }}/plugin-security-audit
+          if-no-files-found: error
 
   preview-servers:
     name: Preview Servers
@@ -53,6 +69,8 @@ jobs:
           node-version: '22'
       - name: Test isolated previews and invalid request paths
         run: node --test scripts/tests/preview-servers.test.mjs
+      - name: Test release decision and bridge audit failures
+        run: node --test scripts/tests/release-gate.test.mjs scripts/tests/plugin-bridge-security.test.mjs
 
   offline-presentation:
     name: Offline Presentation
