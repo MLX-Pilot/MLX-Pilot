@@ -283,6 +283,27 @@ curl -X POST http://127.0.0.1:11435/chat \
 
 ---
 
+## Validar a apresentação offline
+
+O job independente **Offline Presentation** de `.github/workflows/rust.yml`
+roda em pushes e pull requests para `main`, usando Node.js 22. Para repetir
+localmente, execute na raiz do repositório:
+
+```bash
+node docs/apresentacao-plugins/verify.mjs
+node --test scripts/tests/presentation-verifier.test.mjs
+```
+
+Não é necessário instalar pacotes npm, fazer build ou iniciar o MLX-Pilot.
+O verificador confere recursos locais, referências executáveis offline e VTT,
+retornando código diferente de zero quando encontra falhas. Os testes usam cópias
+temporárias, sem alterar as mídias originais, para verificar o pacote válido,
+MP4 ausente, script remoto e tempo inválido de legenda. A revisão visual e a
+reprodução no navegador continuam necessárias; veja o
+[guia da apresentação](docs/apresentacao-plugins/README.md).
+
+---
+
 ## Resumo rapido
 
 - Backend: `crates/daemon`
