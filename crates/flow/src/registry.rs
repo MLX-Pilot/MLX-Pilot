@@ -309,6 +309,8 @@ impl<'a> NodeContext<'a> {
 }
 
 /// Um tipo de no executavel.
+// async-trait generates #[must_use] on future-returning methods.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait NodeExecutor: Send + Sync {
     fn descriptor(&self) -> NodeDescriptor;
