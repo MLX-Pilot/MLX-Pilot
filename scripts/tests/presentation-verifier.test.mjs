@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -42,4 +42,16 @@ test("a missing video fails verification", async (t) => {
   const result = verify(directory);
   assert.equal(result.status, 1, result.stdout);
   assert.match(result.stderr, /arquivo indisponível.*01-instalar-configurar\.mp4/);
+});
+
+test("a remote executable script fails verification", async (t) => {
+  const directory = await copyPresentation(t);
+  await appendFile(
+    path.join(directory, "index.html"),
+    '\n<script defer src="https://example.invalid/remote.js"></script>\n',
+  );
+
+  const result = verify(directory);
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /<script>: use um caminho relativo local/);
 });
