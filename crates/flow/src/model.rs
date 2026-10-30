@@ -346,7 +346,8 @@ mod tests {
     #[test]
     fn named_port_survives_round_trip() {
         let edge = Edge::from_port("if-node", "false", "log-node");
-        let round_trip: Edge = serde_json::from_value(serde_json::to_value(&edge).unwrap()).unwrap();
+        let round_trip: Edge =
+            serde_json::from_value(serde_json::to_value(&edge).unwrap()).unwrap();
         assert_eq!(round_trip.from_port, "false");
         assert_eq!(round_trip.to_port, MAIN_PORT);
     }

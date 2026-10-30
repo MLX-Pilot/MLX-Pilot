@@ -302,7 +302,11 @@ impl StdioTransport {
         for (key, value) in &config.env {
             command.env(key, value);
         }
-        if let Some(cwd) = config.cwd.as_deref().filter(|value| !value.trim().is_empty()) {
+        if let Some(cwd) = config
+            .cwd
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
             command.current_dir(cwd);
         }
 
@@ -334,14 +338,12 @@ impl StdioTransport {
 impl McpTransport for StdioTransport {
     async fn send(&self, line: String) -> Result<(), McpError> {
         let mut stdin = self.stdin.lock().await;
-        stdin
-            .write_all(line.as_bytes())
-            .await
-            .map_err(|error| McpError::new(format!("falha ao escrever no servidor MCP: {error}")))?;
-        stdin
-            .write_all(b"\n")
-            .await
-            .map_err(|error| McpError::new(format!("falha ao escrever no servidor MCP: {error}")))?;
+        stdin.write_all(line.as_bytes()).await.map_err(|error| {
+            McpError::new(format!("falha ao escrever no servidor MCP: {error}"))
+        })?;
+        stdin.write_all(b"\n").await.map_err(|error| {
+            McpError::new(format!("falha ao escrever no servidor MCP: {error}"))
+        })?;
         stdin
             .flush()
             .await
@@ -369,10 +371,7 @@ impl McpTransport for StdioTransport {
 }
 
 /// Sobe o servidor, faz o handshake e devolve o cliente pronto.
-pub async fn connect(
-    config: &McpServerConfig,
-    timeout: Duration,
-) -> Result<McpClient, McpError> {
+pub async fn connect(config: &McpServerConfig, timeout: Duration) -> Result<McpClient, McpError> {
     let transport = StdioTransport::spawn(config).await?;
     let client = McpClient::new(Box::new(transport), timeout);
     client.initialize().await?;
@@ -460,7 +459,10 @@ mod tests {
 
         let sent = sent_log.lock().unwrap();
         assert_eq!(sent[0]["method"], json!("initialize"));
-        assert_eq!(sent[0]["params"]["protocolVersion"], json!(MCP_PROTOCOL_VERSION));
+        assert_eq!(
+            sent[0]["params"]["protocolVersion"],
+            json!(MCP_PROTOCOL_VERSION)
+        );
         assert_eq!(sent[1]["method"], json!("notifications/initialized"));
         // A notificacao nao leva id.
         assert!(sent[1].get("id").is_none());
@@ -468,13 +470,11 @@ mod tests {
 
     #[tokio::test]
     async fn list_tools_reads_both_schema_spellings() {
-        let client = client_with(vec![
-            r#"{"jsonrpc":"2.0","id":1,"result":{"tools":[
+        let client = client_with(vec![r#"{"jsonrpc":"2.0","id":1,"result":{"tools":[
                 {"name":"read_file","description":"Le um arquivo","inputSchema":{"type":"object"}},
                 {"name":"outro","input_schema":{"type":"object","properties":{}}}
             ]}}"#
-                .to_string(),
-        ]);
+            .to_string()]);
 
         let tools = client.list_tools().await.unwrap();
         assert_eq!(tools.len(), 2);
@@ -495,14 +495,12 @@ mod tests {
 
     #[tokio::test]
     async fn call_tool_joins_the_text_blocks() {
-        let client = client_with(vec![
-            r#"{"jsonrpc":"2.0","id":1,"result":{"content":[
+        let client = client_with(vec![r#"{"jsonrpc":"2.0","id":1,"result":{"content":[
                 {"type":"text","text":"linha 1"},
                 {"type":"text","text":"linha 2"},
                 {"type":"image","data":"..."}
             ]}}"#
-                .to_string(),
-        ]);
+            .to_string()]);
 
         let result = client.call_tool("x", json!({ "a": 1 })).await.unwrap();
         assert_eq!(result.text, "linha 1\nlinha 2");
@@ -529,7 +527,11 @@ mod tests {
         ]);
 
         let error = client.list_tools().await.unwrap_err();
-        assert!(error.message.contains("Method not found"), "{}", error.message);
+        assert!(
+            error.message.contains("Method not found"),
+            "{}",
+            error.message
+        );
         assert!(error.message.contains("-32601"));
     }
 

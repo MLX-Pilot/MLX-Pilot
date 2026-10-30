@@ -208,7 +208,11 @@ fn split_template(template: &str) -> Result<Vec<Segment>, ExprError> {
     let mut position = 0usize;
 
     while position < chars.len() {
-        if chars[position] == '\\' && position + 2 < chars.len() && chars[position + 1] == '{' && chars[position + 2] == '{' {
+        if chars[position] == '\\'
+            && position + 2 < chars.len()
+            && chars[position + 1] == '{'
+            && chars[position + 2] == '{'
+        {
             text.push_str("{{");
             position += 3;
             continue;
@@ -223,7 +227,10 @@ fn split_template(template: &str) -> Result<Vec<Segment>, ExprError> {
             })?;
             let expr: String = chars[start..end].iter().collect();
             if expr.trim().is_empty() {
-                return Err(ExprError::new(template, "expressao vazia entre `{{` e `}}`"));
+                return Err(ExprError::new(
+                    template,
+                    "expressao vazia entre `{{` e `}}`",
+                ));
             }
             segments.push(Segment::Expr(expr.trim().to_string()));
             position = end + 2;
@@ -328,7 +335,8 @@ fn tokenize(source: &str) -> Result<Vec<Token>, ExprError> {
             let mut end = position;
             while end < chars.len() && (chars[end].is_ascii_digit() || chars[end] == '.') {
                 // Um ponto so faz parte do numero se vier outro digito depois.
-                if chars[end] == '.' && !(end + 1 < chars.len() && chars[end + 1].is_ascii_digit()) {
+                if chars[end] == '.' && !(end + 1 < chars.len() && chars[end + 1].is_ascii_digit())
+                {
                     break;
                 }
                 end += 1;
@@ -376,7 +384,9 @@ fn tokenize(source: &str) -> Result<Vec<Token>, ExprError> {
             continue;
         }
 
-        let two: String = chars[position..(position + 2).min(chars.len())].iter().collect();
+        let two: String = chars[position..(position + 2).min(chars.len())]
+            .iter()
+            .collect();
         let two_char_op = match two.as_str() {
             "==" => Some("=="),
             "!=" => Some("!="),
@@ -652,9 +662,8 @@ fn eval_expr(expr: &Expr, scope: &ExprScope, source: &str) -> Result<Value, Expr
         Expr::Not(inner) => Ok(Value::Bool(!truthy(&eval_expr(inner, scope, source)?))),
         Expr::Negate(inner) => {
             let value = eval_expr(inner, scope, source)?;
-            let number = as_number(&value).ok_or_else(|| {
-                ExprError::new(source, "`-` exige um numero")
-            })?;
+            let number =
+                as_number(&value).ok_or_else(|| ExprError::new(source, "`-` exige um numero"))?;
             Ok(number_value(-number))
         }
         Expr::Binary(operator, left, right) => {
@@ -856,7 +865,12 @@ fn binary(operator: &str, left: &Value, right: &Value, source: &str) -> Result<V
     }
 }
 
-fn arithmetic(operator: &str, left: &Value, right: &Value, source: &str) -> Result<Value, ExprError> {
+fn arithmetic(
+    operator: &str,
+    left: &Value,
+    right: &Value,
+    source: &str,
+) -> Result<Value, ExprError> {
     let (Some(a), Some(b)) = (as_number(left), as_number(right)) else {
         return Err(ExprError::new(
             source,
@@ -933,14 +947,22 @@ fn call_function(
             }
             let a = as_number(&arg(0)).unwrap_or(f64::NAN);
             let b = as_number(&arg(1)).unwrap_or(f64::NAN);
-            Ok(number_value(if name == "min" { a.min(b) } else { a.max(b) }))
+            Ok(number_value(if name == "min" {
+                a.min(b)
+            } else {
+                a.max(b)
+            }))
         }
         "default" => {
             if args.len() < 2 {
                 return Err(arity_error("2 argumentos"));
             }
             let candidate = arg(0);
-            Ok(if truthy(&candidate) { candidate } else { arg(1) })
+            Ok(if truthy(&candidate) {
+                candidate
+            } else {
+                arg(1)
+            })
         }
         "if" => {
             if args.len() < 3 {

@@ -36,12 +36,14 @@ impl NodeExecutor for IfNode {
             inputs: vec![MAIN_PORT.to_string()],
             outputs: vec![TRUE_PORT.to_string(), FALSE_PORT.to_string()],
             defaults: json!({ "condition": "{{ $json.status == 200 }}" }),
-            fields: vec![FieldSpec::new("condition", "Condicao", FieldKind::Expression)
-                .required()
-                .placeholder("{{ $json.status == 200 }}")
-                .help(
-                    "Avaliada item a item. Vazio, zero, lista vazia e null contam como falso.",
-                )],
+            fields: vec![
+                FieldSpec::new("condition", "Condicao", FieldKind::Expression)
+                    .required()
+                    .placeholder("{{ $json.status == 200 }}")
+                    .help(
+                        "Avaliada item a item. Vazio, zero, lista vazia e null contam como falso.",
+                    ),
+            ],
         }
     }
 
@@ -96,11 +98,13 @@ impl NodeExecutor for MergeNode {
             inputs: vec![MAIN_PORT.to_string()],
             outputs: vec![MAIN_PORT.to_string()],
             defaults: json!({ "mode": "append" }),
-            fields: vec![FieldSpec::new("mode", "Modo", FieldKind::Select).options(vec![
-                SelectOption::new("append", "Todos os itens, na ordem de chegada"),
-                SelectOption::new("first", "Somente o primeiro item"),
-                SelectOption::new("last", "Somente o ultimo item"),
-            ])],
+            fields: vec![
+                FieldSpec::new("mode", "Modo", FieldKind::Select).options(vec![
+                    SelectOption::new("append", "Todos os itens, na ordem de chegada"),
+                    SelectOption::new("first", "Somente o primeiro item"),
+                    SelectOption::new("last", "Somente o ultimo item"),
+                ]),
+            ],
         }
     }
 

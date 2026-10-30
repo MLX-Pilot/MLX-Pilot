@@ -191,7 +191,11 @@ impl FlowHost for DaemonFlowHost {
             },
         };
 
-        match self.tools.dispatch(&request.name, &request.params, &ctx).await {
+        match self
+            .tools
+            .dispatch(&request.name, &request.params, &ctx)
+            .await
+        {
             Ok(result) => Ok(ToolNodeResult {
                 output: result.output,
                 is_error: result.is_error,
@@ -326,11 +330,7 @@ pub async fn save_mcp_server(
 ) -> Response {
     match state.flows.mcp.save(server).await {
         Ok(servers) => Json(json!({ "servers": servers })).into_response(),
-        Err(message) => flow_error(
-            StatusCode::BAD_REQUEST,
-            "mcp_server_invalid",
-            Some(message),
-        ),
+        Err(message) => flow_error(StatusCode::BAD_REQUEST, "mcp_server_invalid", Some(message)),
     }
 }
 
@@ -596,7 +596,11 @@ pub async fn webhook(
         };
     };
 
-    let Some(flow) = flows.iter().find(|flow| flow.id == binding.flow_id).cloned() else {
+    let Some(flow) = flows
+        .iter()
+        .find(|flow| flow.id == binding.flow_id)
+        .cloned()
+    else {
         return flow_error(
             StatusCode::NOT_FOUND,
             "flow_not_found",
@@ -742,7 +746,11 @@ impl FlowScheduler {
             }
             self.last_fired.insert(key, now);
 
-            let Some(flow) = flows.iter().find(|flow| flow.id == binding.flow_id).cloned() else {
+            let Some(flow) = flows
+                .iter()
+                .find(|flow| flow.id == binding.flow_id)
+                .cloned()
+            else {
                 continue;
             };
 

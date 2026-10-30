@@ -7,7 +7,6 @@
 use async_trait::async_trait;
 use serde_json::{json, Map, Value};
 
-
 use crate::host::{AgentNodeRequest, McpNodeRequest, ToolNodeRequest};
 use crate::model::MAIN_PORT;
 use crate::registry::{
@@ -62,13 +61,21 @@ impl NodeExecutor for AgentNode {
                     .help("Lista de nomes. Vazia roda sem ferramenta nenhuma."),
                 FieldSpec::new("max_iterations", "Iteracoes maximas", FieldKind::Number)
                     .help("1 desliga o laco de ferramentas e devolve a primeira resposta."),
-                FieldSpec::new("parse_json", "Interpretar a resposta como JSON", FieldKind::Boolean)
-                    .help("Falha se o modelo nao devolver JSON valido."),
+                FieldSpec::new(
+                    "parse_json",
+                    "Interpretar a resposta como JSON",
+                    FieldKind::Boolean,
+                )
+                .help("Falha se o modelo nao devolver JSON valido."),
                 FieldSpec::new("output_key", "Campo de saida", FieldKind::Text)
                     .placeholder("response")
                     .advanced(),
-                FieldSpec::new("keep_input", "Manter os campos de entrada", FieldKind::Boolean)
-                    .advanced(),
+                FieldSpec::new(
+                    "keep_input",
+                    "Manter os campos de entrada",
+                    FieldKind::Boolean,
+                )
+                .advanced(),
                 // Herdados do provedor escolhido; so aparecem para sobrescrever.
                 FieldSpec::new("base_url", "Base URL", FieldKind::Text)
                     .placeholder("herdada do provedor selecionado")
@@ -169,7 +176,6 @@ fn parse_json_payload(text: &str) -> Result<Value, NodeError> {
     ))
 }
 
-
 /// Chama uma ferramenta de um servidor MCP configurado no MLX Pilot.
 pub struct McpNode;
 
@@ -199,12 +205,20 @@ impl NodeExecutor for McpNode {
                 FieldSpec::dynamic("tool", "Ferramenta", OptionsSource::McpTools).required(),
                 FieldSpec::new("arguments", "Argumentos", FieldKind::Json)
                     .help("Objeto JSON com os argumentos da ferramenta. Aceita expressoes."),
-                FieldSpec::new("parse_json", "Interpretar a saida como JSON", FieldKind::Boolean),
+                FieldSpec::new(
+                    "parse_json",
+                    "Interpretar a saida como JSON",
+                    FieldKind::Boolean,
+                ),
                 FieldSpec::new("output_key", "Campo de saida", FieldKind::Text)
                     .placeholder("mcp_output")
                     .advanced(),
-                FieldSpec::new("keep_input", "Manter os campos de entrada", FieldKind::Boolean)
-                    .advanced(),
+                FieldSpec::new(
+                    "keep_input",
+                    "Manter os campos de entrada",
+                    FieldKind::Boolean,
+                )
+                .advanced(),
             ],
         }
     }
@@ -243,9 +257,7 @@ impl NodeExecutor for McpNode {
 
             let value = if param_bool(&params, "parse_json", false) {
                 serde_json::from_str::<Value>(result.text.trim()).map_err(|error| {
-                    NodeError::new(format!(
-                        "a saida de `{tool}` nao era JSON valido: {error}"
-                    ))
+                    NodeError::new(format!("a saida de `{tool}` nao era JSON valido: {error}"))
                 })?
             } else {
                 Value::String(result.text.clone())
@@ -298,12 +310,20 @@ impl NodeExecutor for ToolNode {
                     .help("Objeto JSON com os argumentos da ferramenta. Aceita expressoes."),
                 FieldSpec::new("read_only", "Somente leitura", FieldKind::Boolean)
                     .help("Bloqueia escrita e execucao de comandos."),
-                FieldSpec::new("parse_json", "Interpretar a saida como JSON", FieldKind::Boolean),
+                FieldSpec::new(
+                    "parse_json",
+                    "Interpretar a saida como JSON",
+                    FieldKind::Boolean,
+                ),
                 FieldSpec::new("output_key", "Campo de saida", FieldKind::Text)
                     .placeholder("tool_output")
                     .advanced(),
-                FieldSpec::new("keep_input", "Manter os campos de entrada", FieldKind::Boolean)
-                    .advanced(),
+                FieldSpec::new(
+                    "keep_input",
+                    "Manter os campos de entrada",
+                    FieldKind::Boolean,
+                )
+                .advanced(),
                 // Herdado do workspace do agente.
                 FieldSpec::new("workspace_root", "Raiz do workspace", FieldKind::Text)
                     .placeholder("herdada do workspace do agente")
@@ -328,11 +348,9 @@ impl NodeExecutor for ToolNode {
                 read_only: param_bool(&params, "read_only", true),
             };
 
-            let result = ctx
-                .host
-                .call_tool(request)
-                .await
-                .map_err(|error| NodeError::new(format!("a ferramenta `{name}` falhou: {error}")))?;
+            let result = ctx.host.call_tool(request).await.map_err(|error| {
+                NodeError::new(format!("a ferramenta `{name}` falhou: {error}"))
+            })?;
 
             if result.is_error {
                 return Err(NodeError::with_details(
@@ -584,9 +602,14 @@ mod tests {
     #[tokio::test]
     async fn agent_node_requires_a_message() {
         let host = Arc::new(SpyHost::default());
-        let error = run_node(&AgentNode, json!({ "message": "  " }), vec![json!({})], host)
-            .await
-            .unwrap_err();
+        let error = run_node(
+            &AgentNode,
+            json!({ "message": "  " }),
+            vec![json!({})],
+            host,
+        )
+        .await
+        .unwrap_err();
         assert!(error.message.contains("mensagem"));
     }
 
@@ -669,9 +692,14 @@ mod tests {
     async fn mcp_node_requires_server_and_tool() {
         let host = Arc::new(SpyHost::default());
 
-        let sem_servidor = run_node(&McpNode, json!({ "tool": "x" }), vec![json!({})], host.clone())
-            .await
-            .unwrap_err();
+        let sem_servidor = run_node(
+            &McpNode,
+            json!({ "tool": "x" }),
+            vec![json!({})],
+            host.clone(),
+        )
+        .await
+        .unwrap_err();
         assert!(sem_servidor.message.contains("servidor MCP"));
 
         let sem_ferramenta = run_node(&McpNode, json!({ "server": "s" }), vec![json!({})], host)
@@ -736,5 +764,4 @@ mod tests {
         );
         assert!(parse_json_payload("sem json aqui").is_err());
     }
-
 }
