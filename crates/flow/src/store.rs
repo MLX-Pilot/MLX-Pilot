@@ -48,7 +48,7 @@ impl FlowStore {
     pub async fn list(&self) -> io::Result<Vec<FlowSummary>> {
         let mut summaries: Vec<FlowSummary> =
             self.read_all().await?.iter().map(Flow::summary).collect();
-        summaries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        summaries.sort_by_key(|summary| std::cmp::Reverse(summary.updated_at));
         Ok(summaries)
     }
 
@@ -154,7 +154,7 @@ impl FlowStore {
             .filter(|run| flow_id.is_none_or(|id| run.flow_id == id))
             .map(RunRecord::summary)
             .collect();
-        runs.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+        runs.sort_by_key(|run| std::cmp::Reverse(run.started_at));
         runs.truncate(limit);
         Ok(runs)
     }
@@ -201,7 +201,7 @@ impl FlowStore {
         if files.len() <= keep {
             return Ok(());
         }
-        files.sort_by(|a, b| b.0.cmp(&a.0));
+        files.sort_by_key(|file| std::cmp::Reverse(file.0));
         for (_, path) in files.into_iter().skip(keep) {
             let _ = fs::remove_file(path).await;
         }

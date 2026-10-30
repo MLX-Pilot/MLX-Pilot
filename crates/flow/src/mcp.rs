@@ -103,6 +103,8 @@ pub struct McpTool {
 }
 
 /// Transporte de linhas JSON-RPC.
+// async-trait generates #[must_use] on future-returning methods.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait McpTransport: Send + Sync {
     /// Envia uma linha (sem `\n`; o transporte acrescenta).
