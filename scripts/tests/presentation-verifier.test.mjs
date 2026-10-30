@@ -1,0 +1,45 @@
+import assert from "node:assert/strict";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import test from "node:test";
+
+const presentation = fileURLToPath(
+  new URL("../../docs/apresentacao-plugins/", import.meta.url),
+);
+
+async function copyPresentation(t) {
+  const temporary = await mkdtemp(path.join(tmpdir(), "mlx-presentation-"));
+  t.after(() => rm(temporary, { recursive: true, force: true }));
+  const directory = path.join(temporary, "presentation");
+  await cp(presentation, directory, { recursive: true });
+  return directory;
+}
+
+function verify(directory) {
+  const result = spawnSync(process.execPath, [path.join(directory, "verify.mjs")], {
+    cwd: directory,
+    encoding: "utf8",
+    timeout: 30_000,
+  });
+  assert.ifError(result.error);
+  assert.equal(result.signal, null, result.stderr);
+  return result;
+}
+
+test("the checked-in presentation passes without installing dependencies", () => {
+  const result = verify(presentation);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Apresentação verificada: 12 slides, 3 MP4/);
+});
+
+test("a missing video fails verification", async (t) => {
+  const directory = await copyPresentation(t);
+  await rm(path.join(directory, "assets", "01-instalar-configurar.mp4"));
+
+  const result = verify(directory);
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /arquivo indisponível.*01-instalar-configurar\.mp4/);
+});
