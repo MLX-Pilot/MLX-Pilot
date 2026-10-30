@@ -48,6 +48,8 @@ jobs:
           node-version: '22'
       - name: Verify portable presentation
         run: node docs/apresentacao-plugins/verify.mjs
+      - name: Test presentation verifier failures
+        run: node --test scripts/tests/presentation-verifier.test.mjs
 
   presentation-studio:
     name: Presentation Studio & Plugin SDK
