@@ -681,12 +681,13 @@ export function canonicalChannelError(payloadOrText) {
 
 export function runReproductionCommands() {
   return [
-    "cargo check -p mlx-ollama-daemon",
+    "cargo build --locked -p mlx-ollama-daemon",
     "cargo test -p mlx-ollama-daemon",
-    "cd apps/desktop-ui && npm run test:e2e:channels-smoke",
-    "cd apps/desktop-ui && npm run test:e2e:skills-smoke",
+    "npm ci --prefix apps/desktop-ui",
+    "npm ci --prefix packages/plugin-sdk",
+    "npm run test:e2e:channels-smoke --prefix apps/desktop-ui",
+    "npm run test:e2e:skills-smoke --prefix apps/desktop-ui",
     "node scripts/release-gate/run-all.mjs",
-    "node scripts/release-gate/run-all.mjs --only plugin_security_smoke",
   ];
 }
 
