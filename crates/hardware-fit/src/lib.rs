@@ -55,8 +55,24 @@ pub struct HardwareSimulationOptions {
     pub manual_ram_gb: Option<f64>,
     pub manual_backend: Option<String>,
     pub manual_gpu_name: Option<String>,
+    /// Simulates an Apple Silicon Mac with this much unified memory.
+    /// `manual_gpu_name` carries the chip (e.g. "Apple M4 Max"). When set,
+    /// it replaces every other GPU/RAM override: on a Mac, CPU and GPU share
+    /// one memory pool, so RAM and VRAM cannot be chosen independently.
+    pub manual_unified_memory_gb: Option<f64>,
     pub ignore_detected_gpu: bool,
     pub ignore_detected_ram: bool,
+}
+
+/// Share of unified memory macOS lets the GPU use. Shared by detection and
+/// simulation so a simulated Mac ranks models the same way a real one does.
+pub const APPLE_GPU_MEMORY_FRACTION: f64 = 0.75;
+
+/// Published figures for an Apple Silicon chip configuration.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AppleSiliconSpec {
+    pub cpu_cores: usize,
+    pub bandwidth_gb_s: f64,
 }
 
 // ── Cache ──────────────────────────────────────────────────────────────────
@@ -387,7 +403,7 @@ async fn detect_apple_silicon() -> Result<Vec<GpuInfo>, String> {
 
     Ok(vec![GpuInfo {
         name: gpu_name,
-        vram_gb: ram_gb * 0.75, // Unified memory: ~75% available for GPU
+        vram_gb: ram_gb * APPLE_GPU_MEMORY_FRACTION,
         index: 0,
         backend: "metal".to_string(),
         compute_capability: None,
@@ -396,48 +412,90 @@ async fn detect_apple_silicon() -> Result<Vec<GpuInfo>, String> {
 }
 
 fn estimate_apple_bandwidth(model: &str) -> f64 {
-    // Rough estimates based on known models
-    if model.contains("M5") {
-        600.0
-    } else if model.contains("M4") {
-        if model.contains("Max") {
-            546.0
-        } else if model.contains("Pro") {
-            273.0
-        } else {
-            120.0
-        }
-    } else if model.contains("M3") {
-        if model.contains("Max") {
-            400.0
-        } else if model.contains("Pro") {
-            150.0
-        } else {
-            100.0
-        }
-    } else if model.contains("M2") {
-        if model.contains("Ultra") {
-            800.0
-        } else if model.contains("Max") {
-            400.0
-        } else if model.contains("Pro") {
-            200.0
-        } else {
-            100.0
-        }
-    } else if model.contains("M1") {
-        if model.contains("Ultra") {
-            800.0
-        } else if model.contains("Max") {
-            400.0
-        } else if model.contains("Pro") {
-            200.0
-        } else {
-            68.0
-        }
-    } else {
-        150.0 // conservative fallback
+    apple_silicon_spec(model, None)
+        .map(|spec| spec.bandwidth_gb_s)
+        .unwrap_or(APPLE_FALLBACK_BANDWIDTH_GB_S)
+}
+
+const APPLE_FALLBACK_BANDWIDTH_GB_S: f64 = 150.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AppleTier {
+    Base,
+    Pro,
+    Max,
+    Ultra,
+}
+
+/// Reads "Apple M4 Max" as (4, Max). The tier must follow the generation
+/// token, so a device name like "MacBook Pro (M4)" reads as a base M4.
+fn parse_apple_chip(name: &str) -> Option<(u8, AppleTier)> {
+    let lower = name.to_ascii_lowercase();
+    let mut tokens = lower
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| !t.is_empty());
+    while let Some(token) = tokens.next() {
+        let Some(digits) = token.strip_prefix('m') else {
+            continue;
+        };
+        let Ok(generation) = digits.parse::<u8>() else {
+            continue;
+        };
+        let tier = match tokens.next() {
+            Some("pro") => AppleTier::Pro,
+            Some("max") => AppleTier::Max,
+            Some("ultra") => AppleTier::Ultra,
+            _ => AppleTier::Base,
+        };
+        return Some((generation, tier));
     }
+    None
+}
+
+/// Apple's published CPU cores and memory bandwidth for a chip. Where the
+/// lower-binned variant is the only one sold with a given memory size, that
+/// memory size selects it (e.g. M4 Max with 36 GB is the 410 GB/s part);
+/// otherwise — or when `unified_memory_gb` is unknown — the top bin is used.
+pub fn apple_silicon_spec(
+    chip_name: &str,
+    unified_memory_gb: Option<f64>,
+) -> Option<AppleSiliconSpec> {
+    let (generation, tier) = parse_apple_chip(chip_name)?;
+    let memory_is = |gb: f64| unified_memory_gb.is_some_and(|m| (m - gb).abs() < 0.5);
+    let spec = |cpu_cores: usize, bandwidth_gb_s: f64| AppleSiliconSpec {
+        cpu_cores,
+        bandwidth_gb_s,
+    };
+
+    use AppleTier::*;
+    Some(match (generation, tier) {
+        (1, Base) => spec(8, 68.0),
+        (1, Pro) => spec(10, 200.0),
+        (1, Max) => spec(10, 400.0),
+        (1, Ultra) => spec(20, 800.0),
+        (2, Base) => spec(8, 100.0),
+        (2, Pro) => spec(12, 200.0),
+        (2, Max) => spec(12, 400.0),
+        (2, Ultra) => spec(24, 800.0),
+        (3, Base) => spec(8, 100.0),
+        (3, Pro) => spec(12, 150.0),
+        (3, Max) if memory_is(36.0) || memory_is(96.0) => spec(14, 300.0),
+        (3, Max) => spec(16, 400.0),
+        (3, Ultra) => spec(32, 819.0),
+        (4, Base) => spec(10, 120.0),
+        (4, Pro) => spec(14, 273.0),
+        (4, Max) if memory_is(36.0) => spec(14, 410.0),
+        (4, Max) => spec(16, 546.0),
+        (5, Base) => spec(10, 153.0),
+        (5, Pro) => spec(18, 307.0),
+        (5, Max) if memory_is(36.0) => spec(18, 460.0),
+        (5, Max) => spec(18, 614.0),
+        (5, Ultra) if memory_is(96.0) => spec(30, 1200.0),
+        (5, Ultra) => spec(36, 1200.0),
+        (6, Base) if memory_is(16.0) => spec(12, 153.0),
+        (6, Base) => spec(12, 170.0),
+        _ => return None,
+    })
 }
 
 // ── sysinfo helpers ────────────────────────────────────────────────────────
@@ -620,6 +678,13 @@ pub fn estimate_gpu_bandwidth(gpu_name: &str, backend: &str) -> f64 {
         return 1200.0;
     }
 
+    // Apple Silicon (integrated GPU, unified memory)
+    if backend == "metal" || name_lower.contains("apple") {
+        if let Some(spec) = apple_silicon_spec(gpu_name, None) {
+            return spec.bandwidth_gb_s;
+        }
+    }
+
     // Fallback by backend
     match backend {
         "cuda" => 220.0,
@@ -667,6 +732,20 @@ pub fn simulate_hardware(
     options: HardwareSimulationOptions,
 ) -> HardwareProfile {
     let mut profile = base.clone();
+
+    if let Some(memory_gb) = options
+        .manual_unified_memory_gb
+        .filter(|gb| gb.is_finite() && *gb > 0.0)
+    {
+        let chip = options
+            .manual_gpu_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or("Apple Silicon");
+        apply_simulated_mac(&mut profile, chip, memory_gb);
+        return profile;
+    }
 
     if options.ignore_detected_gpu {
         profile.gpus.clear();
@@ -721,6 +800,37 @@ pub fn simulate_hardware(
     }
 
     profile
+}
+
+/// Replaces the whole machine with an Apple Silicon Mac: the chip is the CPU
+/// and the GPU, and both draw from the same unified memory.
+fn apply_simulated_mac(profile: &mut HardwareProfile, chip: &str, memory_gb: f64) {
+    let spec = apple_silicon_spec(chip, Some(memory_gb));
+    let gpu_name = format!("{chip} GPU");
+    let bandwidth = spec
+        .map(|s| s.bandwidth_gb_s)
+        .unwrap_or_else(|| estimate_gpu_bandwidth(&gpu_name, "metal"));
+    let vram_gb = memory_gb * APPLE_GPU_MEMORY_FRACTION;
+
+    profile.platform = "macos".to_string();
+    profile.cpu_name = chip.to_string();
+    if let Some(spec) = spec {
+        profile.cpu_cores = spec.cpu_cores;
+    }
+    profile.ram_gb = memory_gb;
+    profile.available_ram_gb = memory_gb * 0.9;
+    profile.gpus = vec![GpuInfo {
+        name: gpu_name,
+        vram_gb,
+        index: 0,
+        backend: "metal".to_string(),
+        compute_capability: None,
+        bandwidth_gb_s: Some(bandwidth),
+    }];
+    profile.gpu_count = 1;
+    profile.total_vram_gb = vram_gb;
+    profile.primary_backend = "metal".to_string();
+    profile.is_cpu_only = false;
 }
 
 // ── Internal helpers ───────────────────────────────────────────────────────
@@ -988,5 +1098,170 @@ mod tests {
         assert!(simulated.gpus.is_empty());
         assert!(simulated.is_cpu_only);
         assert_eq!(simulated.primary_backend, "cpu");
+    }
+
+    fn windows_pc_with_rtx_4090() -> HardwareProfile {
+        HardwareProfile {
+            platform: "windows".into(),
+            cpu_name: "Intel Core i7-12700H".into(),
+            cpu_cores: 14,
+            ram_gb: 32.0,
+            available_ram_gb: 20.0,
+            gpus: vec![GpuInfo {
+                name: "NVIDIA GeForce RTX 4090".into(),
+                vram_gb: 24.0,
+                index: 0,
+                backend: "cuda".into(),
+                compute_capability: Some("8.9".into()),
+                bandwidth_gb_s: Some(1008.0),
+            }],
+            gpu_count: 1,
+            total_vram_gb: 24.0,
+            primary_backend: "cuda".into(),
+            is_cpu_only: false,
+            detected_at: Utc::now().to_rfc3339(),
+        }
+    }
+
+    fn simulate_mac(chip: &str, memory_gb: f64) -> HardwareProfile {
+        simulate_hardware(
+            &windows_pc_with_rtx_4090(),
+            HardwareSimulationOptions {
+                manual_gpu_name: Some(chip.into()),
+                manual_unified_memory_gb: Some(memory_gb),
+                ignore_detected_gpu: true,
+                ignore_detected_ram: true,
+                ..Default::default()
+            },
+        )
+    }
+
+    #[test]
+    fn test_simulate_mac_replaces_the_whole_machine() {
+        let mac = simulate_mac("Apple M4 Max", 128.0);
+
+        assert_eq!(mac.platform, "macos");
+        assert_eq!(mac.cpu_name, "Apple M4 Max");
+        assert_eq!(mac.cpu_cores, 16);
+        assert_eq!(mac.ram_gb, 128.0);
+        assert!((mac.available_ram_gb - 115.2).abs() < 0.01);
+        assert_eq!(mac.gpu_count, 1);
+        assert_eq!(mac.gpus.len(), 1);
+        assert_eq!(mac.gpus[0].name, "Apple M4 Max GPU");
+        assert_eq!(mac.gpus[0].backend, "metal");
+        assert_eq!(mac.gpus[0].vram_gb, 96.0);
+        assert_eq!(mac.gpus[0].bandwidth_gb_s, Some(546.0));
+        assert_eq!(mac.total_vram_gb, 96.0);
+        assert_eq!(mac.primary_backend, "metal");
+        assert!(!mac.is_cpu_only);
+    }
+
+    #[test]
+    fn test_simulate_mac_ignores_discrete_gpu_overrides() {
+        let mac = simulate_hardware(
+            &windows_pc_with_rtx_4090(),
+            HardwareSimulationOptions {
+                manual_gpu_name: Some("Apple M3 Pro".into()),
+                manual_unified_memory_gb: Some(36.0),
+                manual_gpu_count: Some(4),
+                manual_vram_gb: Some(80.0),
+                manual_ram_gb: Some(512.0),
+                manual_backend: Some("cuda".into()),
+                ignore_detected_gpu: true,
+                ignore_detected_ram: true,
+            },
+        );
+
+        assert_eq!(mac.gpu_count, 1);
+        assert_eq!(mac.total_vram_gb, 27.0);
+        assert_eq!(mac.ram_gb, 36.0);
+        assert_eq!(mac.primary_backend, "metal");
+    }
+
+    #[test]
+    fn test_simulate_mac_bandwidth_follows_memory_bound_bins() {
+        let bw = |chip: &str, gb: f64| simulate_mac(chip, gb).gpus[0].bandwidth_gb_s.unwrap();
+
+        assert_eq!(bw("Apple M4 Max", 36.0), 410.0);
+        assert_eq!(bw("Apple M4 Max", 48.0), 546.0);
+        assert_eq!(bw("Apple M3 Max", 36.0), 300.0);
+        assert_eq!(bw("Apple M3 Max", 96.0), 300.0);
+        assert_eq!(bw("Apple M3 Max", 128.0), 400.0);
+        assert_eq!(bw("Apple M5 Max", 36.0), 460.0);
+        assert_eq!(bw("Apple M5 Max", 64.0), 614.0);
+        assert_eq!(bw("Apple M6", 16.0), 153.0);
+        assert_eq!(bw("Apple M6", 24.0), 170.0);
+        assert_eq!(simulate_mac("Apple M5 Ultra", 96.0).cpu_cores, 30);
+        assert_eq!(simulate_mac("Apple M5 Ultra", 512.0).cpu_cores, 36);
+    }
+
+    #[test]
+    fn test_simulate_mac_unknown_chip_falls_back_to_metal_estimate() {
+        let base = windows_pc_with_rtx_4090();
+        let mac = simulate_mac("Apple M9 Hyper", 64.0);
+
+        assert_eq!(mac.cpu_name, "Apple M9 Hyper");
+        assert_eq!(mac.cpu_cores, base.cpu_cores);
+        assert_eq!(
+            mac.gpus[0].bandwidth_gb_s,
+            Some(APPLE_FALLBACK_BANDWIDTH_GB_S)
+        );
+        assert_eq!(mac.total_vram_gb, 48.0);
+    }
+
+    #[test]
+    fn test_simulate_mac_without_chip_name_uses_generic_label() {
+        let mac = simulate_mac("   ", 16.0);
+        assert_eq!(mac.cpu_name, "Apple Silicon");
+        assert_eq!(mac.gpus[0].name, "Apple Silicon GPU");
+    }
+
+    #[test]
+    fn test_simulate_mac_rejects_invalid_memory() {
+        for memory_gb in [0.0, -8.0, f64::NAN, f64::INFINITY] {
+            let simulated = simulate_hardware(
+                &windows_pc_with_rtx_4090(),
+                HardwareSimulationOptions {
+                    manual_gpu_name: Some("Apple M4".into()),
+                    manual_unified_memory_gb: Some(memory_gb),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(simulated.platform, "windows", "memory {memory_gb}");
+            assert_eq!(simulated.primary_backend, "cuda", "memory {memory_gb}");
+        }
+    }
+
+    #[test]
+    fn test_apple_chip_tier_must_follow_generation() {
+        // Device names carry "Pro"/"Air" before the chip; only the word right
+        // after the generation is the chip tier.
+        assert_eq!(
+            parse_apple_chip("MacBook Pro (M4)"),
+            Some((4, AppleTier::Base))
+        );
+        assert_eq!(
+            parse_apple_chip("Apple M2 Ultra"),
+            Some((2, AppleTier::Ultra))
+        );
+        // sysctl hw.model identifiers must not be read as chips.
+        assert_eq!(parse_apple_chip("MacBookPro18,3"), None);
+        assert_eq!(parse_apple_chip("Mac16,1"), None);
+        // Non-Apple names with an "M<number>" token are not Apple chips.
+        assert_eq!(apple_silicon_spec("Tesla M60", None), None);
+        assert_eq!(apple_silicon_spec("Quadro M4000", None), None);
+    }
+
+    #[test]
+    fn test_bandwidth_estimation_knows_apple_chips() {
+        assert_eq!(estimate_gpu_bandwidth("Apple M4 Pro GPU", "metal"), 273.0);
+        assert_eq!(estimate_gpu_bandwidth("Apple M1", "metal"), 68.0);
+        // Without a memory size the top bin is assumed.
+        assert_eq!(estimate_gpu_bandwidth("Apple M4 Max", "metal"), 546.0);
+        // Real detection passes hw.model, which never names the chip.
+        assert_eq!(
+            estimate_apple_bandwidth("Mac16,1"),
+            APPLE_FALLBACK_BANDWIDTH_GB_S
+        );
     }
 }

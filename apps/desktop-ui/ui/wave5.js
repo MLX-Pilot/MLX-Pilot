@@ -300,6 +300,110 @@
     { id: 'custom', name: 'Personalizada', vramGb: null, backend: null }
   ];
 
+  // Apple Silicon Macs, newest first within each device. `memoryGb` lists the
+  // unified memory sizes Apple sells for that chip in that device (first one
+  // is the base config). The daemon looks up bandwidth and CPU cores by chip
+  // name (crates/hardware-fit, apple_silicon_spec), so chips must be "M<n>"
+  // optionally followed by Pro/Max/Ultra.
+  const MAC_PRESETS = [
+    { device: 'MacBook Air', chip: 'M5', memoryGb: [16, 24, 32] },
+    { device: 'MacBook Air', chip: 'M4', memoryGb: [16, 24, 32] },
+    { device: 'MacBook Air', chip: 'M3', memoryGb: [8, 16, 24] },
+    { device: 'MacBook Air', chip: 'M2', memoryGb: [8, 16, 24] },
+    { device: 'MacBook Air', chip: 'M1', memoryGb: [8, 16] },
+    { device: 'MacBook Pro', chip: 'M5 Max', memoryGb: [36, 48, 64, 128] },
+    { device: 'MacBook Pro', chip: 'M5 Pro', memoryGb: [24, 48, 64] },
+    { device: 'MacBook Pro', chip: 'M5', memoryGb: [16, 24, 32] },
+    { device: 'MacBook Pro', chip: 'M4 Max', memoryGb: [36, 48, 64, 128] },
+    { device: 'MacBook Pro', chip: 'M4 Pro', memoryGb: [24, 48] },
+    { device: 'MacBook Pro', chip: 'M4', memoryGb: [16, 24, 32] },
+    { device: 'MacBook Pro', chip: 'M3 Max', memoryGb: [36, 48, 64, 96, 128] },
+    { device: 'MacBook Pro', chip: 'M3 Pro', memoryGb: [18, 36] },
+    { device: 'MacBook Pro', chip: 'M3', memoryGb: [8, 16, 24] },
+    { device: 'MacBook Pro', chip: 'M2 Max', memoryGb: [32, 64, 96] },
+    { device: 'MacBook Pro', chip: 'M2 Pro', memoryGb: [16, 32] },
+    { device: 'MacBook Pro', chip: 'M2', memoryGb: [8, 16, 24] },
+    { device: 'MacBook Pro', chip: 'M1 Max', memoryGb: [32, 64] },
+    { device: 'MacBook Pro', chip: 'M1 Pro', memoryGb: [16, 32] },
+    { device: 'MacBook Pro', chip: 'M1', memoryGb: [8, 16] },
+    { device: 'Mac mini', chip: 'M6', memoryGb: [16, 24, 32] },
+    { device: 'Mac mini', chip: 'M5 Pro', memoryGb: [24, 48, 64] },
+    { device: 'Mac mini', chip: 'M4 Pro', memoryGb: [24, 48, 64] },
+    { device: 'Mac mini', chip: 'M4', memoryGb: [16, 24, 32] },
+    { device: 'Mac mini', chip: 'M2 Pro', memoryGb: [16, 32] },
+    { device: 'Mac mini', chip: 'M2', memoryGb: [8, 16, 24] },
+    { device: 'Mac mini', chip: 'M1', memoryGb: [8, 16] },
+    { device: 'Mac Studio', chip: 'M5 Ultra', memoryGb: [96, 256, 512] },
+    { device: 'Mac Studio', chip: 'M5 Max', memoryGb: [36, 48, 64, 128] },
+    { device: 'Mac Studio', chip: 'M3 Ultra', memoryGb: [96, 256, 512] },
+    { device: 'Mac Studio', chip: 'M4 Max', memoryGb: [36, 48, 64, 128] },
+    { device: 'Mac Studio', chip: 'M2 Ultra', memoryGb: [64, 128, 192] },
+    { device: 'Mac Studio', chip: 'M2 Max', memoryGb: [32, 64, 96] },
+    { device: 'Mac Studio', chip: 'M1 Ultra', memoryGb: [64, 128] },
+    { device: 'Mac Studio', chip: 'M1 Max', memoryGb: [32, 64] },
+    { device: 'iMac', chip: 'M6', memoryGb: [16, 24, 32] },
+    { device: 'iMac', chip: 'M4', memoryGb: [16, 24, 32] },
+    { device: 'iMac', chip: 'M3', memoryGb: [8, 16, 24] },
+    { device: 'iMac', chip: 'M1', memoryGb: [8, 16] },
+    { device: 'Mac Pro', chip: 'M2 Ultra', memoryGb: [64, 128, 192] }
+  ].map(function (p) {
+    var slug = function (s) { return s.toLowerCase().replace(/[^a-z0-9]+/g, '-'); };
+    return {
+      id: 'mac-' + slug(p.device) + '-' + slug(p.chip),
+      device: p.device,
+      chipName: 'Apple ' + p.chip,
+      label: p.device + ' (' + p.chip + ')',
+      memoryGb: p.memoryGb
+    };
+  });
+
+  function findMacPreset(id) {
+    return MAC_PRESETS.find(function (p) { return p.id === id; }) || null;
+  }
+
+  // Adds one <optgroup> per Mac device just before "Personalizada".
+  function populateMacPresets() {
+    var select = $('hw-sim-gpu-preset');
+    var customOption = select.querySelector('option[value="custom"]');
+    var groups = {};
+    MAC_PRESETS.forEach(function (p) {
+      if (!groups[p.device]) {
+        groups[p.device] = document.createElement('optgroup');
+        groups[p.device].label = 'Mac · ' + p.device;
+        select.insertBefore(groups[p.device], customOption);
+      }
+      var option = document.createElement('option');
+      option.value = p.id;
+      option.textContent = p.label;
+      groups[p.device].appendChild(option);
+    });
+  }
+
+  // A Mac has one unified memory pool, so the discrete-GPU fields (count,
+  // VRAM, system RAM, backend) give way to a single memory picker.
+  function setMacMode(preset) {
+    var isMac = !!preset;
+    ['hw-sim-gpu-count-box', 'hw-sim-vram-box', 'hw-sim-ram-preset-box', 'hw-sim-backend-box'].forEach(function (id) {
+      $(id).style.display = isMac ? 'none' : '';
+    });
+    $('hw-sim-mac-memory-box').style.display = isMac ? 'block' : 'none';
+    $('hw-sim-mac-note').style.display = isMac ? 'block' : 'none';
+
+    var memorySelect = $('hw-sim-mac-memory');
+    memorySelect.innerHTML = '';
+    if (!isMac) return;
+
+    $('hw-sim-ram-preset').value = 'current';
+    $('hw-sim-ram-custom-box').style.display = 'none';
+    $('hw-sim-ram-custom').value = '';
+    preset.memoryGb.forEach(function (gb) {
+      var option = document.createElement('option');
+      option.value = String(gb);
+      option.textContent = gb + ' GB';
+      memorySelect.appendChild(option);
+    });
+  }
+
   var hwProfile = null;
   var hwSimulation = null;
 
@@ -319,7 +423,7 @@
     var badge = $('hw-mode-badge');
     if (!badge) return;
     if (hwSimulation) {
-      badge.textContent = 'Modo: Simulado';
+      badge.textContent = 'Modo: Simulado' + (hwSimulation.deviceLabel ? ' · ' + hwSimulation.deviceLabel : '');
       badge.style.background = 'rgba(57, 208, 216, 0.15)';
       badge.style.borderColor = 'var(--cyan,#39d0d8)';
       badge.style.color = 'var(--cyan,#39d0d8)';
@@ -339,6 +443,16 @@
     var vramInput = $('hw-sim-vram');
     var backendSelect = $('hw-sim-backend');
     var countInput = $('hw-sim-gpu-count');
+
+    var macPreset = findMacPreset(presetId);
+    setMacMode(macPreset);
+    if (macPreset) {
+      customBox.style.display = 'none';
+      $('hw-sim-gpu-custom-name').value = '';
+      vramInput.value = '';
+      backendSelect.value = '';
+      return;
+    }
 
     if (presetId === 'custom') {
       customBox.style.display = 'block';
@@ -391,6 +505,7 @@
     if (hwSimulation.vramGb != null) p += '&manual_vram_gb=' + hwSimulation.vramGb;
     if (hwSimulation.ramGb != null) p += '&manual_ram_gb=' + hwSimulation.ramGb;
     if (hwSimulation.backend) p += '&manual_backend=' + encodeURIComponent(hwSimulation.backend);
+    if (hwSimulation.unifiedMemoryGb != null) p += '&manual_unified_memory_gb=' + hwSimulation.unifiedMemoryGb;
     if (hwSimulation.ignoreDetectedGpu) p += '&ignore_detected_gpu=true';
     if (hwSimulation.ignoreDetectedRam) p += '&ignore_detected_ram=true';
     return p;
@@ -398,6 +513,26 @@
 
   function readSimulationFromForm() {
     var presetId = $('hw-sim-gpu-preset').value;
+
+    var macPreset = findMacPreset(presetId);
+    if (macPreset) {
+      var memoryGb = parseOptionalFloat($('hw-sim-mac-memory').value);
+      if (memoryGb == null || macPreset.memoryGb.indexOf(memoryGb) < 0) {
+        throw new Error('Selecione a memória unificada do ' + macPreset.label + '.');
+      }
+      return {
+        deviceLabel: macPreset.label + ' · ' + memoryGb + ' GB',
+        gpuName: macPreset.chipName,
+        unifiedMemoryGb: memoryGb,
+        gpuCount: null,
+        vramGb: null,
+        ramGb: null,
+        backend: null,
+        ignoreDetectedGpu: true,
+        ignoreDetectedRam: true
+      };
+    }
+
     var customName = $('hw-sim-gpu-custom-name').value.trim();
     var gpuCount = parseOptionalInt($('hw-sim-gpu-count').value);
     var vramGb = parseOptionalFloat($('hw-sim-vram').value);
@@ -491,10 +626,19 @@
       ? hwProfile.gpus.map(function (g) { return esc(g.name) + ' (' + g.vram_gb.toFixed(1) + ' GB ' + esc(g.backend) + ')'; }).join('<br>')
       : 'Nenhuma GPU detectada (CPU-only)';
 
+    // Apple Silicon: RAM and "VRAM" are the same pool, not two separate amounts.
+    var unifiedMemory = hwProfile.platform === 'macos' && hwProfile.primary_backend === 'metal' && !hwProfile.is_cpu_only;
+    var gpuValue = hwProfile.gpu_count + ' GPU' + (hwProfile.gpu_count !== 1 ? 's' : '') + ' · ' + hwProfile.total_vram_gb.toFixed(1) + ' GB VRAM';
+    if (unifiedMemory) {
+      var gpuShare = hwProfile.ram_gb > 0 ? Math.round(hwProfile.total_vram_gb / hwProfile.ram_gb * 100) : 0;
+      gpuValue = 'GPU integrada · ' + hwProfile.total_vram_gb.toFixed(1) + ' GB para a GPU';
+      gpuDetail = esc(hwProfile.gpus[0].name) + '<br>≈' + gpuShare + '% da memória unificada';
+    }
+
     $('hw-cards').innerHTML =
       '<div class="wave5-hw-card"><div class="eyebrow">CPU</div><div class="value">' + esc(hwProfile.cpu_name) + '</div><div class="detail">' + hwProfile.cpu_cores + ' núcleos</div></div>' +
-      '<div class="wave5-hw-card"><div class="eyebrow">RAM</div><div class="value">' + hwProfile.ram_gb.toFixed(1) + ' GB</div><div class="detail">' + hwProfile.available_ram_gb.toFixed(1) + ' GB disponível</div></div>' +
-      '<div class="wave5-hw-card"><div class="eyebrow">GPU</div><div class="value">' + hwProfile.gpu_count + ' GPU' + (hwProfile.gpu_count !== 1 ? 's' : '') + ' · ' + hwProfile.total_vram_gb.toFixed(1) + ' GB VRAM</div><div class="detail">' + gpuDetail + '</div></div>' +
+      '<div class="wave5-hw-card"><div class="eyebrow">' + (unifiedMemory ? 'Memória unificada' : 'RAM') + '</div><div class="value">' + hwProfile.ram_gb.toFixed(1) + ' GB</div><div class="detail">' + hwProfile.available_ram_gb.toFixed(1) + ' GB disponível' + (unifiedMemory ? ' · compartilhada entre CPU e GPU' : '') + '</div></div>' +
+      '<div class="wave5-hw-card"><div class="eyebrow">GPU</div><div class="value">' + gpuValue + '</div><div class="detail">' + gpuDetail + '</div></div>' +
       '<div class="wave5-hw-card"><div class="eyebrow">Backend</div><div class="value" style="text-transform:uppercase">' + esc(hwProfile.primary_backend) + '</div><div class="detail">' + (hwProfile.is_cpu_only ? 'Modo CPU-only' : 'Aceleração GPU disponível') + '</div></div>';
   }
 
@@ -590,6 +734,7 @@
   async function resetHardwareSimulation() {
     hwSimulation = null;
     $('hw-sim-gpu-preset').value = 'current';
+    setMacMode(null);
     $('hw-sim-gpu-custom-box').style.display = 'none';
     $('hw-sim-gpu-custom-name').value = '';
     $('hw-sim-gpu-count').value = '1';
@@ -637,6 +782,7 @@
   $('btn-report-spinoff').addEventListener('click', spinoffResearch);
   $('btn-report-delete').addEventListener('click', deleteResearch);
 
+  populateMacPresets();
   $('btn-hw-scan').addEventListener('click', function () { scanHardware(true); });
   $('btn-hw-sim-apply').addEventListener('click', applySimulatedHardware);
   $('btn-hw-sim-reset').addEventListener('click', resetHardwareSimulation);

@@ -865,7 +865,7 @@
                 <!-- GPU Row -->
                 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
                   <div style="flex:2;min-width:200px">
-                    <label class="wave5-label" for="hw-sim-gpu-preset">GPU</label>
+                    <label class="wave5-label" for="hw-sim-gpu-preset">GPU / Aparelho</label>
                     <select id="hw-sim-gpu-preset" class="wave1-select" style="width:100%">
                       <option value="current">Hardware detectado / usar atual</option>
                       <option value="rtx-5090">NVIDIA GeForce RTX 5090 (32 GB)</option>
@@ -882,6 +882,7 @@
                       <option value="rx-7900-xt">AMD Radeon RX 7900 XT (20 GB)</option>
                       <option value="rx-7800-xt">AMD Radeon RX 7800 XT (16 GB)</option>
                       <option value="rx-7700-xt">AMD Radeon RX 7700 XT (12 GB)</option>
+                      <!-- Mac (Apple Silicon) groups are inserted here by wave5.js from MAC_PRESETS -->
                       <option value="custom">Personalizada</option>
                     </select>
                   </div>
@@ -889,19 +890,26 @@
                     <label class="wave5-label" for="hw-sim-gpu-custom-name">Nome da GPU</label>
                     <input type="text" id="hw-sim-gpu-custom-name" class="wave1-input" placeholder="Ex: RTX 4070 Ti Super" style="width:100%" />
                   </div>
-                  <div style="flex:1;min-width:90px">
+                  <div id="hw-sim-mac-memory-box" style="flex:1.5;min-width:160px;display:none">
+                    <label class="wave5-label" for="hw-sim-mac-memory">Mem&oacute;ria unificada</label>
+                    <select id="hw-sim-mac-memory" class="wave1-select" style="width:100%"></select>
+                  </div>
+                  <div id="hw-sim-gpu-count-box" style="flex:1;min-width:90px">
                     <label class="wave5-label" for="hw-sim-gpu-count">Quantidade</label>
                     <input type="number" id="hw-sim-gpu-count" class="wave1-input" placeholder="Qtd" min="0" max="8" value="1" style="width:100%" />
                   </div>
-                  <div style="flex:1.2;min-width:130px">
+                  <div id="hw-sim-vram-box" style="flex:1.2;min-width:130px">
                     <label class="wave5-label" for="hw-sim-vram">VRAM por GPU (GB)</label>
                     <input type="number" id="hw-sim-vram" class="wave1-input" placeholder="VRAM (GB)" min="0" step="0.5" style="width:100%" />
                   </div>
                 </div>
+                <p id="hw-sim-mac-note" style="display:none;margin:0;font-size:11px;color:var(--text-tertiary,#8a8aa0)">
+                  No Mac, CPU e GPU usam a mesma mem&oacute;ria (unificada). Cerca de 75% dela fica dispon&iacute;vel para a GPU &mdash; a mesma regra usada quando o app detecta um Mac de verdade.
+                </p>
 
                 <!-- RAM & Backend Row -->
                 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
-                  <div style="flex:1.5;min-width:160px">
+                  <div id="hw-sim-ram-preset-box" style="flex:1.5;min-width:160px">
                     <label class="wave5-label" for="hw-sim-ram-preset">RAM do Sistema</label>
                     <select id="hw-sim-ram-preset" class="wave1-select" style="width:100%">
                       <option value="current">Manter detectada</option>
@@ -917,7 +925,7 @@
                     <label class="wave5-label" for="hw-sim-ram-custom">RAM (GB)</label>
                     <input type="number" id="hw-sim-ram-custom" class="wave1-input" placeholder="RAM (GB)" min="4" step="1" style="width:100%" />
                   </div>
-                  <div style="flex:1.5;min-width:150px">
+                  <div id="hw-sim-backend-box" style="flex:1.5;min-width:150px">
                     <label class="wave5-label" for="hw-sim-backend">Backend (Override)</label>
                     <select id="hw-sim-backend" class="wave1-select" style="width:100%">
                       <option value="">Auto (pelo preset/sistema)</option>
