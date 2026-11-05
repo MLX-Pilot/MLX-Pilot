@@ -38,6 +38,7 @@ pub struct ModelsQuery {
     pub manual_vram_gb: Option<f64>,
     pub manual_ram_gb: Option<f64>,
     pub manual_backend: Option<String>,
+    pub manual_unified_memory_gb: Option<f64>,
     pub ignore_detected_gpu: Option<bool>,
     pub ignore_detected_ram: Option<bool>,
 }
@@ -60,6 +61,7 @@ pub struct ProfilesQuery {
     pub manual_vram_gb: Option<f64>,
     pub manual_ram_gb: Option<f64>,
     pub manual_backend: Option<String>,
+    pub manual_unified_memory_gb: Option<f64>,
     pub ignore_detected_gpu: Option<bool>,
     pub ignore_detected_ram: Option<bool>,
 }
@@ -71,6 +73,7 @@ pub struct SimulateRequest {
     pub manual_vram_gb: Option<f64>,
     pub manual_ram_gb: Option<f64>,
     pub manual_backend: Option<String>,
+    pub manual_unified_memory_gb: Option<f64>,
     pub ignore_detected_gpu: Option<bool>,
     pub ignore_detected_ram: Option<bool>,
 }
@@ -108,6 +111,7 @@ struct HardwareOverrides<'a> {
     manual_vram_gb: Option<f64>,
     manual_ram_gb: Option<f64>,
     manual_backend: Option<&'a str>,
+    manual_unified_memory_gb: Option<f64>,
     ignore_detected_gpu: bool,
     ignore_detected_ram: bool,
 }
@@ -121,6 +125,7 @@ impl<'a> HardwareOverrides<'a> {
             manual_vram_gb: query.manual_vram_gb,
             manual_ram_gb: query.manual_ram_gb,
             manual_backend: query.manual_backend.as_deref(),
+            manual_unified_memory_gb: query.manual_unified_memory_gb,
             ignore_detected_gpu: query.ignore_detected_gpu.unwrap_or(false),
             ignore_detected_ram: query.ignore_detected_ram.unwrap_or(false),
         }
@@ -134,8 +139,22 @@ impl<'a> HardwareOverrides<'a> {
             manual_vram_gb: query.manual_vram_gb,
             manual_ram_gb: query.manual_ram_gb,
             manual_backend: query.manual_backend.as_deref(),
+            manual_unified_memory_gb: query.manual_unified_memory_gb,
             ignore_detected_gpu: query.ignore_detected_gpu.unwrap_or(false),
             ignore_detected_ram: query.ignore_detected_ram.unwrap_or(false),
+        }
+    }
+
+    fn simulation_options(&self) -> mlx_hardware_fit::HardwareSimulationOptions {
+        mlx_hardware_fit::HardwareSimulationOptions {
+            manual_gpu_count: self.manual_gpu_count,
+            manual_vram_gb: self.manual_vram_gb,
+            manual_ram_gb: self.manual_ram_gb,
+            manual_backend: self.manual_backend.map(str::to_string),
+            manual_gpu_name: self.manual_gpu_name.map(str::to_string),
+            manual_unified_memory_gb: self.manual_unified_memory_gb,
+            ignore_detected_gpu: self.ignore_detected_gpu,
+            ignore_detected_ram: self.ignore_detected_ram,
         }
     }
 }
@@ -151,15 +170,7 @@ async fn resolve_hardware_profile(
     if overrides.manual_mode {
         Ok(mlx_hardware_fit::simulate_hardware(
             &profile,
-            mlx_hardware_fit::HardwareSimulationOptions {
-                manual_gpu_count: overrides.manual_gpu_count,
-                manual_vram_gb: overrides.manual_vram_gb,
-                manual_ram_gb: overrides.manual_ram_gb,
-                manual_backend: overrides.manual_backend.map(str::to_string),
-                manual_gpu_name: overrides.manual_gpu_name.map(str::to_string),
-                ignore_detected_gpu: overrides.ignore_detected_gpu,
-                ignore_detected_ram: overrides.ignore_detected_ram,
-            },
+            overrides.simulation_options(),
         ))
     } else {
         Ok(profile)
@@ -294,6 +305,7 @@ pub async fn hwfit_simulate(
         manual_vram_gb: req.manual_vram_gb,
         manual_ram_gb: req.manual_ram_gb,
         manual_backend: req.manual_backend.as_deref(),
+        manual_unified_memory_gb: req.manual_unified_memory_gb,
         ignore_detected_gpu: req.ignore_detected_gpu.unwrap_or(false),
         ignore_detected_ram: req.ignore_detected_ram.unwrap_or(false),
     };
@@ -591,4 +603,66 @@ fn get_default_model_catalog() -> Vec<ModelCard> {
             size_gb: Some(4.0),
         },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::Uri;
+
+    fn models_query(query: &str) -> ModelsQuery {
+        let uri: Uri = format!("/api/hwfit/models?{query}").parse().unwrap();
+        Query::<ModelsQuery>::try_from_uri(&uri).unwrap().0
+    }
+
+    fn profiles_query(query: &str) -> ProfilesQuery {
+        let uri: Uri = format!("/api/hwfit/profiles?model_id=x&{query}")
+            .parse()
+            .unwrap();
+        Query::<ProfilesQuery>::try_from_uri(&uri).unwrap().0
+    }
+
+    // Same query string the desktop UI builds for a simulated Mac.
+    const MAC_QUERY: &str = "manual_mode=true&manual_gpu_name=Apple%20M4%20Max\
+        &manual_unified_memory_gb=64&ignore_detected_gpu=true&ignore_detected_ram=true";
+
+    #[test]
+    fn models_query_carries_unified_memory_into_simulation() {
+        let query = models_query(MAC_QUERY);
+        let options = HardwareOverrides::from_models_query(&query).simulation_options();
+
+        assert_eq!(options.manual_unified_memory_gb, Some(64.0));
+        assert_eq!(options.manual_gpu_name.as_deref(), Some("Apple M4 Max"));
+        assert!(options.ignore_detected_gpu);
+        assert!(options.ignore_detected_ram);
+    }
+
+    #[test]
+    fn profiles_query_carries_unified_memory_into_simulation() {
+        let query = profiles_query(MAC_QUERY);
+        let options = HardwareOverrides::from_profiles_query(&query).simulation_options();
+
+        assert_eq!(options.manual_unified_memory_gb, Some(64.0));
+        assert_eq!(options.manual_gpu_name.as_deref(), Some("Apple M4 Max"));
+    }
+
+    #[test]
+    fn simulate_request_accepts_unified_memory() {
+        let req: SimulateRequest = serde_json::from_str(
+            r#"{"manual_gpu_name":"Apple M5 Ultra","manual_unified_memory_gb":256}"#,
+        )
+        .unwrap();
+        assert_eq!(req.manual_unified_memory_gb, Some(256.0));
+    }
+
+    #[test]
+    fn discrete_gpu_queries_leave_unified_memory_unset() {
+        let query = models_query(
+            "manual_mode=true&manual_gpu_name=NVIDIA%20GeForce%20RTX%204090\
+             &manual_gpu_count=1&manual_vram_gb=24&manual_backend=cuda",
+        );
+        let options = HardwareOverrides::from_models_query(&query).simulation_options();
+        assert_eq!(options.manual_unified_memory_gb, None);
+        assert_eq!(options.manual_vram_gb, Some(24.0));
+    }
 }
