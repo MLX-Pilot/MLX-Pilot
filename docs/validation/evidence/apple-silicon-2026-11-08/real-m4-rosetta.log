@@ -1,0 +1,30 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running unittests src/lib.rs (target/rosetta-validation/x86_64-apple-darwin/debug/deps/mlx_model_fit-8523220703abfe09)
+
+running 1 test
+{
+  "platform": "macos",
+  "cpu_name": "Apple M4",
+  "cpu_cores": 10,
+  "ram_gb": 24.0,
+  "available_ram_gb": 1.9750404357910156,
+  "gpus": [
+    {
+      "name": "Apple M4 GPU",
+      "vram_gb": 18.0,
+      "index": 0,
+      "backend": "metal",
+      "compute_capability": null,
+      "bandwidth_gb_s": 120.0
+    }
+  ],
+  "gpu_count": 1,
+  "total_vram_gb": 18.0,
+  "primary_backend": "metal",
+  "is_cpu_only": false,
+  "detected_at": "2026-11-08T19:04:27.233452+00:00"
+}
+test tests::real_m4_24gb_matches_simulator ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 15 filtered out; finished in 0.03s
+

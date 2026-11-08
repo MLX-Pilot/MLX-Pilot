@@ -1,0 +1,31 @@
+{
+  "platform": "macos",
+  "cpu_name": "Apple M4",
+  "cpu_cores": 10,
+  "ram_gb": 24.0,
+  "available_ram_gb": 7.69097900390625,
+  "gpus": [
+    {
+      "name": "Apple M4 GPU",
+      "vram_gb": 18.0,
+      "index": 0,
+      "backend": "metal",
+      "compute_capability": null,
+      "bandwidth_gb_s": 120.0
+    }
+  ],
+  "gpu_count": 1,
+  "total_vram_gb": 18.0,
+  "primary_backend": "metal",
+  "is_cpu_only": false,
+  "gpu_groups": [
+    {
+      "name": "Apple M4 GPU",
+      "count": 1,
+      "vram_gb_per_gpu": 18.0,
+      "total_vram_gb": 18.0,
+      "backend": "metal"
+    }
+  ],
+  "detected_at": "2026-11-08T19:05:32.794110+00:00"
+}

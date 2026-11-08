@@ -1014,4 +1014,114 @@ mod tests {
             assert!(p.fits, "CPU-only profiles should always fit (RAM-based)");
         }
     }
+
+    // Synthetic detected profile: hardware-fit separately tests that actual
+    // OS-query resolution produces these GPU fields from "Apple M4" + 24 GiB.
+    fn detected_m4_24gb_fixture() -> HardwareProfile {
+        HardwareProfile {
+            platform: "macos".into(),
+            cpu_name: "Apple M4".into(),
+            cpu_cores: 10,
+            ram_gb: 24.0,
+            available_ram_gb: 12.0,
+            gpus: vec![GpuInfo {
+                name: "Apple M4 GPU".into(),
+                vram_gb: 18.0,
+                index: 0,
+                backend: "metal".into(),
+                compute_capability: None,
+                bandwidth_gb_s: Some(120.0),
+            }],
+            gpu_count: 1,
+            total_vram_gb: 18.0,
+            primary_backend: "metal".into(),
+            is_cpu_only: false,
+            detected_at: "synthetic fixture".into(),
+        }
+    }
+
+    fn assert_m4_rankings_match_simulation(detected: &HardwareProfile) {
+        let simulated = mlx_hardware_fit::simulate_hardware(
+            &test_hardware(),
+            mlx_hardware_fit::HardwareSimulationOptions {
+                manual_gpu_name: Some("Apple M4".into()),
+                manual_unified_memory_gb: Some(24.0),
+                ..Default::default()
+            },
+        );
+        let models = [test_model_7b(), test_model_70b()];
+        for use_case in ["general", "coding", "creative", "analysis"] {
+            for quant in [None, Some("Q4_K_M")] {
+                for context in [4096, 16384] {
+                    let rank = |hw| {
+                        rank_models(
+                            hw,
+                            &models,
+                            Some(use_case),
+                            Some("score"),
+                            None,
+                            None,
+                            quant,
+                            Some(context),
+                            false,
+                        )
+                    };
+                    assert_eq!(
+                        serde_json::to_value(rank(detected)).unwrap(),
+                        serde_json::to_value(rank(&simulated)).unwrap()
+                    );
+                    for model in &models {
+                        let profiles = |hw| compute_serve_profiles(hw, model, None, quant);
+                        assert_eq!(
+                            serde_json::to_value(profiles(detected)).unwrap(),
+                            serde_json::to_value(profiles(&simulated)).unwrap()
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn detected_m4_24gb_and_simulator_produce_identical_rankings_and_serve_profiles() {
+        assert_m4_rankings_match_simulation(&detected_m4_24gb_fixture());
+    }
+
+    #[test]
+    fn m4_bandwidth_correction_changes_speed_without_changing_memory_fit() {
+        let corrected = detected_m4_24gb_fixture();
+        let mut legacy = corrected.clone();
+        legacy.gpus[0].bandwidth_gb_s = Some(150.0);
+        for model in [test_model_7b(), test_model_70b()] {
+            let before = analyze_model(&legacy, &model, Some("Q4_K_M"), None, Some(4096));
+            let after = analyze_model(&corrected, &model, Some("Q4_K_M"), None, Some(4096));
+            assert!(after.estimated_tps < before.estimated_tps);
+            assert!(after.composite_score <= before.composite_score);
+            assert_eq!(after.fit_score, before.fit_score);
+            assert_eq!(after.recommended_quant, before.recommended_quant);
+            assert_eq!(after.estimated_vram_gb, before.estimated_vram_gb);
+            if model.params_b == 8.0 {
+                // Fully offloaded: 120 / 150, exactly 20% lower estimated TPS.
+                assert!((after.estimated_tps / before.estimated_tps - 0.8).abs() < 1e-9);
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    #[ignore = "requires a real Mac mini M4 with 24 GiB unified memory"]
+    async fn real_m4_24gb_matches_simulator() {
+        let detected = mlx_hardware_fit::detect_system(true).await.unwrap();
+        println!("{}", serde_json::to_string_pretty(&detected).unwrap());
+        assert_eq!(detected.cpu_name, "Apple M4");
+        assert_eq!(detected.cpu_cores, 10);
+        assert!((detected.ram_gb - 24.0).abs() < 0.01);
+        assert_eq!(detected.gpu_count, 1);
+        assert_eq!(detected.primary_backend, "metal");
+        assert!(!detected.is_cpu_only);
+        assert_eq!(detected.gpus[0].name, "Apple M4 GPU");
+        assert_eq!(detected.gpus[0].bandwidth_gb_s, Some(120.0));
+        assert!((detected.total_vram_gb - 18.0).abs() < 0.01);
+        assert_m4_rankings_match_simulation(&detected);
+    }
 }

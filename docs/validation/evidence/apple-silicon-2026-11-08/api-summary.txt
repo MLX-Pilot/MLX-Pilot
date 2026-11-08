@@ -1,0 +1,4 @@
+HTTP 200: system fresh; detected M4/10 cores/24 GiB/Metal/18 GiB/120 GB/s.
+60 model results identical across general/coding/creative/analysis.
+2 profile responses identical (llama3-8b, llama3-70b).
+HTTP 200: POST simulate M4/24; CPU, GPU and memory fields identical to fresh detection.
