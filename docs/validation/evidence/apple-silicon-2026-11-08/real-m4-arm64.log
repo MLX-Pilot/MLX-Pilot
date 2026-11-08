@@ -1,0 +1,46 @@
+   Compiling num-traits v0.2.19
+   Compiling syn v2.0.114
+   Compiling either v1.16.0
+   Compiling rayon v1.12.0
+   Compiling sysinfo v0.32.1
+   Compiling serde_derive v1.0.228
+   Compiling thiserror-impl v2.0.18
+   Compiling tracing-attributes v0.1.31
+   Compiling tokio-macros v2.6.0
+   Compiling tokio v1.49.0
+   Compiling tracing v0.1.44
+   Compiling thiserror v2.0.18
+   Compiling serde v1.0.228
+   Compiling chrono v0.4.43
+   Compiling mlx-hardware-fit v0.1.0 ($REPO/crates/hardware-fit)
+   Compiling mlx-model-fit v0.1.0 ($REPO/crates/model-fit)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.06s
+     Running unittests src/lib.rs (target/debug/deps/mlx_model_fit-8f10985505c91e3b)
+
+running 1 test
+{
+  "platform": "macos",
+  "cpu_name": "Apple M4",
+  "cpu_cores": 10,
+  "ram_gb": 24.0,
+  "available_ram_gb": 8.354110717773438,
+  "gpus": [
+    {
+      "name": "Apple M4 GPU",
+      "vram_gb": 18.0,
+      "index": 0,
+      "backend": "metal",
+      "compute_capability": null,
+      "bandwidth_gb_s": 120.0
+    }
+  ],
+  "gpu_count": 1,
+  "total_vram_gb": 18.0,
+  "primary_backend": "metal",
+  "is_cpu_only": false,
+  "detected_at": "2026-11-08T19:03:53.607136+00:00"
+}
+test tests::real_m4_24gb_matches_simulator ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 15 filtered out; finished in 0.02s
+

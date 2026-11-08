@@ -1,0 +1,28 @@
+    Checking tokio v1.49.0
+    Checking mlx-ollama-core v0.1.0 ($REPO/crates/core)
+    Checking mlx-presentation v0.1.0 ($REPO/crates/presentation)
+    Checking hyper v1.8.1
+    Checking tower v0.5.3
+    Checking tokio-util v0.7.18
+    Checking tokio-rustls v0.26.4
+    Checking mlx-hardware-fit v0.1.0 ($REPO/crates/hardware-fit)
+    Checking mlx-agent-skills v0.1.0 ($REPO/crates/agent-skills)
+    Checking mlx-provider v0.1.0 ($REPO/crates/providers/mlx)
+    Checking tokio-stream v0.1.18
+    Checking tower-http v0.6.8
+    Checking mlx-model-fit v0.1.0 ($REPO/crates/model-fit)
+    Checking hyper-util v0.1.20
+    Checking hyper-rustls v0.27.7
+    Checking axum v0.8.8
+    Checking reqwest v0.12.28
+    Checking jsonschema v0.29.1
+    Checking mlx-research v0.1.0 ($REPO/crates/research)
+    Checking llamacpp-provider v0.1.0 ($REPO/crates/providers/llamacpp)
+    Checking mlx-flow v0.1.0 ($REPO/crates/flow)
+    Checking ollama-provider v0.1.0 ($REPO/crates/providers/ollama)
+    Checking http-llm-provider v0.1.0 ($REPO/crates/providers/http_llm_provider)
+    Checking mlx-agent-tools v0.1.0 ($REPO/crates/agent-tools)
+    Checking mlx-plugin-runtime v0.1.0 ($REPO/crates/plugin-runtime)
+    Checking mlx-agent-core v0.1.0 ($REPO/crates/agent-core)
+    Checking mlx-ollama-daemon v0.1.0 ($REPO/crates/daemon)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 15.73s

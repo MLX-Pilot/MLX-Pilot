@@ -1,0 +1,103 @@
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.44
+   Compiling unicode-ident v1.0.23
+   Compiling libc v0.2.182
+   Compiling crossbeam-utils v0.8.21
+   Compiling serde_core v1.0.228
+   Compiling autocfg v1.5.0
+   Compiling rayon-core v1.13.0
+   Compiling zmij v1.0.20
+   Compiling serde v1.0.228
+   Compiling core-foundation-sys v0.8.7
+   Compiling memchr v2.8.0
+   Compiling num-traits v0.2.19
+   Compiling serde_json v1.0.149
+   Compiling anyhow v1.0.101
+   Compiling either v1.16.0
+   Compiling pin-project-lite v0.2.16
+   Compiling thiserror v2.0.18
+   Compiling once_cell v1.21.3
+   Compiling tracing-core v0.1.36
+   Compiling crossbeam-epoch v0.9.18
+   Compiling iana-time-zone v0.1.65
+   Compiling crossbeam-deque v0.8.6
+   Compiling bytes v1.11.1
+   Compiling itoa v1.0.17
+   Compiling rayon v1.12.0
+   Compiling syn v2.0.114
+   Compiling errno v0.3.14
+   Compiling socket2 v0.6.2
+   Compiling mio v1.1.1
+   Compiling signal-hook-registry v1.4.8
+   Compiling sysinfo v0.32.1
+   Compiling serde_derive v1.0.228
+   Compiling tracing-attributes v0.1.31
+   Compiling thiserror-impl v2.0.18
+   Compiling tokio-macros v2.6.0
+   Compiling tokio v1.49.0
+   Compiling tracing v0.1.44
+   Compiling chrono v0.4.43
+   Compiling mlx-hardware-fit v0.1.0 ($REPO/crates/hardware-fit)
+   Compiling mlx-model-fit v0.1.0 ($REPO/crates/model-fit)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.42s
+     Running unittests src/lib.rs (target/rosetta-validation/x86_64-apple-darwin/debug/deps/mlx_hardware_fit-ad78e063190c9a11)
+
+running 21 tests
+test tests::test_bandwidth_estimation ... ok
+test tests::test_apple_chip_tier_must_follow_generation ... ok
+test tests::test_bandwidth_estimation_knows_apple_chips ... ok
+test tests::test_simulate_hardware_cpu_only ... ok
+test tests::test_simulate_hardware ... ok
+test tests::test_gpu_grouping ... ok
+test tests::test_simulate_hardware_dual_gpu ... ok
+test tests::test_simulate_hardware_named_gpu ... ok
+test tests::detection_rejects_invalid_unified_memory ... ok
+test tests::test_simulate_hardware_ram_override ... ok
+test tests::detection_falls_back_to_sysinfo_when_brand_query_fails_or_is_empty ... ok
+test tests::detected_m4_24gb_matches_simulated_mac ... ok
+test tests::test_simulate_mac_ignores_discrete_gpu_overrides ... ok
+test tests::test_simulate_mac_bandwidth_follows_memory_bound_bins ... ok
+test tests::detected_chips_use_memory_dependent_bandwidth_like_simulation ... ok
+test tests::test_simulate_mac_rejects_invalid_memory ... ok
+test tests::test_simulate_mac_replaces_the_whole_machine ... ok
+test tests::test_simulate_mac_unknown_chip_falls_back_to_metal_estimate ... ok
+test tests::test_simulate_mac_without_chip_name_uses_generic_label ... ok
+test tests::unknown_apple_chips_keep_fallback_without_guessing_a_generation ... ok
+test tests::unknown_brand_requires_arm_host_evidence_including_rosetta ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/rosetta-validation/x86_64-apple-darwin/debug/deps/mlx_model_fit-8523220703abfe09)
+
+running 16 tests
+test tests::real_m4_24gb_matches_simulator ... ignored, requires a real Mac mini M4 with 24 GiB unified memory
+test tests::test_best_quant_for_budget ... ok
+test tests::test_analyze_model_gpu ... ok
+test tests::m4_bandwidth_correction_changes_speed_without_changing_memory_fit ... ok
+test tests::test_analyze_model_cpu_only ... ok
+test tests::test_cpu_only_ranking_is_honest ... ok
+test tests::test_cpu_only_small_models_rank_higher ... ok
+test tests::test_infer_use_case ... ok
+test tests::test_cpu_only_serve_profiles_note_cpu ... ok
+test tests::test_infer_quant_from_name ... ok
+test tests::test_large_model_limited_vram ... ok
+test tests::test_params_b_from_name ... ok
+test tests::test_quant_bytes ... ok
+test tests::test_serve_profiles ... ok
+test tests::test_rank_models ... ok
+test tests::detected_m4_24gb_and_simulator_produce_identical_rankings_and_serve_profiles ... ok
+
+test result: ok. 15 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mlx_hardware_fit
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mlx_model_fit
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

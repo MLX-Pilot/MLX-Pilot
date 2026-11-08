@@ -1,10 +1,97 @@
 # Detecção Apple Silicon: chip real e paridade com o simulador
 
+## Validação no Mac real — 8 de novembro de 2026
+
+Tarefa: [#70](https://github.com/MLX-Pilot/MLX-Pilot/issues/70).
+O patch recebido no ZIP foi aplicado sem conflitos com `git am`, após
+`git pull --ff-only` da main até `cb21a55`. O commit de origem `c2440f5`
+foi reaplicado como `ec966b7` na branch `fix/apple-silicon-chip-detection`.
+A publicação desta branch é separada do merge, que continua dependendo de revisão.
+
+Ambiente desta validação: Mac mini M4, macOS 26.3.1 (25D2128), Rust 1.93.0,
+24 GiB de memória unificada e dez núcleos. As consultas reais retornaram:
+
+```text
+/usr/sbin/sysctl -n machdep.cpu.brand_string → Apple M4
+/usr/sbin/sysctl -n hw.memsize → 25769803776
+uname -m → arm64
+/usr/bin/arch -x86_64 /usr/sbin/sysctl -n sysctl.proc_translated → 1
+/usr/bin/arch -x86_64 /usr/sbin/sysctl -n machdep.cpu.brand_string → Apple M4
+```
+
+A detecção real, tanto no binário ARM64 quanto no binário x86_64 executado
+sob Rosetta, produziu `Apple M4`, dez núcleos, 24 GiB de RAM, uma GPU
+`Apple M4 GPU`, backend Metal, 18 GiB estimados para GPU e **120 GB/s**.
+O teste específico compara também rankings e perfis de execução com o simulador.
+
+| Verificação desta execução | Resultado | Evidência |
+| --- | --- | --- |
+| `cargo test --locked --workspace` | 493 passaram, zero falhas; um teste de hardware ignorado por padrão | [log](evidence/apple-silicon-2026-11-08/workspace-tests.log) |
+| Teste ignorado `real_m4_24gb_matches_simulator`, ARM64 nativo | Passou no Mac real | [log](evidence/apple-silicon-2026-11-08/real-m4-arm64.log) |
+| Bibliotecas hardware-fit/model-fit, `--target x86_64-apple-darwin` | 36 passaram sob Rosetta; um ignorado | [log](evidence/apple-silicon-2026-11-08/rosetta-tests.log) |
+| Mesmo teste específico do M4/24, binário x86_64 | Passou sob Rosetta | [log](evidence/apple-silicon-2026-11-08/real-m4-rosetta.log) |
+| `cargo clippy --locked --workspace --all-targets -- -D warnings` | Sem avisos | [log](evidence/apple-silicon-2026-11-08/clippy.log) |
+| `cargo fmt --all -- --check`, `git diff --check` | Passaram | Executados localmente |
+| `cargo build --locked -p mlx-ollama-daemon` | Passou | Daemon usado no smoke abaixo |
+| `node --test apps/desktop-ui/e2e/hardware-mac-simulator.test.js` | Quatro passaram | [log](evidence/apple-silicon-2026-11-08/ui-tests.log) |
+| API do daemon ARM64 corrigido | HTTP 200; 60 resultados de modelos e dois conjuntos de perfis idênticos entre detectado/simulado; POST de simulação também equivalente | [resumo](evidence/apple-silicon-2026-11-08/api-summary.txt), [hardware real](evidence/apple-silicon-2026-11-08/system-arm64.json) |
+| Navegador Chromium com daemon real | Escanear, simular Mac mini M4/24 e restaurar hardware real; 15 linhas de ranking idênticas; zero erros no console após daemon pronto | [paridade](evidence/apple-silicon-2026-11-08/ui-parity.txt), [console](evidence/apple-silicon-2026-11-08/ui-console.txt) |
+
+O smoke usou estado temporário, UI em `127.0.0.1:5597` e daemon em
+`127.0.0.1:11437`, sem alterar a configuração persistente do aplicativo.
+Na primeira abertura houve conexões recusadas antes de o daemon ficar pronto;
+a conferência foi repetida após a inicialização. O selo global “Degradado” nas
+capturas decorre do autostart do Ollama desativado nesse ambiente isolado;
+as rotas de hardware responderam normalmente. A validação visual cobre a UI
+web do desktop em Chromium; o aplicativo empacotado Tauri não foi executado.
+
+[Hardware detectado](evidence/apple-silicon-2026-11-08/apple-m4-detected.png) ·
+[Simulação Mac mini M4/24](evidence/apple-silicon-2026-11-08/apple-m4-simulated.png)
+
+### Impacto reproduzido no motor de estimativas ARM64
+
+O teste `m4_24gb_bandwidth_impact_on_default_catalog` isolou a mudança de
+150 para 120 GB/s com os mesmos 15 modelos do catálogo padrão. Mudaram de
+posição seis modelos em `general` e seis em `coding`; nenhum em `creative`
+ou `analysis`. Os 60 pares mantiveram quantização, memória estimada e fit.
+O simulador manual já usava 120 GB/s e continua produzindo os mesmos resultados;
+a correção alinha a detecção real a ele.
+
+| Modelo, uso geral | TPS antes → corrigido | Posição antes → corrigida |
+| --- | --- | --- |
+| Llama 3 8B Instruct, Q8_0 | 24,375 → 19,500 | 2 → 6 |
+| Gemma 2 9B IT, Q8_0 | 21,195652 → 16,956522 | 9 → 9 |
+| Llama 3 70B Instruct, Q2_K | 13,508339 → 11,897027 | 14 → 14 |
+
+[Saída completa do experimento ARM64](evidence/apple-silicon-2026-11-08/catalog-impact-arm64.log).
+Estes números são estimativas do software executado no Mac, **não um benchmark
+de inferência física**. O offload parcial difere dos valores Linux históricos
+abaixo porque a heurística de banda da CPU depende da arquitetura compilada.
+
+### Limitações atuais
+
+- Os caminhos de consulta real e o teste de paridade foram executados em ARM64
+  e sob Rosetta. O daemon completo e a UI foram exercitados em ARM64; não houve
+  smoke HTTP/visual do daemon completo x86_64 nem teste em um Mac Intel físico.
+- Falhas de sysctl, nomes desconhecidos e ausência de evidência ARM continuam
+  cobertos por respostas injetadas nos testes; não se provocaram falhas no SO.
+- 120 GB/s é uma especificação cadastrada, não uma medição. A parcela de 75%
+  para GPU e o fallback desconhecido de 150 GB/s continuam heurísticas.
+- A tabela preexistente de outros chips não foi auditada; configurações em que
+  a memória não distingue o bin ainda usam o bin superior.
+- Não houve execução do app Tauri empacotado nem benchmark de inferência.
+
+## Registro histórico da execução original Linux
+
+O texto abaixo veio do ZIP e descreve exclusivamente a execução anterior em
+Linux. As pendências de detecção nativa, Rosetta e UI web mencionadas nesse
+registro foram verificadas nesta execução conforme os resultados acima.
+
 Base: `cb21a55b0d5213983fd62ee3cfc21d405b84daa0` (PR #69). Caso principal:
 Mac mini com Apple M4 e 24 GB de memória unificada. Os perfis usados nos testes
 Linux são **sintéticos**, não capturas do computador do usuário.
 
-## Problema e correção
+### Problema e correção
 
 `hw.model` retorna o identificador do computador, como `Mac16,10`, não o chip.
 Consultá-lo na tabela de chips levava ao fallback de 150 GB/s, enquanto o
@@ -42,7 +129,7 @@ inválida não gera GPU de memória zero/NaN.
 A capacidade é calculada em GiB, mantendo a convenção anterior da interface
 que a rotula como GB; a banda segue GB/s decimal das especificações Apple.
 
-## Regressões e execução
+### Regressões e execução
 
 - Resolução de consultas do SO injetada nos testes, exercitando o mesmo caminho
   usado em produção: M4/24, M1, M2 Pro, M3 Max e M4 Pro/Max; bins por memória;
@@ -63,7 +150,7 @@ cargo check --locked -p mlx-hardware-fit -p mlx-model-fit --all-targets --target
 cargo check --locked -p mlx-hardware-fit -p mlx-model-fit --all-targets --target x86_64-apple-darwin
 ```
 
-### Impacto medido no motor de estimativas
+#### Impacto medido no motor de estimativas
 
 Comparação controlada de 150 versus 120 GB/s com M4/24 e os 15 modelos do
 catálogo padrão, quantização e contexto automáticos:
@@ -96,7 +183,7 @@ os números de offload parcial podem diferir ao repetir o experimento no Mac;
 a queda de 20% nos modelos totalmente na GPU independe dessa diferença.
 Essa heurística de CPU não foi alterada neste patch.
 
-### Verificações locais
+#### Verificações locais
 
 Executado em Linux x86_64 com Rust/Cargo 1.99.1, usando `Cargo.lock` sem
 alterações:
@@ -115,7 +202,7 @@ São nove testes de regressão novos executados no Linux, além do teste macOS
 opcional. A suíte do workspace inclui os testes de integração existentes;
 o fluxo gráfico da interface não foi executado nesta alteração.
 
-## Validação que exige o Mac real
+### Validação que exige o Mac real
 
 O ambiente de desenvolvimento desta correção é Linux x86_64. A checagem de
 compilação cruzada inclui os testes específicos de macOS, mas não executa
@@ -147,7 +234,7 @@ A execução Rosetta precisa de validação separada com o daemon x86_64 em um
 Mac ARM. Os testes simulados cobrem os sinais de host traduzido; a checagem de
 compilação x86_64 não prova o comportamento do SO sob tradução.
 
-## Limitações preservadas
+### Limitações preservadas
 
 - 120 GB/s é a banda publicada do M4, não throughput medido. A estimativa de TPS
   continua heurística e não equivale a um benchmark de inferência.
@@ -158,7 +245,7 @@ compilação x86_64 não prova o comportamento do SO sob tradução.
 - Não houve revisão geral da tabela de chips nem mudança no algoritmo de score.
 - O caminho de fallback não conhece a banda física de um chip futuro.
 
-## Fontes
+### Fontes
 
 - [PR #69](https://github.com/MLX-Pilot/MLX-Pilot/pull/69)
 - [Issue #65](https://github.com/MLX-Pilot/MLX-Pilot/issues/65)

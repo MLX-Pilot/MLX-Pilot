@@ -1,0 +1,707 @@
+   Compiling tokio v1.49.0
+   Compiling mlx-ollama-core v0.1.0 ($REPO/crates/core)
+   Compiling hyper v1.8.1
+   Compiling tower v0.5.3
+   Compiling tokio-rustls v0.26.4
+   Compiling tokio-util v0.7.18
+   Compiling mlx-agent-skills v0.1.0 ($REPO/crates/agent-skills)
+   Compiling mlx-hardware-fit v0.1.0 ($REPO/crates/hardware-fit)
+   Compiling mlx-provider v0.1.0 ($REPO/crates/providers/mlx)
+   Compiling tower-http v0.6.8
+   Compiling tokio-stream v0.1.18
+   Compiling hyper-util v0.1.20
+   Compiling mlx-model-fit v0.1.0 ($REPO/crates/model-fit)
+   Compiling hyper-rustls v0.27.7
+   Compiling axum v0.8.8
+   Compiling reqwest v0.12.28
+   Compiling jsonschema v0.29.1
+   Compiling llamacpp-provider v0.1.0 ($REPO/crates/providers/llamacpp)
+   Compiling http-llm-provider v0.1.0 ($REPO/crates/providers/http_llm_provider)
+   Compiling mlx-flow v0.1.0 ($REPO/crates/flow)
+   Compiling mlx-research v0.1.0 ($REPO/crates/research)
+   Compiling ollama-provider v0.1.0 ($REPO/crates/providers/ollama)
+   Compiling mlx-agent-tools v0.1.0 ($REPO/crates/agent-tools)
+   Compiling mlx-plugin-runtime v0.1.0 ($REPO/crates/plugin-runtime)
+   Compiling mlx-agent-core v0.1.0 ($REPO/crates/agent-core)
+   Compiling mlx-ollama-daemon v0.1.0 ($REPO/crates/daemon)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 31.28s
+     Running unittests src/lib.rs (target/debug/deps/http_llm_provider-2ca00405407b4424)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/llamacpp_provider-dc449a3fafdc74ae)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/mlx_agent_core-05166a229e67c8b0)
+
+running 112 tests
+test agent_loop::tests::default_config_values ... ok
+test approval::tests::approval_auto_mode_returns_allow ... ok
+test approval::tests::approval_decision_variants ... ok
+test approval::tests::approval_deny_mode_returns_deny ... ok
+test approval::tests::approval_request_serializes ... ok
+test approval::tests::risk_based_mode_auto_approves_low_and_medium ... ok
+test agent_loop::tests::agent_loop_falls_back_to_direct_chat_when_tools_are_unsupported ... ok
+test agent_loop::tests::agent_loop_direct_response ... ok
+test agent_loop::tests::reasoning_only_turn_is_reprompted_for_its_conclusion ... ok
+test agent_loop::tests::persistently_empty_answer_does_not_loop ... ok
+test audit::tests::audit_entry_serializes ... ok
+test agent_loop::tests::agent_loop_with_tool_call ... ok
+test agent_loop::tests::empty_final_answer_is_reprompted_once ... ok
+test audit::tests::audit_log_write_stub_ok ... ok
+test agent_loop::tests::agent_loop_max_iterations ... ok
+test agent_loop::tests::agent_loop_tool_fallback_reprompt_works ... ok
+test events::tests::event_bus_emits_without_subscribers ... ok
+test events::tests::event_bus_subscriber_receives ... ok
+test memory::tests::upsert_and_search_records ... ok
+test context_budget::tests::compresses_long_history_without_exceeding_budget ... ok
+test memory_manager::tests::short_query_passes_through_unchanged ... ok
+test ooda::tests::accepts_dash_and_paren_markers ... ok
+test ooda::tests::act_observation_hides_future_steps ... ok
+test memory_manager::tests::recall_query_is_bounded_and_keeps_both_ends ... ok
+test ooda::tests::controller_never_exceeds_the_cycle_limit ... ok
+test ooda::tests::controller_stops_at_the_tool_call_budget ... ok
+test ooda::tests::controller_runs_every_planned_step_in_order ... ok
+test ooda::tests::decide_enforces_cycle_limit ... ok
+test ooda::tests::controller_stops_when_the_model_cannot_plan ... ok
+test ooda::tests::decide_enforces_deadline ... ok
+test ooda::tests::decide_enforces_tool_call_budget ... ok
+test ooda::tests::decide_executes_the_first_pending_step ... ok
+test ooda::tests::decide_replans_after_a_failure ... ok
+test ooda::tests::decide_reports_failures_separately_from_success ... ok
+test ooda::tests::decide_skips_completed_steps ... ok
+test ooda::tests::decide_stops_on_empty_plan ... ok
+test ooda::tests::decide_stops_replanning_after_the_limit ... ok
+test ooda::tests::decide_stops_when_plan_is_complete ... ok
+test ooda::tests::empty_answer_yields_no_steps ... ok
+test ooda::tests::empty_revision_leaves_the_plan_untouched ... ok
+test ooda::tests::ignores_preamble_and_trailing_chatter ... ok
+test ooda::tests::failed_step_is_retried_then_marked_failed ... ok
+test ooda::tests::limits_are_checked_before_the_plan ... ok
+test ooda::tests::parses_numbered_list ... ok
+test ooda::tests::observation_marks_progress_so_steps_are_not_repeated ... ok
+test ooda::tests::revised_plan_preserves_finished_steps ... ok
+test ooda::tests::respects_max_steps ... ok
+test policy::tests::airgapped_mode_blocks_all_network ... ok
+test policy::tests::allowed_tool_subset_blocks_tools_outside_active_toolset ... ok
+test policy::tests::command_only_form_still_works ... ok
+test policy::tests::benign_command_field_does_not_launder_a_destructive_argv ... ok
+test policy::tests::default_policy_has_safe_bins ... ok
+test policy::tests::default_policy_denies_dangerous_paths ... ok
+test policy::tests::deny_patterns_reach_the_argv_form ... ok
+test policy::tests::dynamic_plugin_tools_respect_mode_and_subset ... ok
+test policy::tests::egress_blocks_direct_ip_when_enabled ... ok
+test policy::tests::known_hash_change_returns_warning ... ok
+test policy::tests::network_allowlist_blocks_unlisted_domain ... ok
+test policy::tests::safe_bin_matching_ignores_path_and_extension ... ok
+test policy::tests::owner_only_mode_blocks_outside_workspace ... ok
+test policy::tests::safe_bin_requires_the_program_not_a_substring ... ok
+test policy::tests::skill_capability_fs_read_is_enforced ... ok
+test policy::tests::skill_pin_mismatch_denies_load ... ok
+test prompt_builder::tests::applies_profile_by_model_size ... ok
+test prompt_builder::tests::filters_tools_aggressively_and_by_mode ... ok
+test prompt_builder::tests::filtering_ranks_the_requested_tool_first ... ok
+test prompt_builder::tests::long_message_keeps_the_question_at_the_end ... ok
+test prompt_builder::tests::middle_truncation_keeps_both_ends ... ok
+test prompt_builder::tests::read_only_mode_never_offers_write_tools ... ok
+test prompt_builder::tests::sliding_window_preserves_recent_and_system ... ok
+test registry::tests::channel_registry_contains_compatibility_catalog ... ok
+test registry::tests::definitions_returns_all_tool_schemas ... ok
+test agent_runtime::tests::hermes_inspired_runtime_persists_tool_events ... ok
+test registry::tests::dispatch_unknown_tool_errors ... ok
+test registry::tests::dispatch_validates_schema_missing_required ... ok
+test registry::tests::dispatch_validates_schema_rejects_invalid ... ok
+test registry::tests::empty_registry ... ok
+test registry::tests::plugin_registry_resolves_aliases ... ok
+test registry::tests::with_builtins_has_local_search_tools ... ok
+test runtime::tests::lazy_runtime_registry_reports_errors ... ok
+test runtime::tests::lazy_runtime_registry_reports_idle_and_ready ... ok
+test session::tests::new_session_id_is_uuid ... ok
+test capabilities::tests::authority_enforces_fs_scope ... ok
+test capabilities::tests::authority_enforces_process_scope ... ok
+test capabilities::tests::schema_rejects_unknown_permission ... ok
+test capabilities::tests::schema_accepts_valid_manifest ... ok
+test state_store::tests::fts_query_caps_the_number_of_distinct_terms ... ok
+test state_store::tests::fts_query_is_empty_for_blank_input ... ok
+test tool_catalog::tests::coding_profile_contains_exec ... ok
+test tool_catalog::tests::precedence_applies_session_last ... ok
+test tool_catalog::tests::unknown_tool_is_denied ... ok
+test registry::tests::dispatch_enforces_capabilities_before_tool_execution ... ok
+test capabilities::tests::authority_parses_json_and_toml_manifests ... ok
+test tool_index::tests::accents_do_not_break_matching ... ok
+test tool_index::tests::checkpoint_tools_are_reachable ... ok
+test tool_index::tests::delegation_tools_are_reachable ... ok
+test tool_index::tests::conjugated_portuguese_verb_still_finds_grep ... ok
+test state_store::tests::fts_query_is_deduplicated_and_capped ... ok
+test tool_index::tests::explicit_tool_name_wins ... ok
+test tool_index::tests::new_tool_is_matchable_without_touching_the_selector ... ok
+test tool_index::tests::exec_request_ranks_exec_first ... ok
+test tool_index::tests::read_request_ranks_read_file_first ... ok
+test tool_index::tests::english_queries_still_work ... ok
+test tool_index::tests::ranking_is_deterministic ... ok
+test tool_index::tests::unmatched_query_falls_back_instead_of_returning_nothing ... ok
+test tool_index::tests::memory_tools_are_reachable ... ok
+test tool_index::tests::portuguese_edit_request_finds_edit_file ... ok
+test tool_index::tests::regression_cases_from_the_live_agent_run ... ok
+test session::tests::session_store_operations ... ok
+test prompt_builder::tests::prompt_never_exceeds_budget_estimate ... ok
+test approval::tests::risk_based_mode_still_asks_for_high_risk ... ok
+test context_budget::tests::single_huge_message_keeps_the_trailing_question ... ok
+
+test result: ok. 112 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.22s
+
+     Running unittests src/lib.rs (target/debug/deps/mlx_agent_skills-5497bfa7eab38d9e)
+
+running 36 tests
+test frontmatter::tests::parse_invalid_unclosed_frontmatter ... ok
+test frontmatter::tests::parse_invalid_no_frontmatter ... ok
+test frontmatter::tests::parse_invalid_yaml ... ok
+test frontmatter::tests::parse_always_skill ... ok
+test frontmatter::tests::parse_any_bins ... ok
+test frontmatter::tests::parse_capabilities ... ok
+test frontmatter::tests::parse_complex_metadata ... ok
+test frontmatter::tests::parse_claude_compat_metadata ... ok
+test frontmatter::tests::basedir_substitution ... ok
+test frontmatter::tests::parse_os_filtered_skill ... ok
+test frontmatter::tests::parse_valid_frontmatter ... ok
+test frontmatter::tests::parse_primary_env_and_config_requirements ... ok
+test frontmatter::tests::requirement_check_empty_is_satisfied ... ok
+test frontmatter::tests::requirement_check_uses_context_for_env_and_config ... ok
+test frontmatter::tests::to_skill_package_full ... ok
+test loader::tests::build_prompt_respects_char_limit ... ok
+test loader::tests::build_prompt_always_skills_first ... ok
+test loader::tests::build_prompt_respects_max_skills ... ok
+test frontmatter::tests::requirement_check_missing_bins ... ok
+test frontmatter::tests::requirement_check_any_bins_none_present ... ok
+test loader::tests::load_respects_file_size_limit ... ok
+test loader::tests::load_skips_nonexistent_dir ... ok
+test loader::tests::load_all_from_claude_compat_directory ... ok
+test resolver::tests::registry_skill_meta_serializes ... ok
+test types::tests::defaults_are_restrictive ... ok
+test types::tests::legacy_network_scope_string_maps_to_network_capability ... ok
+test loader::tests::load_all_from_hermes_compat_directory ... ok
+test loader::tests::load_all_from_workspace ... ok
+test types::tests::skill_requirements_default_empty ... ok
+test types::tests::trust_level_ordering ... ok
+test loader::tests::load_all_from_codex_compat_directory ... ok
+test loader::tests::load_merges_legacy_and_claude_skill_roots ... ok
+test loader::tests::load_prefers_legacy_skill_when_duplicate_name_exists ... ok
+test loader::tests::load_merges_all_compat_roots ... ok
+test loader::tests::hermes_compatible_skill_sets_import_metadata_and_indexes_support_files ... ok
+test loader::tests::discover_reports_eligibility_for_critical_skills ... ok
+
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (target/debug/deps/mlx_agent_tools-dd8a5ca9f3a585d2)
+
+running 35 tests
+test sandbox::tests::sandbox_allows_new_file_path ... ok
+test sandbox::tests::sandbox_blocks_dot_dot_traversal ... ok
+test sandbox::tests::sandbox_allows_file_inside_workspace ... ok
+test sandbox::tests::sandbox_blocks_symlink_escape ... ok
+test sandbox::tests::sandbox_allows_nested_path ... ok
+test sandbox::tests::sandbox_blocks_absolute_path_outside ... ok
+test tools::exec::tests::blocks_shell_metacharacters ... ok
+test tools::exec::tests::denies_dangerous_commands ... ok
+test tools::exec::tests::tokenizes_quoted_arguments ... ok
+test tools::exec::tests::exec_readonly_blocked ... ok
+test tools::edit_file::tests::edit_file_errors_when_not_found ... ok
+test tools::glob::tests::glob_helper_matches_shallow_and_nested ... ok
+test tools::grep::tests::grep_glob_helper_matches_shallow_and_nested ... ok
+test tools::exec::tests::exec_blocks_denied_command ... ok
+test tools::list_dir::tests::list_dir_blocks_escape ... ok
+test tools::glob::tests::glob_matches_nested_files ... ok
+test tools::list_dir::tests::list_dir_shows_files ... ok
+test tools::read_file::tests::read_file_blocks_escape ... ok
+test tools::read_file::tests::read_file_tool_definition ... ok
+test tools::read_file::tests::read_file_success ... ok
+test tools::write_file::tests::write_file_blocks_outside_workspace ... ok
+test tools::write_file::tests::write_file_dry_run ... ok
+test tools::write_file::tests::write_file_readonly_blocked ... ok
+test tools::grep::tests::grep_finds_matches_with_line_numbers ... ok
+test types::tests::execution_mode_default_is_full ... ok
+test types::tests::tool_definition_serializes ... ok
+test types::tests::tool_result_serializes ... ok
+test tools::grep::tests::grep_treats_empty_path_filter_as_no_filter ... ok
+test tools::grep::tests::grep_skips_internal_and_build_directories ... ok
+test tools::edit_file::tests::edit_file_replaces_text ... ok
+test checkpoints::tests::checkpoint_restore_deletes_created_file ... ok
+test checkpoints::tests::checkpoint_roundtrip_restores_previous_bytes ... ok
+test tools::write_file::tests::write_file_creates_new ... ok
+test tools::exec::tests::exec_runs_simple_command ... ok
+test tools::exec::tests::exec_timeout ... ok
+
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.52s
+
+     Running unittests src/lib.rs (target/debug/deps/mlx_flow-8d4751e07f5ee772)
+
+running 153 tests
+test engine::tests::invalid_flow_is_rejected_before_running ... ok
+test engine::tests::failure_stops_the_run_by_default ... ok
+test engine::tests::a_reserved_run_id_is_used_instead_of_a_new_one ... ok
+test engine::tests::disabled_node_passes_input_through ... ok
+test engine::tests::a_blank_reserved_run_id_falls_back_to_a_generated_one ... ok
+test engine::tests::every_node_reports_its_output_indexed_by_port ... ok
+test engine::tests::a_failed_sibling_does_not_hide_completed_node_records ... ok
+test engine::tests::linear_flow_passes_data_forward ... ok
+test engine::tests::array_payload_becomes_multiple_items ... ok
+test engine::tests::if_node_prunes_the_branch_not_taken ... ok
+test engine::tests::on_error_continue_keeps_the_flow_going ... ok
+test engine::tests::node_output_is_visible_by_name_downstream ... ok
+test engine::tests::parallel_branches_merge_into_one_node ... ok
+test engine::tests::retry_policy_reexecutes_until_success ... ok
+test engine::tests::webhook_trigger_requires_a_webhook_node ... ok
+test expr::tests::division_by_zero_is_an_error ... ok
+test expr::tests::arithmetic_and_comparison ... ok
+test engine::tests::retries_share_the_flow_deadline ... ok
+test engine::tests::start_node_override_runs_a_subgraph ... ok
+test engine::tests::queued_nodes_share_the_flow_deadline ... ok
+test expr::tests::env_is_isolated_from_process_environment ... ok
+test engine::tests::retry_delay_stops_at_the_flow_deadline ... ok
+test expr::tests::has_template_detects_nested_templates ... ok
+test expr::tests::logical_operators_short_circuit ... ok
+test expr::tests::missing_path_is_null_not_error ... ok
+test expr::tests::functions_cover_the_common_cases ... ok
+test expr::tests::mixed_template_interpolates_as_string ... ok
+test expr::tests::plus_concatenates_when_a_side_is_string ... ok
+test expr::tests::node_outputs_are_reachable_by_name ... ok
+test expr::tests::template_respects_quotes_and_escapes ... ok
+test expr::tests::reads_nested_paths ... ok
+test expr::tests::render_value_walks_nested_structures ... ok
+test expr::tests::truthiness_matches_documented_rules ... ok
+test expr::tests::unknown_function_is_an_error ... ok
+test expr::tests::unknown_variable_is_an_error ... ok
+test expr::tests::unterminated_template_is_an_error ... ok
+test expr::tests::whole_string_template_preserves_type ... ok
+test graph::tests::cycle_is_reported_with_the_full_path ... ok
+test graph::tests::dangling_edge_is_rejected ... ok
+test graph::tests::duplicated_node_name_is_rejected ... ok
+test graph::tests::independent_branches_share_a_level ... ok
+test graph::tests::join_node_waits_for_the_longest_path ... ok
+test graph::tests::linear_flow_produces_one_node_per_level ... ok
+test graph::tests::missing_trigger_is_only_a_warning ... ok
+test graph::tests::reachable_from_follows_edges_forward_only ... ok
+test graph::tests::self_loop_is_rejected ... ok
+test graph::tests::unknown_kind_is_rejected ... ok
+test import::tests::dangling_connection_is_dropped_with_a_warning ... ok
+test import::tests::duplicated_names_are_made_unique ... ok
+test import::tests::agent_http_request_becomes_the_native_agent_node ... ok
+test import::tests::if_node_output_indexes_become_true_and_false_ports ... ok
+test import::tests::rejects_json_without_a_node_list ... ok
+test import::tests::imports_nodes_edges_and_positions ... ok
+test import::tests::schedule_interval_becomes_a_cron_expression ... ok
+test import::tests::import_is_deterministic ... ok
+test import::tests::set_node_assignments_lose_the_n8n_equals_prefix ... ok
+test import::tests::unsupported_node_becomes_a_log_with_a_note ... ok
+test import::tests::webhook_parameters_are_carried_over ... ok
+test import::tests::imported_flow_passes_native_validation ... ok
+test mcp::tests::arguments_are_always_an_object ... ok
+test mcp::tests::a_closed_transport_surfaces_as_an_error ... ok
+test mcp::tests::a_jsonrpc_error_becomes_a_client_error ... ok
+test mcp::tests::config_validation_requires_name_and_command ... ok
+test mcp::tests::extract_text_handles_missing_content ... ok
+test mcp::tests::call_tool_joins_the_text_blocks ... ok
+test mcp::tests::call_tool_reports_the_servers_error_flag ... ok
+test mcp::tests::initialize_sends_the_handshake_and_the_notification ... ok
+test mcp::tests::list_tools_reads_both_schema_spellings ... ok
+test mcp::tests::malformed_lines_are_skipped ... ok
+test model::tests::disabled_trigger_is_not_reported ... ok
+test mcp::tests::notifications_arriving_first_do_not_confuse_the_response ... ok
+test mcp::tests::tools_without_a_name_are_ignored ... ok
+test model::tests::edge_defaults_to_main_port_and_omits_it_when_serializing ... ok
+test model::tests::flow_deserializes_from_minimal_json ... ok
+test model::tests::named_port_survives_round_trip ... ok
+test model::tests::retry_attempts_are_clamped ... ok
+test model::tests::settings_are_clamped_to_safe_bounds ... ok
+test nodes::control::tests::if_accepts_a_condition_without_braces ... ok
+test nodes::control::tests::if_omits_the_port_that_got_no_items ... ok
+test nodes::control::tests::if_reports_a_broken_expression ... ok
+test nodes::control::tests::if_without_condition_is_an_error ... ok
+test nodes::control::tests::if_splits_items_between_both_ports ... ok
+test nodes::control::tests::merge_modes_select_the_right_items ... ok
+test nodes::data::tests::assignment_without_name_is_an_error ... ok
+test nodes::data::tests::dotted_names_create_nested_objects ... ok
+test nodes::data::tests::keep_only_set_drops_the_original_fields ... ok
+test nodes::data::tests::expressions_are_resolved_per_item ... ok
+test nodes::data::tests::log_passes_items_through_and_records_lines ... ok
+test nodes::data::tests::set_path_overwrites_non_object_segments ... ok
+test nodes::data::tests::set_merges_into_the_existing_item_by_default ... ok
+test nodes::http::tests::headers_and_query_are_stringified ... ok
+test nodes::http::tests::json_body_accepts_object_and_json_string ... ok
+test nodes::http::tests::malformed_json_body_is_reported ... ok
+test nodes::http::tests::spec_defaults_to_get_without_body ... ok
+test nodes::http::tests::spec_rejects_an_invalid_method ... ok
+test nodes::http::tests::spec_requires_an_absolute_url ... ok
+test nodes::http::tests::text_body_stringifies_non_strings ... ok
+test nodes::http::tests::timeout_is_clamped ... ok
+test nodes::mlx::tests::agent_node_can_drop_the_input_fields ... ok
+test nodes::mlx::tests::agent_node_merges_the_reply_into_the_item ... ok
+test nodes::mlx::tests::agent_node_parses_json_wrapped_in_markdown ... ok
+test nodes::mlx::tests::agent_node_reports_unparseable_json ... ok
+test nodes::mlx::tests::agent_node_requires_a_message ... ok
+test nodes::mlx::tests::agent_node_runs_once_per_item ... ok
+test nodes::mlx::tests::agent_node_surfaces_host_failures ... ok
+test nodes::mlx::tests::json_payload_parser_handles_bare_and_fenced_json ... ok
+test nodes::mlx::tests::mcp_node_requires_server_and_tool ... ok
+test nodes::mlx::tests::mcp_node_forwards_server_tool_and_resolved_arguments ... ok
+test nodes::mlx::tests::mcp_node_without_a_configured_host_fails_clearly ... ok
+test nodes::mlx::tests::tool_node_fails_when_the_tool_reports_an_error ... ok
+test nodes::mlx::tests::mcp_node_surfaces_the_servers_error_flag ... ok
+test nodes::mlx::tests::tool_node_forwards_resolved_parameters ... ok
+test nodes::tests::param_helpers_are_tolerant_with_types ... ok
+test nodes::tests::param_str_accepts_values_produced_by_a_template ... ok
+test nodes::tests::builtin_registry_exposes_the_documented_kinds ... ok
+test nodes::tests::inherited_settings_are_hidden_under_advanced ... ok
+test nodes::tests::every_field_key_exists_in_the_node_defaults ... ok
+test nodes::tests::every_descriptor_declares_its_default_parameters_as_an_object ... ok
+test nodes::tests::provider_model_and_tool_fields_are_resolved_by_the_ui ... ok
+test nodes::triggers::tests::manual_trigger_rejects_invalid_sample_json ... ok
+test nodes::triggers::tests::schedule_binding_reads_the_cron_expression ... ok
+test nodes::tests::trigger_descriptors_have_no_inputs ... ok
+test nodes::triggers::tests::webhook_binding_defaults_to_post ... ok
+test nodes::triggers::tests::webhook_binding_normalizes_path_and_method ... ok
+test nodes::triggers::tests::manual_trigger_uses_sample_only_when_no_data_arrives ... ok
+test nodes::triggers::tests::manual_trigger_sample_array_becomes_multiple_items ... ok
+test nodes::triggers::tests::webhook_binding_rejects_empty_path ... ok
+test registry::tests::descriptor_without_inputs_is_a_trigger ... ok
+test registry::tests::named_port_output_does_not_populate_main ... ok
+test registry::tests::output_without_port_stops_the_branch ... ok
+test registry::tests::registry_indexes_by_descriptor_kind ... ok
+test run::tests::preview_keeps_small_payloads_intact ... ok
+test run::tests::preview_caps_item_count ... ok
+test run::tests::summary_reports_the_failed_node ... ok
+test run::tests::preview_caps_huge_single_item ... ok
+test store::tests::missing_flow_returns_none_instead_of_error ... ok
+test store::tests::path_traversal_ids_are_refused ... ok
+test nodes::http::tests::truncated_response_body_fails_in_auto_and_text_modes ... ok
+test store::tests::delete_reports_whether_the_flow_existed ... ok
+test tests::disabled_trigger_node_is_not_published ... ok
+test tests::only_active_flows_publish_webhooks ... ok
+test tests::response_mode_is_carried_over ... ok
+test tests::schedule_bindings_read_the_cron_field ... ok
+test tests::webhook_without_path_is_not_published ... ok
+test store::tests::round_trip_keeps_the_flow_intact ... ok
+test store::tests::no_temp_file_is_left_behind ... ok
+test store::tests::save_assigns_id_and_timestamps ... ok
+test store::tests::corrupted_files_are_skipped_not_fatal ... ok
+test store::tests::save_preserves_created_at_on_update ... ok
+test store::tests::deleting_a_flow_can_drop_its_runs ... ok
+test store::tests::runs_are_listed_newest_first_and_filtered_by_flow ... ok
+test store::tests::list_is_sorted_by_most_recently_updated ... ok
+test store::tests::run_history_is_pruned_to_the_limit ... ok
+
+test result: ok. 153 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running unittests src/lib.rs (target/debug/deps/mlx_hardware_fit-7376a9af67d786a0)
+
+running 21 tests
+test tests::test_bandwidth_estimation ... ok
+test tests::test_apple_chip_tier_must_follow_generation ... ok
+test tests::test_bandwidth_estimation_knows_apple_chips ... ok
+test tests::test_simulate_hardware ... ok
+test tests::test_gpu_grouping ... ok
+test tests::test_simulate_hardware_cpu_only ... ok
+test tests::test_simulate_hardware_dual_gpu ... ok
+test tests::test_simulate_hardware_named_gpu ... ok
+test tests::test_simulate_hardware_ram_override ... ok
+test tests::detection_rejects_invalid_unified_memory ... ok
+test tests::detection_falls_back_to_sysinfo_when_brand_query_fails_or_is_empty ... ok
+test tests::detected_m4_24gb_matches_simulated_mac ... ok
+test tests::test_simulate_mac_ignores_discrete_gpu_overrides ... ok
+test tests::test_simulate_mac_rejects_invalid_memory ... ok
+test tests::test_simulate_mac_replaces_the_whole_machine ... ok
+test tests::test_simulate_mac_bandwidth_follows_memory_bound_bins ... ok
+test tests::test_simulate_mac_unknown_chip_falls_back_to_metal_estimate ... ok
+test tests::test_simulate_mac_without_chip_name_uses_generic_label ... ok
+test tests::unknown_apple_chips_keep_fallback_without_guessing_a_generation ... ok
+test tests::detected_chips_use_memory_dependent_bandwidth_like_simulation ... ok
+test tests::unknown_brand_requires_arm_host_evidence_including_rosetta ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/mlx_model_fit-35e1cdecd6a432df)
+
+running 16 tests
+test tests::real_m4_24gb_matches_simulator ... ignored, requires a real Mac mini M4 with 24 GiB unified memory
+test tests::test_best_quant_for_budget ... ok
+test tests::test_infer_quant_from_name ... ok
+test tests::test_cpu_only_serve_profiles_note_cpu ... ok
+test tests::test_infer_use_case ... ok
+test tests::test_analyze_model_gpu ... ok
+test tests::m4_bandwidth_correction_changes_speed_without_changing_memory_fit ... ok
+test tests::test_cpu_only_small_models_rank_higher ... ok
+test tests::test_cpu_only_ranking_is_honest ... ok
+test tests::test_analyze_model_cpu_only ... ok
+test tests::test_large_model_limited_vram ... ok
+test tests::test_params_b_from_name ... ok
+test tests::test_quant_bytes ... ok
+test tests::test_rank_models ... ok
+test tests::test_serve_profiles ... ok
+test tests::detected_m4_24gb_and_simulator_produce_identical_rankings_and_serve_profiles ... ok
+
+test result: ok. 15 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (target/debug/deps/mlx_ollama_core-0b6e5c3f57f13e44)
+
+running 5 tests
+test chat_message_tests::truly_empty_turn_is_blank ... ok
+test chat_message_tests::reasoning_only_turn_is_not_blank ... ok
+test chat_message_tests::reasoning_is_omitted_from_the_wire_when_absent ... ok
+test chat_message_tests::turn_with_content_is_neither_blank_nor_reasoning_only ... ok
+test chat_message_tests::whitespace_reasoning_does_not_count ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/mlx_ollama_daemon-79a061e38b8a8e28)
+
+running 73 tests
+test agent_api::tests::normalize_node_manager_defaults_to_npm ... ok
+test agent_api::tests::normalize_agent_model_id_strips_local_prefixes_and_display_suffixes ... ok
+test agent_api::tests::build_install_command_supports_node_managers ... ok
+test agent_api::tests::capability_inventory_detector_matches_agent_capability_questions ... ok
+test agent_api::tests::effective_skill_enabled_respects_override_flag ... ok
+test agent_api::tests::resolve_provider_profile_prefers_request_then_config_default ... ok
+test agent_api::tests::skills_check_summary_counts_missing_state ... ok
+test catalog::tests::progress_prefers_known_byte_total ... ok
+test agent_api::tests::capability_inventory_markdown_reflects_exec_and_web_flags ... ok
+test agent_api::tests::sync_legacy_enabled_tools_matches_effective_policy ... ok
+test channels::protocol::tests::accepts_missing_or_v1_protocol_header ... ok
+test channels::protocol::tests::rejects_protocol_mismatch ... ok
+test channels::protocol::tests::validates_credentials_by_family ... ok
+test agent_api::tests::build_tool_policy_state_applies_session_override_last ... ok
+test agent_api::tests::explicit_empty_tools_and_skills_disable_prompt_extras ... ok
+test agent_api::tests::run_install_command_reports_permission_failures ... ok
+test channels::tests::all_catalog_channels_have_operational_adapters ... ok
+test agent_api::tests::apply_skill_config_update_uses_vault_for_secret_env ... ok
+test catalog::tests::cancelling_job_disables_repeated_cancellation ... ok
+test config::tests::legacy_agent_default_model_is_upgraded_to_qwen35 ... ok
+test config::tests::legacy_settings_without_schema_version_are_migrated ... ok
+test flows::tests::a_five_minute_cron_does_not_fire_within_the_same_minute ... ok
+test config::tests::compatibility_state_roundtrips_via_custom_settings_path ... ok
+test flows::tests::next_occurrence_reads_six_field_cron ... ok
+test flows::tests::next_occurrence_rejects_a_broken_expression ... ok
+test flows::tests::run_request_accepts_payload_and_env ... ok
+test hwfit_routes::tests::discrete_gpu_queries_leave_unified_memory_unset ... ok
+test flows::tests::run_request_defaults_are_permissive ... ok
+test config::tests::v2_ollama_desktop_endpoint_migrates_to_managed_runtime ... ok
+test agent_api::tests::enable_disable_roundtrips_after_restart ... ok
+test hwfit_routes::tests::simulate_request_accepts_unified_memory ... ok
+test hwfit_routes::tests::models_query_carries_unified_memory_into_simulation ... ok
+test hwfit_routes::tests::profiles_query_carries_unified_memory_into_simulation ... ok
+test hwfit_routes::tests::m4_24gb_bandwidth_impact_on_default_catalog ... ok
+test mcp_servers::tests::calling_an_unknown_server_is_reported ... ok
+test mcp_servers::tests::listing_an_absent_file_is_empty_not_an_error ... ok
+test mcp_servers::tests::calling_a_disabled_server_is_refused_before_spawning ... ok
+test mcp_servers::tests::probing_an_unknown_server_reports_unreachable ... ok
+test mcp_servers::tests::no_temp_file_is_left_behind ... ok
+test mcp_servers::tests::save_rejects_an_invalid_config ... ok
+test channels::tests::irc_adapter_uses_tcp_transport ... ok
+test mcp_servers::tests::get_and_delete_ignore_case ... ok
+test mcp_servers::tests::save_replaces_by_name_ignoring_case ... ok
+test plugins::tests::enable_disable_persists_plugin_state ... ok
+test mcp_servers::tests::save_round_trips_and_sorts_by_name ... ok
+test mcp_servers::tests::probing_a_server_that_cannot_start_reports_the_reason ... ok
+test presentations::plugin_host::tests::metadata_targets_and_untrusted_origins_are_blocked ... ok
+test channels::tests::bridge_channels_use_http_bridge_transport ... ok
+test presentations::plugin_host::tests::server_rejects_remote_origins_and_rebinding_hosts_without_relying_on_cors ... ok
+test channels::tests::matrix_adapter_calls_real_client_server_paths ... ok
+test channels::tests::multi_whatsapp_accounts_keep_isolated_sessions ... ok
+test channels::tests::telegram_multi_account_requires_explicit_resolution_when_ambiguous ... ok
+test channels::tests::webhook_channels_probe_and_send_with_real_http_transport ... ok
+test presentations::tests::saves_conflicts_history_and_scopes ... ok
+test presentations::plugin_host::tests::credentials_are_encrypted_scoped_write_only_and_removed_on_uninstall ... ok
+test presentations::plugin_host::tests::changed_service_manifest_requires_fresh_authorization ... ok
+test runtime_doctor::tests::loose_version_compare_handles_semver_like_values ... ok
+test runtime_doctor::tests::numeric_segment_parser_extracts_digits ... ok
+test provider_embedder::tests::ready_embedder_rejects_replacement_with_incompatible_server ... ok
+test secrets_vault::tests::set_get_remove_roundtrip ... ok
+test tests::annotates_tool_ready_and_chat_only_models ... ok
+test secrets_vault::tests::vault_file_does_not_store_plaintext ... ok
+test tests::local_catalog_does_not_duplicate_provider_prefixes ... ok
+test tests::workspace_marker_detects_git_and_skill_roots ... ok
+test tests::workspace_root_scans_ancestors_for_repo_markers ... ok
+test presentations::plugin_host::tests::reads_cannot_smuggle_writes_and_revocation_rechecks_existing_hosts ... ok
+test presentations::plugin_host::tests::network_is_pinned_opt_in_method_scoped_and_redacts_echoed_credentials ... ok
+test presentations::tests::edits_execute_real_wasm ... ok
+test presentations::plugin_host::tests::document_grants_are_explicit_workspace_scoped_and_revision_safe ... ok
+test presentations::tests::preview_edits_do_not_persist_and_still_enforce_revision_and_grants ... ok
+test presentations::tests::frontend_requires_enabled_package_and_grants ... ok
+test presentations::tests::plugin_removal_persists_and_reinstall_restores_documents ... ok
+test presentations::tests::wasm_edits_preserve_large_opaque_assets_without_spending_fuel_on_pixels ... ok
+
+test result: ok. 73 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.23s
+
+     Running unittests src/main.rs (target/debug/deps/mlx_ollama_daemon-7fbb17db6ace136e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/mlx_plugin_runtime-3048382bf1f630cd)
+
+running 8 tests
+test tests::rejects_names_and_external_schemas ... ok
+test tests::service_metadata_rejects_unsafe_endpoints_and_capabilities ... ok
+test tests::service_manifest_is_backward_compatible_and_accepts_explicit_loopback ... ok
+test tests::credential_headers_cannot_override_routing_cookies_or_message_framing ... ok
+test tests::frontend_assets_are_bounded_and_backward_compatible ... ok
+test tests::wasm_imports_compile_before_install_and_host_calls_round_trip_dynamically ... ok
+test tests::host_operations_require_grants_and_declared_services_before_dispatch ... ok
+test tests::wasm_is_bounded_and_grants_are_required ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running unittests src/lib.rs (target/debug/deps/mlx_presentation-42cbede893516afb)
+
+running 5 tests
+test tests::edits_are_atomic ... ok
+test tests::updates_keep_ids ... ok
+test tests::images_cannot_reference_network_or_svg ... ok
+test tests::css_rejects_active_content_and_transition_edits_validate ... ok
+test tests::validates_and_reports_bounds ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/mlx_provider-e37bdf096f6d03e6)
+
+running 1 test
+test tests::prompt_contains_all_roles_and_assistant_suffix ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/mlx_research-0e19959b65dd398e)
+
+running 9 tests
+test tests::test_html_escape ... ok
+test tests::test_extract_title ... ok
+test tests::test_extract_headings ... ok
+test tests::test_engine_honours_cancellation ... ok
+test tests::test_parse_json_string_array ... ok
+test tests::test_engine_aborts_on_planning_llm_error ... ok
+test tests::test_engine_aborts_on_synthesis_llm_error ... ok
+test tests::test_render_markdown ... ok
+test tests::test_sanitize_html ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/ollama_provider-b827a12d2e5f52ea)
+
+running 19 tests
+test runtime::archive::tests::selects_arch_specific_official_assets ... ok
+test runtime::tests::isolated_runtime_fallback_only_matches_server_version_errors ... ok
+test runtime::tests::compatible_version_range_is_pinned ... ok
+test runtime::tests::runtime_http_timeout_allows_slow_initial_model_loads ... ok
+test runtime::tests::parses_gpu_and_cpu_discovery_lines ... ok
+test tests::json_mode_preserves_generation_options_messages_and_tools ... ok
+test tests::json_mode_is_omitted_unless_explicitly_enabled ... ok
+test tests::delete_model_uses_ollama_delete_api_with_namespaced_id ... ok
+test runtime::tests::cancellation_does_not_remove_previous_active_runtime ... ok
+test tests::runtime_endpoint_override_uses_runtime_base_url ... ok
+test tests::test_tool_call_deserialization ... ok
+test tests::test_tool_serialization ... ok
+test tests::manual_endpoint_requires_compatible_version_and_keeps_auth_headers ... ok
+test runtime::tests::rejects_zip_path_traversal ... ok
+test runtime::archive::tests::rejects_tar_links_outside_destination ... ok
+test runtime::tests::atomic_state_replace_overwrites_previous_manifest ... ok
+test runtime::tests::cached_ready_rechecks_server_version_before_using_model ... ok
+test runtime::archive::tests::extracts_gzip_zstd_and_preserves_executable_mode ... ok
+test runtime::tests::interrupted_download_cleans_staging_and_preserves_active_manifest ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+   Doc-tests http_llm_provider
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests llamacpp_provider
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mlx_agent_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mlx_agent_skills
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mlx_agent_tools
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mlx_flow
+
+running 1 test
+test crates/flow/src/lib.rs - (line 17) - compile ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+   Doc-tests mlx_hardware_fit
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mlx_model_fit
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mlx_ollama_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mlx_ollama_daemon
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mlx_plugin_runtime
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mlx_presentation
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mlx_provider
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mlx_research
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ollama_provider
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
