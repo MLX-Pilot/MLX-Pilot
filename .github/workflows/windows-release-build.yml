@@ -1,0 +1,145 @@
+name: Windows installer for v0.1.0
+
+on:
+  push:
+    branches: ["release/windows-v0.1.0"]
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_SOURCE: 030b10628ef2bf07b85dc710efebae19c7e666a8
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_SOURCE }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop-ui/src-tauri -> target
+      - name: Build native Windows x64 installer
+        working-directory: apps/desktop-ui
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD).Trim() -ne $env:RELEASE_SOURCE) { throw 'Unexpected release source' }
+          npm exec --yes --package=@tauri-apps/cli@2.10.0 -- tauri build --bundles nsis -- --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Tauri failed to build the installer' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-installer
+          path: apps/desktop-ui/src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+
+  smoke:
+    needs: build
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-x64-installer
+          path: installers
+      - name: Install NSIS bundle and open the native desktop
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $evidence = Join-Path $PWD 'evidence'
+          New-Item $evidence -ItemType Directory | Out-Null
+          $packages = @(Get-ChildItem installers -Filter '*-setup.exe')
+          if ($packages.Count -ne 1) { throw 'Expected one Windows installer' }
+          $package = $packages[0]
+          $installDir = Join-Path $env:RUNNER_TEMP 'mlx-pilot-install'
+          $sandbox = Join-Path $env:RUNNER_TEMP 'mlx-pilot-state'
+          New-Item $sandbox -ItemType Directory | Out-Null
+          $installer = Start-Process -FilePath $package.FullName -ArgumentList "/S /D=$installDir" -Wait -PassThru
+          if ($installer.ExitCode -ne 0) { throw "Installer exited with code $($installer.ExitCode)" }
+          $binary = Join-Path $installDir 'mlx-ollama-desktop.exe'
+          if (!(Test-Path $binary)) { throw "Desktop executable missing at $binary" }
+
+          $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+          $listener.Start()
+          $port = $listener.LocalEndpoint.Port
+          $listener.Stop()
+          $env:APP_BIND_ADDR = "127.0.0.1:$port"
+          $env:APP_SETTINGS_PATH = Join-Path $sandbox 'settings.json'
+          $env:APP_AGENT_WORKSPACE = Join-Path $sandbox 'workspace'
+          $env:APP_MODELS_DIR = Join-Path $sandbox 'models'
+          $env:APP_REMOTE_DOWNLOADS_DIR = Join-Path $sandbox 'downloads'
+          $env:APP_OLLAMA_AUTO_START = 'false'
+          $env:APP_OLLAMA_AUTO_INSTALL = 'false'
+          $env:APP_LLAMACPP_AUTO_START = 'false'
+          $env:APP_LLAMACPP_AUTO_INSTALL = 'false'
+          $env:MLX_PILOT_DESKTOP_LOG = Join-Path $evidence 'desktop.log'
+          $env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $sandbox 'webview'
+          $base = "http://$($env:APP_BIND_ADDR)"
+          $recording = $null
+          $recorderCommand = Get-Command ffmpeg -ErrorAction SilentlyContinue
+          if ($recorderCommand) {
+            $movie = Join-Path $evidence 'windows-desktop.mp4'
+            $recorder = New-Object System.Diagnostics.ProcessStartInfo
+            $recorder.FileName = $recorderCommand.Source
+            foreach ($option in @('-loglevel','error','-y','-f','gdigrab','-framerate','10','-i','desktop','-t','55','-c:v','libx264','-pix_fmt','yuv420p','-movflags','+faststart',$movie)) {
+              $recorder.ArgumentList.Add($option)
+            }
+            $recorder.UseShellExecute = $false
+            $recorder.RedirectStandardInput = $true
+            $recording = [System.Diagnostics.Process]::Start($recorder)
+          }
+          $desktop = Start-Process -FilePath $binary -WorkingDirectory $sandbox -PassThru
+          try {
+            $deadline = [DateTime]::UtcNow.AddSeconds(100)
+            $health = $null
+            do {
+              $desktop.Refresh()
+              if ($desktop.HasExited) { throw "Installed app exited with code $($desktop.ExitCode)" }
+              try { $health = Invoke-RestMethod -Uri "$base/health" -TimeoutSec 2 } catch {}
+              $log = if (Test-Path $env:MLX_PILOT_DESKTOP_LOG) { Get-Content $env:MLX_PILOT_DESKTOP_LOG -Raw } else { '' }
+              $ready = $null -ne $health -and $desktop.MainWindowHandle -ne 0 -and $log -match 'Conectado'
+              if (!$ready) { Start-Sleep -Milliseconds 750 }
+            } until ($ready -or [DateTime]::UtcNow -ge $deadline)
+            if (!$ready) { throw "Desktop window or WebView not ready. window=$($desktop.MainWindowHandle); log=$log" }
+            if ($desktop.MainWindowTitle -notmatch '^MLX Pilot') { throw 'Unexpected native window title' }
+            $endpoint = Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort $port -State Listen
+            if ($endpoint.OwningProcess -ne $desktop.Id) { throw 'The loopback daemon does not belong to the installed app' }
+            $sessions = Invoke-RestMethod -Uri "$base/agent/sessions" -TimeoutSec 5
+            if (@($sessions).Count -ne 0) { throw 'A clean install should start without conversation history' }
+            Start-Sleep -Seconds 3
+            $report = [ordered]@{
+              status = 'pass'
+              revision = $env:RELEASE_SOURCE
+              architecture = 'x64'
+              platform = [System.Runtime.InteropServices.RuntimeInformation]::OSDescription
+              installer = $package.Name
+              sha256 = (Get-FileHash $package.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              installer_exit_code = $installer.ExitCode
+              window_title = $desktop.MainWindowTitle
+              embedded_daemon_owned_by_app = $true
+              webview_connected = $true
+              session_list_accessible = $true
+              model_ready = $health.provider_ready
+              signature = (Get-AuthenticodeSignature $package.FullName).Status.ToString()
+            }
+            $report | ConvertTo-Json | Set-Content (Join-Path $evidence 'report.json')
+            $report | ConvertTo-Json
+          } finally {
+            if ($recording -and !$recording.HasExited) {
+              $recording.StandardInput.WriteLine('q')
+              if (!$recording.WaitForExit(10000)) { $recording.Kill() }
+            }
+            if (!$desktop.HasExited) { Stop-Process -Id $desktop.Id -Force }
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-x64-installation-test
+          path: evidence/
+          if-no-files-found: warn
