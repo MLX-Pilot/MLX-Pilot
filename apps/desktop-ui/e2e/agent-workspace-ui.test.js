@@ -1953,3 +1953,24 @@ test("continuing during first preparation opens settings without cancelling the 
     assert.equal(fixture.fetchCalls.filter(r => r.path === "/chat/stream").length, 0);
   } finally { fixture.cleanup(); }
 });
+
+test("a failed background runtime exposes retry after the splash is dismissed", async () => {
+  const fixture = createFixture({
+    startupResponse: {
+      phase: "degraded", step: "degraded", app_ready: true, degraded: true,
+      providers: [
+        {provider: "ollama", phase: "failed", ready: false, applicable: true, error: "Download interrompido; os bytes foram preservados"},
+        {provider: "llamacpp", phase: "ready", ready: true, applicable: true},
+      ],
+    },
+  });
+  try {
+    await flush(10);
+    const retry = fixture.document.getElementById("runtime-retry");
+    assert.equal(retry.hidden, false);
+    assert.match(fixture.document.getElementById("runtime-notice-text").textContent, /bytes foram preservados/);
+    retry.click();
+    await flush(5);
+    assert.equal(fixture.fetchCalls.filter(r => r.path === "/runtime/startup/retry" && r.method === "POST").length, 1);
+  } finally { fixture.cleanup(); }
+});

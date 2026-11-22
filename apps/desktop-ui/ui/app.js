@@ -956,8 +956,14 @@
     const notice = document.getElementById('runtime-notice');
     if (notice) {
       const preparing = runtimePending(snapshot);
-      notice.hidden = !preparing;
-      notice.textContent = preparing ? `Preparando runtimes locais · ${snapshot.message || snapshot.phase}${determinate ? ` · ${Math.round(percent)}%` : ''}. O chat estará disponível para cada modelo quando seu runtime estiver pronto.` : '';
+      const failures = (snapshot.providers || []).filter(p => p.applicable !== false && !p.ready && p.error);
+      notice.hidden = !preparing && !failures.length;
+      const text = document.getElementById('runtime-notice-text');
+      if (text) text.textContent = preparing
+        ? `Preparando runtimes locais · ${snapshot.message || snapshot.phase}${determinate ? ` · ${Math.round(percent)}%` : ''}. O chat estará disponível para cada modelo quando seu runtime estiver pronto.`
+        : failures.map(p => `${startupProviderLabel(p.provider)}: ${p.error}`).join(' · ');
+      const resume = document.getElementById('runtime-retry');
+      if (resume) resume.hidden = preparing || !failures.length;
     }
     if (cancel) cancel.hidden = !snapshot.can_cancel;
     if (retry) retry.hidden = !['failed', 'cancelled', 'degraded'].includes(snapshot.phase);
@@ -980,8 +986,8 @@
     startupSkipped = true;
   });
 
-  function monitorRuntimePreparation() {
-    if (runtimePoll || !runtimePending(state.runtimeStartup)) return;
+  function monitorRuntimePreparation(force = false) {
+    if (runtimePoll || (!force && !runtimePending(state.runtimeStartup))) return;
     let polling = false;
     runtimePoll = setInterval(async () => {
       if (polling) return;
@@ -1042,6 +1048,10 @@
     }
   });
 
+  document.getElementById('runtime-retry')?.addEventListener('click', () => {
+    document.getElementById('startup-retry')?.click();
+  });
+
   document.getElementById('startup-retry')?.addEventListener('click', async () => {
     const retry = document.getElementById('startup-retry');
     if (retry) retry.hidden = true;
@@ -1049,7 +1059,7 @@
       renderStartupStatus(await api('/runtime/startup/retry', { method: 'POST' }));
       startupSkipped = false;
       const snapshot = await waitForRuntimeStartup();
-      monitorRuntimePreparation();
+      monitorRuntimePreparation(true);
       updateStatusBadge(snapshot?.phase === 'ready', snapshot?.degraded ? 'degraded' : snapshot?.phase);
       if (snapshot?.app_ready) revealApp();
     } catch (error) {
