@@ -18,7 +18,7 @@ import sys
 import tempfile
 import time
 from urllib.error import URLError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 
 args = argparse.ArgumentParser(description=__doc__)
@@ -168,7 +168,17 @@ with tempfile.TemporaryDirectory(prefix="mlx-native-test-") as isolated:
             (evidence / "conversation-accessibility.txt").write_text(conversation_tree)
             if options.check_answer:
                 session_id, = after - before
-                question = "Quanto é 2 + 2? Responda somente com o número, sem usar ferramentas."
+                config_url = health_url + "/agent/config"
+                agent_config = get_json(config_url)
+                agent_config["temperature"] = 0
+                update = Request(config_url, data=json.dumps(agent_config).encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+                with urlopen(update, timeout=10) as response:
+                    if json.load(response).get("temperature") != 0:
+                        raise RuntimeError("The native agent did not accept temperature 0")
+                if get_json(config_url).get("temperature") != 0:
+                    raise RuntimeError("Temperature 0 was not persisted in the native agent configuration")
+                question = "Quanto é 2 + 2? Responda somente com o número, sem usar ferramentas. /no_think"
                 invoke("type-id", bundle, "agent-command-input", question)
                 sent = click(("press-id", "agent-send-btn"))
                 if not sent:
@@ -192,7 +202,7 @@ with tempfile.TemporaryDirectory(prefix="mlx-native-test-") as isolated:
                     ) else None
                 transcript = wait_for(rendered_answer, 30, "Ollama answer visible in the native agent conversation")
                 (evidence / "answer-accessibility.txt").write_text(transcript)
-                save("conversation.json", {"session_id": session_id, "model": model, "sent_via": sent,
+                save("conversation.json", {"session_id": session_id, "model": model, "temperature": 0, "sent_via": sent,
                                            "question": question, "persisted_answer": answer, "rendered": True})
             save("interactions.json", {"navigation": [active, created, config, back]})
             time.sleep(1)

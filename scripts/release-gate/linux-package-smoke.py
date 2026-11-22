@@ -2,11 +2,14 @@
 """Ubuntu VM: linux-package-smoke.py path/to/package.deb new-evidence-directory.
 
 Requires sudo, Xvfb, xauth, dbus-x11, openbox, ffmpeg, xdotool and python3-pyatspi.
+Optionally pass --ollama-model TAG and set APP_OLLAMA_BASE_URL for live inference.
 """
+import argparse
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import socket
 import subprocess
 import sys
@@ -39,7 +42,7 @@ def stop(proc):
             proc.wait()
 
 
-def exercise(binary, evidence, state, report):
+def exercise(binary, evidence, state, report, model):
     import pyatspi
     import gi
     gi.require_version("Gdk", "3.0")
@@ -64,16 +67,36 @@ def exercise(binary, evidence, state, report):
            "APP_LLAMACPP_AUTO_START": "false", "APP_LLAMACPP_AUTO_INSTALL": "false",
            "XDG_DATA_HOME": str(state / "data"), "XDG_CONFIG_HOME": str(state / "config"),
            "MLX_PILOT_DESKTOP_LOG": str(evidence / "desktop.log")}
+    def get_json(url):
+        with urlopen(url, timeout=4) as response:
+            return json.load(response)
+
+    if model:
+        ollama_url = os.environ.get("APP_OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
+        env.update(APP_OLLAMA_BASE_URL=ollama_url, APP_LOCAL_PROVIDER="ollama",
+                   APP_AGENT_PROVIDER="ollama", APP_AGENT_MODEL=model)
+        (state / "settings.json").write_text(json.dumps({"agent": {
+            "temperature": 0, "execution_mode": "locked", "max_tools_in_prompt": 0,
+        }}))
+        assert model in {item["name"] for item in get_json(ollama_url + "/api/tags")["models"]}
+        report["ollama_model"] = model
+
     def health():
         try:
-            with urlopen(f"{base}/health", timeout=2) as response:
-                return json.load(response)
+            info = get_json(f"{base}/health")
+            return info if not model or info.get("provider_ready") else None
         except OSError:
             return None
 
     def session_ids():
-        with urlopen(f"{base}/agent/sessions", timeout=4) as response:
-            return {session["id"] for session in json.load(response)}
+        return {session["id"] for session in get_json(f"{base}/agent/sessions")}
+
+    def check_policy(stage):
+        config = get_json(f"{base}/agent/config")
+        values = {key: config[key] for key in ("provider", "model_id", "execution_mode", "temperature")}
+        report[stage] = values
+        assert values == {"provider": "ollama", "model_id": model, "execution_mode": "locked", "temperature": 0}, \
+            f"Agent settings changed at {stage}: {values}"
 
     wm = recorder = app = None
     with (evidence / "native.log").open("w") as log:
@@ -90,6 +113,9 @@ def exercise(binary, evidence, state, report):
             assert report["listener_owned_by_app"], "The listener does not belong to the installed app"
             report["executable"] = str(Path(f"/proc/{app.pid}/exe").resolve())
             assert Path(report["executable"]) == Path(binary).resolve()
+            if model:
+                check_policy("startup_policy")
+                (evidence / "runtime-startup.json").write_text(json.dumps(get_json(f"{base}/runtime/startup"), indent=2) + "\n")
             tab = until("Agent tab", lambda: find(lambda o: o.getRole() in
                 (pyatspi.ROLE_PAGE_TAB, pyatspi.ROLE_PUSH_BUTTON) and visible(o)
                 and (o.name or "").strip().casefold() in {"agent", "agente"}))
@@ -103,6 +129,8 @@ def exercise(binary, evidence, state, report):
             created = until("session created from the installed UI", lambda: session_ids() - before)
             session_id, = created
             report["session_created_via_ui"] = session_id
+            if model:
+                check_policy("ui_policy")
             def is_composer(obj):
                 if obj.getRole() != pyatspi.ROLE_ENTRY or not visible(obj):
                     return False
@@ -110,13 +138,39 @@ def exercise(binary, evidence, state, report):
                 return "id:agent-command-input" in attributes or "agente" in ((obj.name or "") + attributes).casefold()
             composer = until("Agent composer", lambda: find(is_composer))
             composer.queryComponent().grabFocus()
-            draft = "Teste da janela instalada no Ubuntu."
-            subprocess.run(["xdotool", "type", "--delay", "45", draft], check=True)
-            subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+a", "ctrl+c"], check=True)
+            draft = "Say hello. /no_think" if model else "Teste Linux."
+            subprocess.run(["xdotool", "type", "--clearmodifiers", "--delay", "80", draft], check=True)
             clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
-            until("draft copied from the composer", lambda: clipboard.wait_for_text() == draft)
+            def copied_draft():
+                subprocess.run(["xdotool", "key", "--clearmodifiers", "--delay", "120", "ctrl+a", "ctrl+c"], check=True)
+                return clipboard.wait_for_text() == draft
+            until("draft copied from the composer", copied_draft)
             subprocess.run(["xdotool", "key", "End"], check=True)
             report["draft"] = draft
+            if model:
+                subprocess.run(["xdotool", "key", "Return"], check=True)
+                def persisted_answer():
+                    messages = get_json(f"{base}/agent/sessions/{session_id}")
+                    user_sent = any(m["role"] == "user" and m["content"] == draft for m in messages)
+                    return user_sent and next((m["content"] for m in messages if m["role"] == "assistant"
+                        and m["content"].strip()), None)
+                report["persisted_answer"] = until("model answer in the UI-created session", persisted_answer, 120)
+                assert re.search(r"\b(hello|hi|olá|oi)\b", report["persisted_answer"], re.IGNORECASE), "Expected a greeting"
+                assert model in {item["name"] for item in get_json(ollama_url + "/api/ps")["models"]}
+                def displays_answer(obj):
+                    if obj.getRole() not in (pyatspi.ROLE_PARAGRAPH, pyatspi.ROLE_TEXT, pyatspi.ROLE_STATIC) or not visible(obj):
+                        return False
+                    return report["persisted_answer"].strip() in (obj.name or obj.queryText().getText(0, -1))
+                until("persisted answer in the WebKit window", lambda: find(displays_answer))
+                report["answer_visible"] = True
+                check_policy("post_conversation_policy")
+                messages = get_json(f"{base}/agent/sessions/{session_id}")
+                (evidence / "session.json").write_text(json.dumps(messages, ensure_ascii=False, indent=2) + "\n")
+                report["session_tool_events"] = sum(bool(m.get("tool_name") or m.get("tool_call_id")) or
+                    m["role"] == "tool" or m["kind"].startswith("tool_") for m in messages)
+                entries = get_json(f"{base}/agent/audit?session_id={session_id}&limit=500")["entries"]
+                report["audit_tool_events"] = sum(e["event_type"].startswith("tool_") for e in entries)
+                assert report["session_tool_events"] == 0 and report["audit_tool_events"] == 0, "Unexpected tool event"
             time.sleep(2)
             assert recorder.poll() is None and app.poll() is None
         finally:
@@ -126,13 +180,19 @@ def exercise(binary, evidence, state, report):
 
 
 def main():
-    package = Path(sys.argv[1]).resolve(strict=True)
-    evidence = Path(sys.argv[2]).resolve()
-    if len(sys.argv) == 3:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("package", type=Path)
+    parser.add_argument("evidence", type=Path)
+    parser.add_argument("--ollama-model")
+    parser.add_argument("--session", action="store_true", help=argparse.SUPPRESS)
+    args = parser.parse_args()
+    package = args.package.resolve(strict=True)
+    evidence = args.evidence.resolve()
+    if not args.session:
         evidence.mkdir(parents=True, exist_ok=False)
         subprocess.run(["sudo", "-n", "dpkg", "-i", package], check=True)
         subprocess.run(["xvfb-run", "-a", "-s", "-screen 0 1440x1000x24", "dbus-run-session",
-                        "--", sys.executable, __file__, package, evidence, "--session"], check=True)
+                        "--", sys.executable, __file__, *sys.argv[1:], "--session"], check=True)
         return
     name = output("dpkg-deb", "-f", package, "Package")
     binary, = [p for p in output("dpkg-query", "-L", name).splitlines()
@@ -142,7 +202,7 @@ def main():
                   "dpkg-query", "-W", "-f=${Version}", name), "status": "fail"}
     try:
         with tempfile.TemporaryDirectory(prefix="mlx-linux-package-") as sandbox:
-            exercise(binary, evidence, Path(sandbox), report)
+            exercise(binary, evidence, Path(sandbox), report, args.ollama_model)
         duration = float(output("ffprobe", "-v", "error", "-show_entries", "format=duration",
                                 "-of", "default=nw=1:nk=1", evidence / "linux-agent.mp4"))
         assert duration > 3

@@ -255,6 +255,19 @@ export async function runSecurityAuditSmoke() {
       `/agent/audit?session_id=${allowedSessionId}&limit=50`,
     );
 
+    const modeChecks = {};
+    for (const mode of ["read-only", "locked"]) {
+      const sessionId = `desktop-mode-${mode}`;
+      await requestJson(daemon.baseUrl, "POST", "/agent/run", {
+        session_id: sessionId, execution_mode: mode, message: "List the workspace using exec",
+        provider: "custom", model_id: "mock-small", base_url: provider.baseUrl, workspace_root: harness.workspace,
+      }, { expectedStatuses: [200, 403] });
+      const audit = await assertOkJson(daemon.baseUrl, "GET", `/agent/audit?session_id=${sessionId}&limit=50`);
+      const events = audit.entries.filter(entry => entry.tool_name === "exec");
+      modeChecks[mode] = events.some(entry => entry.event_type === "tool_denied") &&
+        !events.some(entry => entry.event_type === "tool_executed");
+    }
+
     await assertOkJson(daemon.baseUrl, "POST", "/agent/tools/profile", { profile: "full" });
     await assertOkJson(daemon.baseUrl, "POST", "/agent/tools/allow-deny", {
       scope: "global",
@@ -343,7 +356,7 @@ export async function runSecurityAuditSmoke() {
         action: "Force chmod 600 on the vault key file during creation and startup.",
       });
     }
-    if (!minimalDenied || !allowExecuted || !overrideDenied) {
+    if (!minimalDenied || !allowExecuted || !overrideDenied || Object.values(modeChecks).includes(false)) {
       findings.push({
         severity: "high",
         area: "policy",
@@ -351,6 +364,9 @@ export async function runSecurityAuditSmoke() {
         evidence: [
           `minimal exec run status=${deniedRun.status} denied_event=${minimalDenied}`,
           `agent allow exec run status=${allowedRun.status} executed_event=${allowExecuted}`,
+          ...allowedAudit.entries.filter(entry => entry.tool_name === "exec")
+            .map(entry => [entry.event_type, entry.policy_rule, entry.reason, entry.error_summary].filter(Boolean).join(" · ")),
+          `desktop execution mode denials=${JSON.stringify(modeChecks)}`,
           `global deny exec run status=${deniedByOverride.status} denied_event=${overrideDenied}`,
         ],
         action: "Revisar precedence entre profile/global/agent overrides antes do release.",
@@ -381,6 +397,7 @@ export async function runSecurityAuditSmoke() {
           minimal_exec_denied: minimalDenied,
           agent_allow_exec_passed: allowExecuted,
           global_deny_exec_denied: overrideDenied,
+          desktop_execution_modes_denied: modeChecks,
         },
       },
       findings,
