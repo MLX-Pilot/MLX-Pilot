@@ -47,13 +47,24 @@ def exercise(binary, evidence, state, report, model):
     import gi
     gi.require_version("Gdk", "3.0")
     gi.require_version("Gtk", "3.0")
-    from gi.repository import Gdk, Gtk
+    from gi.repository import Gdk, GLib, Gtk
     # WebKit's accessibility tree and the pointer operate on this isolated X display.
     def find(test):
         return pyatspi.findDescendant(pyatspi.Registry.getDesktop(0), test)
 
     def visible(obj):
         return obj.getState().contains(pyatspi.STATE_SHOWING)
+
+    def click(control):
+        def bounds():
+            try:
+                rect = control.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+                return rect if rect.width > 0 and rect.height > 0 else None
+            except GLib.GError:
+                return None
+        rect = until("visible control bounds", bounds)
+        subprocess.run(["xdotool", "mousemove", str(rect.x + rect.width // 2),
+                        str(rect.y + rect.height // 2), "click", "1"], check=True)
 
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -120,12 +131,12 @@ def exercise(binary, evidence, state, report, model):
                 (pyatspi.ROLE_PAGE_TAB, pyatspi.ROLE_PUSH_BUTTON) and visible(o)
                 and (o.name or "").strip().casefold() in {"agent", "agente"}))
             time.sleep(1)
-            assert tab.queryAction().doAction(0), "Agent tab did not open"
+            click(tab)
             before = session_ids()
             new_session = until("New conversation button", lambda: find(lambda obj:
                 obj.getRole() == pyatspi.ROLE_PUSH_BUTTON and (obj.name or "").casefold()
                 in {"nova sessão", "nova sessao", "nova conversa"} and visible(obj)))
-            assert new_session.queryAction().doAction(0), "New conversation button did not activate"
+            click(new_session)
             created = until("session created from the installed UI", lambda: session_ids() - before)
             session_id, = created
             report["session_created_via_ui"] = session_id
@@ -137,7 +148,7 @@ def exercise(binary, evidence, state, report, model):
                 attributes = " ".join(obj.getAttributes())
                 return "id:agent-command-input" in attributes or "agente" in ((obj.name or "") + attributes).casefold()
             composer = until("Agent composer", lambda: find(is_composer))
-            composer.queryComponent().grabFocus()
+            click(composer)
             draft = "Say hello. /no_think" if model else "Teste Linux."
             subprocess.run(["xdotool", "type", "--clearmodifiers", "--delay", "80", draft], check=True)
             clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)

@@ -201,29 +201,20 @@ export async function runSecurityAuditSmoke() {
       };
     }
 
+    // Tool policy and skill capability are independent restrictions. Pin the active
+    // skills for each control, regardless of which optional binaries the host has.
+    async function probeExec(sessionId, settings = {}) {
+      const run = await requestJson(daemon.baseUrl, "POST", "/agent/run", {
+        session_id: sessionId, message: "Run ls using exec",
+        provider: "custom", model_id: "mock-small", base_url: provider.baseUrl,
+        workspace_root: harness.workspace, enabled_skills: [], ...settings,
+      }, { expectedStatuses: [200, 403] });
+      const audit = await assertOkJson(daemon.baseUrl, "GET", `/agent/audit?session_id=${sessionId}&limit=50`);
+      return { run, audit };
+    }
+
     await assertOkJson(daemon.baseUrl, "POST", "/agent/tools/profile", { profile: "minimal" });
-    const deniedSessionId = "security-policy-deny";
-    const deniedRun = await requestJson(
-      daemon.baseUrl,
-      "POST",
-      "/agent/run",
-      {
-        session_id: deniedSessionId,
-        message: "Run ls using exec",
-        provider: "custom",
-        model_id: "mock-small",
-        base_url: provider.baseUrl,
-        workspace_root: harness.workspace,
-      },
-      {
-        expectedStatuses: [200, 403],
-      },
-    );
-    const deniedAudit = await assertOkJson(
-      daemon.baseUrl,
-      "GET",
-      `/agent/audit?session_id=${deniedSessionId}&limit=50`,
-    );
+    const { run: deniedRun, audit: deniedAudit } = await probeExec("security-policy-deny");
 
     await assertOkJson(daemon.baseUrl, "POST", "/agent/tools/allow-deny", {
       scope: "agent",
@@ -232,39 +223,17 @@ export async function runSecurityAuditSmoke() {
       deny: [],
       replace: false,
     });
-    const allowedSessionId = "security-policy-allow";
-    const allowedRun = await requestJson(
-      daemon.baseUrl,
-      "POST",
-      "/agent/run",
-      {
-        session_id: allowedSessionId,
-        message: "Run ls using exec",
-        provider: "custom",
-        model_id: "mock-small",
-        base_url: provider.baseUrl,
-        workspace_root: harness.workspace,
-      },
-      {
-        expectedStatuses: [200, 403],
-      },
-    );
-    const allowedAudit = await assertOkJson(
-      daemon.baseUrl,
-      "GET",
-      `/agent/audit?session_id=${allowedSessionId}&limit=50`,
-    );
-
+    const { run: allowedRun, audit: allowedAudit } = await probeExec("security-policy-allow");
     const modeChecks = {};
-    for (const mode of ["read-only", "locked"]) {
-      const sessionId = `desktop-mode-${mode}`;
-      await requestJson(daemon.baseUrl, "POST", "/agent/run", {
-        session_id: sessionId, execution_mode: mode, message: "List the workspace using exec",
-        provider: "custom", model_id: "mock-small", base_url: provider.baseUrl, workspace_root: harness.workspace,
-      }, { expectedStatuses: [200, 403] });
-      const audit = await assertOkJson(daemon.baseUrl, "GET", `/agent/audit?session_id=${sessionId}&limit=50`);
+    const restrictedControls = [
+      ["read-only", { execution_mode: "read-only" }, "execution_mode:read_only"],
+      ["locked", { execution_mode: "locked" }, "execution_mode:locked"],
+      ["summarize", { enabled_skills: ["summarize"] }, "skill:summarize:exec"],
+    ];
+    for (const [name, settings, rule] of restrictedControls) {
+      const { audit } = await probeExec(`controlled-exec-${name}`, settings);
       const events = audit.entries.filter(entry => entry.tool_name === "exec");
-      modeChecks[mode] = events.some(entry => entry.event_type === "tool_denied") &&
+      modeChecks[name] = events.some(entry => entry.event_type === "tool_denied" && entry.policy_rule === rule) &&
         !events.some(entry => entry.event_type === "tool_executed");
     }
 
@@ -275,28 +244,7 @@ export async function runSecurityAuditSmoke() {
       deny: ["exec"],
       replace: true,
     });
-    const deniedOverrideSessionId = "security-policy-global-deny";
-    const deniedByOverride = await requestJson(
-      daemon.baseUrl,
-      "POST",
-      "/agent/run",
-      {
-        session_id: deniedOverrideSessionId,
-        message: "Run ls using exec",
-        provider: "custom",
-        model_id: "mock-small",
-        base_url: provider.baseUrl,
-        workspace_root: harness.workspace,
-      },
-      {
-        expectedStatuses: [200, 403],
-      },
-    );
-    const deniedOverrideAudit = await assertOkJson(
-      daemon.baseUrl,
-      "GET",
-      `/agent/audit?session_id=${deniedOverrideSessionId}&limit=50`,
-    );
+    const { run: deniedByOverride, audit: deniedOverrideAudit } = await probeExec("security-policy-global-deny");
 
     const noExec = (audit) => !audit.entries.some(
       (entry) => entry.event_type === "tool_executed" && entry.tool_name === "exec",
@@ -366,7 +314,7 @@ export async function runSecurityAuditSmoke() {
           `agent allow exec run status=${allowedRun.status} executed_event=${allowExecuted}`,
           ...allowedAudit.entries.filter(entry => entry.tool_name === "exec")
             .map(entry => [entry.event_type, entry.policy_rule, entry.reason, entry.error_summary].filter(Boolean).join(" · ")),
-          `desktop execution mode denials=${JSON.stringify(modeChecks)}`,
+          `execution mode and skill denials=${JSON.stringify(modeChecks)}`,
           `global deny exec run status=${deniedByOverride.status} denied_event=${overrideDenied}`,
         ],
         action: "Revisar precedence entre profile/global/agent overrides antes do release.",
@@ -397,7 +345,7 @@ export async function runSecurityAuditSmoke() {
           minimal_exec_denied: minimalDenied,
           agent_allow_exec_passed: allowExecuted,
           global_deny_exec_denied: overrideDenied,
-          desktop_execution_modes_denied: modeChecks,
+          execution_mode_and_skill_denials: modeChecks,
         },
       },
       findings,
