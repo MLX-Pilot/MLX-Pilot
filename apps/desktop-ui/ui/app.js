@@ -5245,7 +5245,10 @@
   });
 
   // -- Utilities ----------------------------------------------
-  function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+  function esc(value) {
+    const entities = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+    return String(value ?? '').replace(/[&<>"']/g, character => entities[character]);
+  }
   function fmtBytes(b) { if (b >= 1e9) return (b / 1e9).toFixed(1) + ' GB'; if (b >= 1e6) return (b / 1e6).toFixed(1) + ' MB'; return (b / 1e3).toFixed(0) + ' KB'; }
   function fmtNum(n) { if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'; if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K'; return String(n); }
   function fmtDuration(s) { if (s < 60) return s + 's'; if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`; return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`; }
@@ -5263,7 +5266,10 @@
 
   function sanitizeHref(href) {
     const value = String(href || '').trim();
-    if (/^(https?:|mailto:)/i.test(value)) return esc(value);
+    try {
+      const url = new URL(value);
+      if (['http:', 'https:', 'mailto:'].includes(url.protocol)) return esc(url.href);
+    } catch { /* Incomplete Markdown destinations stay inert. */ }
     return '#';
   }
 
@@ -5278,13 +5284,14 @@
       return stashHtmlToken(tokens, `<a href="${sanitizeHref(href)}" target="_blank" rel="noopener"${titleAttr}>${renderInlineMarkdown(label)}</a>`);
     });
 
+    output = output.replace(/https?:\/\/[^\s<>"'\uE000\uE001]+/gi, href =>
+      stashHtmlToken(tokens, `<a href="${sanitizeHref(href)}" target="_blank" rel="noopener">${esc(href)}</a>`));
     output = esc(output);
     output = output.replace(/(^|[\s(])\*\*([^*]+)\*\*(?=$|[\s).,!?:;])/g, '$1<strong>$2</strong>');
     output = output.replace(/(^|[\s(])__([^_]+)__(?=$|[\s).,!?:;])/g, '$1<strong>$2</strong>');
     output = output.replace(/(^|[\s(])\*([^*]+)\*(?=$|[\s).,!?:;])/g, '$1<em>$2</em>');
     output = output.replace(/(^|[\s(])_([^_]+)_(?=$|[\s).,!?:;])/g, '$1<em>$2</em>');
     output = output.replace(/~~([^~]+)~~/g, '<del>$1</del>');
-    output = output.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
     return restoreHtmlTokens(output, tokens);
   }
 

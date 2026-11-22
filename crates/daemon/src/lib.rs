@@ -2,6 +2,7 @@ mod agent_api;
 mod agent_runtime_tools;
 mod catalog;
 mod channels;
+mod chat_input;
 mod chat_stream;
 mod config;
 mod flows;
@@ -764,7 +765,10 @@ pub async fn run() -> anyhow::Result<()> {
             "/agent/channels/remove-account",
             post(agent_channels_remove_account),
         )
-        .route("/agent/channels/rename-account", post(agent_channels_rename_account))
+        .route(
+            "/agent/channels/rename-account",
+            post(agent_channels_rename_account),
+        )
         .route("/agent/channels/login", post(agent_channels_login))
         .route("/agent/channels/logout", post(agent_channels_logout))
         .route("/agent/channels/probe", post(agent_channels_probe))
@@ -1247,7 +1251,12 @@ async fn agent_channels_rename_account(
     Json(request): Json<channels::ChannelRenameAccountRequest>,
 ) -> Result<Json<channels::ChannelView>, AppError> {
     ensure_channel_protocol(&headers)?;
-    state.channel_service.rename_account(request).await.map(Json).map_err(map_channel_service_error)
+    state
+        .channel_service
+        .rename_account(request)
+        .await
+        .map(Json)
+        .map_err(map_channel_service_error)
 }
 
 async fn agent_channels_remove_account(
@@ -1480,12 +1489,6 @@ async fn chat(
     State(state): State<AppState>,
     Json(request): Json<ChatRequest>,
 ) -> Result<Json<ChatResponse>, AppError> {
-    if request.model_id.trim().is_empty() {
-        return Err(AppError::Provider(ProviderError::InvalidRequest {
-            details: "model_id cannot be empty".to_string(),
-        }));
-    }
-
     let response = chat_with_routing(&state, request).await.map_err(|error| {
         error!("chat request failed: {error}");
         AppError::Provider(error)
@@ -1498,11 +1501,9 @@ async fn chat_stream(
     State(state): State<AppState>,
     Json(request): Json<ChatRequest>,
 ) -> Result<Response, AppError> {
-    if request.model_id.trim().is_empty() {
-        return Err(AppError::Provider(ProviderError::InvalidRequest {
-            details: "model_id cannot be empty".to_string(),
-        }));
-    }
+    chat_input::validate_chat(&request).map_err(|details| ProviderError::InvalidRequest {
+        details: details.into(),
+    })?;
 
     let routed = route_model_request(&state, &request.model_id).await?;
     let normalized_request = ChatRequest {
@@ -2312,11 +2313,10 @@ async fn try_cloud_chat(
 ) -> Option<Result<ChatResponse, ProviderError>> {
     let model_id = request.model_id.trim();
     // Check known cloud provider prefixes.
-    let known_cloud_providers = ["deepseek", "openai", "anthropic", "groq", "openrouter"];
     let mut cloud_provider: Option<&str> = None;
     let mut cloud_model: Option<&str> = None;
 
-    for prefix in &known_cloud_providers {
+    for prefix in &chat_input::CLOUD_PROVIDERS {
         if let Some(rest) = model_id.strip_prefix(&format!("{prefix}:")) {
             cloud_provider = Some(prefix);
             cloud_model = Some(rest.trim());
@@ -2359,6 +2359,9 @@ async fn chat_with_routing(
     state: &AppState,
     request: ChatRequest,
 ) -> Result<ChatResponse, ProviderError> {
+    chat_input::validate_chat(&request).map_err(|details| ProviderError::InvalidRequest {
+        details: details.into(),
+    })?;
     // Check for cloud provider prefix (e.g. "deepseek:model-name").
     if let Some(cloud_result) = try_cloud_chat(state, &request).await {
         return cloud_result;

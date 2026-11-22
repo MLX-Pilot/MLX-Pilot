@@ -7,7 +7,6 @@ import {
   assertOkJson,
   buildLegacySettings,
   configureCustomProvider,
-  containsAnySecret,
   createHarness,
   isDirectRun,
   pickPort,
@@ -16,14 +15,52 @@ import {
   scanFilesForMarkers,
   seedReleaseGateSkills,
   startDaemon,
+  startJsonServer,
   startOpenAiMockServer,
   startWebhookSink,
   listFilesRecursive,
   statMode,
   stopDaemon,
   waitForHealth,
+  writeExecutable,
   writeJson,
 } from "./_lib.mjs";
+
+async function checkChatInputs(baseUrl, llama, agentProvider) {
+  const model = "llama::fixture.gguf";
+  const message = (content) => [{ role: "user", content }];
+  const calls = () => llama.requests.filter((req) => req.url === "/v1/chat/completions").length
+    + agentProvider.requests.filter((req) => req.url === "/chat/completions").length;
+  const checks = [];
+  async function reject(route, label, body, expectedError) {
+    const before = calls();
+    const { status, payload } = await requestJson(baseUrl, "POST", route, body);
+    const modelCalls = calls() - before;
+    checks.push({ route, input: label, status, model_calls: modelCalls,
+      passed: status === 400 && payload?.error === expectedError && modelCalls === 0 });
+  }
+  for (const route of ["/chat", "/chat/stream"]) {
+    const before = calls();
+    const control = await requestJson(baseUrl, "POST", route, { model_id: model, messages: message("Olá\nOlá") });
+    const modelCalls = calls() - before;
+    const complete = route === "/chat" ? control.payload?.message?.content === "gate-ready"
+      : control.text.split("\n").filter(Boolean).map((line) => JSON.parse(line)).some((frame) => frame.event === "done");
+    checks.push({ route, input: "valid multiline", status: control.status, model_calls: modelCalls,
+      passed: control.status === 200 && complete && modelCalls === 1 });
+    await reject(route, "no messages", { model_id: model, messages: [] }, "messages cannot be empty");
+    await reject(route, "blank message", { model_id: model, messages: message("   ") }, "message cannot be empty");
+    await reject(route, "NUL in message", { model_id: model, messages: message("Hello\u0000world") }, "message contains a control character");
+    await reject(route, "blank model", { model_id: " ", messages: message("Hello") }, "model_id cannot be empty");
+    await reject(route, "provider without model", { model_id: "ollama::", messages: message("Hello") }, "model_id cannot be empty");
+    await reject(route, "NUL in model", { model_id: `${model}\u0000x`, messages: message("Hello") }, "model_id contains a control character");
+  }
+  for (const route of ["/agent/run", "/agent/stream", "/agent/gateway/events"]) {
+    const blankError = route === "/agent/gateway/events" ? "message/text/prompt/input cannot be empty" : "message cannot be empty";
+    await reject(route, "blank message", { message: "   " }, blankError);
+    await reject(route, "NUL in message", { message: "Hello\u0000world" }, "message contains a control character");
+  }
+  return checks;
+}
 
 export async function runSecurityAuditSmoke() {
   const harness = await createHarness("release-gate-security");
@@ -37,6 +74,7 @@ export async function runSecurityAuditSmoke() {
 
   let daemon;
   let provider;
+  let llama;
   let webhook;
 
   try {
@@ -47,12 +85,31 @@ export async function runSecurityAuditSmoke() {
       toolCallArguments: { command: "ls" },
       finalPrefix: "policy-allow",
     });
+    // The test owns the loopback model server. The launcher's successful return
+    // leaves the already-listening fixture in place on each platform.
+    llama = await startJsonServer(({ req }) => {
+      if (req.url === "/health") return { body: { status: "ok" } };
+      if (req.method === "POST" && req.url === "/v1/chat/completions") {
+        return { body: { choices: [{ message: { role: "assistant", content: "gate-ready" } }] } };
+      }
+      return { status: 404 };
+    }, "security-chat-provider");
+    const windows = process.platform === "win32";
+    const launcher = path.join(harness.root, windows ? "fixture-server.cmd" : "fixture-server");
+    await writeExecutable(launcher, windows ? "@exit /b 0\r\n" : "#!/bin/sh\nexit 0\n");
+    const modelsDir = path.join(harness.root, "models");
+    await fs.mkdir(modelsDir, { recursive: true });
+    await fs.writeFile(path.join(modelsDir, "fixture.gguf"), "HTTP model fixture");
+    const temporary = path.join(harness.root, "temp");
+    await fs.mkdir(temporary);
     webhook = await startWebhookSink();
 
     daemon = startDaemon({
       workspace: harness.workspace,
       settingsPath: harness.settingsPath,
       port: daemonPort,
+      llamaFixture: { port: llama.port, launcher },
+      env: { TMPDIR: temporary, TMP: temporary, TEMP: temporary },
       name: "release-gate-security",
     });
     await waitForHealth(daemon.baseUrl, daemon.proc, "security audit daemon");
@@ -60,6 +117,7 @@ export async function runSecurityAuditSmoke() {
     const config = await configureCustomProvider(provider.baseUrl, harness.workspace);
     config.api_key = secrets[0];
     await assertOkJson(daemon.baseUrl, "POST", "/agent/config", config);
+    const inputChecks = await checkChatInputs(daemon.baseUrl, llama, provider);
 
     await assertOkJson(daemon.baseUrl, "POST", "/agent/skills/config", {
       skill: "summarize",
@@ -121,17 +179,6 @@ export async function runSecurityAuditSmoke() {
     });
 
     const settingsRaw = await fs.readFile(harness.settingsPath, "utf8");
-    const daemonLogRaw = await fs.readFile(daemon.logPath, "utf8");
-    const channelAuditFiles = await scanFilesForMarkers(
-      await listFilesRecursive(path.join(harness.root, "channel-audit")),
-      secrets,
-    );
-
-    const leakedFiles = [
-      ...(containsAnySecret(settingsRaw, secrets) ? [harness.settingsPath] : []),
-      ...(containsAnySecret(daemonLogRaw, secrets) ? [daemon.logPath] : []),
-      ...channelAuditFiles,
-    ];
 
     const skillConfig = await assertOkJson(daemon.baseUrl, "GET", "/agent/skills/check");
     const savedSettings = JSON.parse(settingsRaw);
@@ -210,8 +257,7 @@ export async function runSecurityAuditSmoke() {
 
     await assertOkJson(daemon.baseUrl, "POST", "/agent/tools/profile", { profile: "full" });
     await assertOkJson(daemon.baseUrl, "POST", "/agent/tools/allow-deny", {
-      scope: "agent",
-      agent_id: "default",
+      scope: "global",
       allow: [],
       deny: ["exec"],
       replace: true,
@@ -239,17 +285,27 @@ export async function runSecurityAuditSmoke() {
       `/agent/audit?session_id=${deniedOverrideSessionId}&limit=50`,
     );
 
-    const minimalDenied = deniedAudit.entries.some(
+    const noExec = (audit) => !audit.entries.some(
+      (entry) => entry.event_type === "tool_executed" && entry.tool_name === "exec",
+    );
+    const minimalDenied = noExec(deniedAudit) && deniedAudit.entries.some(
       (entry) => entry.event_type === "tool_denied" && entry.tool_name === "exec",
     );
     const allowExecuted = allowedAudit.entries.some(
       (entry) => entry.event_type === "tool_executed" && entry.tool_name === "exec",
     );
-    const overrideDenied = deniedOverrideAudit.entries.some(
+    const overrideDenied = noExec(deniedOverrideAudit) && deniedOverrideAudit.entries.some(
       (entry) => entry.event_type === "tool_denied" && entry.tool_name === "exec",
     );
 
+    await stopDaemon(daemon);
+    const leakedFiles = await scanFilesForMarkers(await listFilesRecursive(harness.root), secrets);
     const findings = [];
+    const failedInputs = inputChecks.filter((check) => !check.passed);
+    if (failedInputs.length) {
+      findings.push({ severity: "high", area: "chat_input", title: "Chat input validation diverged from its contract",
+        evidence: failedInputs, action: "Validate input before routing or starting model inference." });
+    }
     if (leakedFiles.length) {
       findings.push({
         severity: "high",
@@ -274,7 +330,7 @@ export async function runSecurityAuditSmoke() {
         severity: "high",
         area: "vault",
         title: "Skill secret env was not moved to vault",
-        evidence: [JSON.stringify(summarizeOverride || {})],
+        evidence: ["Missing protected environment reference or plaintext value present"],
         action: "Store secret-like env keys through env_refs backed by the vault.",
       });
     }
@@ -312,6 +368,8 @@ export async function runSecurityAuditSmoke() {
         findings_total: findings.length,
       },
       checklist: {
+        chat_input_backend: "llama.cpp-compatible loopback HTTP fixture; agent uses OpenAI-compatible loopback HTTP",
+        chat_inputs: inputChecks,
         secrets_not_in_settings_or_logs: leakedFiles.length === 0,
         vault_used_for_agent_api_key: Boolean(savedSettings.agent.api_key_ref) && !savedSettings.agent.api_key,
         vault_used_for_skill_env: Boolean(summarizeOverride?.env_refs?.OPENAI_API_KEY),
@@ -340,6 +398,7 @@ export async function runSecurityAuditSmoke() {
   } finally {
     await stopDaemon(daemon);
     await provider?.close?.();
+    await llama?.close?.();
     await webhook?.close?.();
   }
 }

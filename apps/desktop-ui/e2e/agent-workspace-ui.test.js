@@ -624,7 +624,7 @@ function createFixture({
       return streamingResponse([
         JSON.stringify({ event: "status", status: "thinking" }),
         JSON.stringify({ event: "thinking_delta", delta: "Mapeando estado inicial..." }),
-        JSON.stringify({ event: "answer_delta", delta: "<think>Consolidando contexto interno.</think>\n## Diagnostico\n- Runtime conectado\n- Cache aquecido\n\n```js\nconsole.log('ok');\n```" }),
+        JSON.stringify({ event: "answer_delta", delta: "<think>Consolidando contexto interno.</think>\n## Diagnostico\n- Runtime conectado\n- Cache aquecido\n\n```js\nconsole.log('ok');\n```\n\n[Leitura](https://example.org/busca?q=\"livros\"&edicao=2) · [Anexo](file:///material) · <nota>" }),
         JSON.stringify({ event: "done", status: "completed", total_tokens: 64, latency_ms: 320 }),
       ]);
     }
@@ -787,6 +787,13 @@ test("chat stream shows thinking and renders markdown output", async () => {
     assert.match(answerHtml, /<h2>Diagnostico<\/h2>/);
     assert.match(answerHtml, /<li>Runtime conectado<\/li>/);
     assert.match(answerHtml, /code-block/);
+    const answer = fixture.document.querySelector("#chat-messages .assistant-message .msg-content");
+    const [reading, attachment] = answer.querySelectorAll("a");
+    assert.equal(new URL(reading.href).searchParams.get("q"), '"livros"');
+    assert.equal(new URL(reading.href).searchParams.get("edicao"), "2");
+    assert.equal(attachment.getAttribute("href"), "#");
+    assert.equal(answer.querySelector("nota"), null);
+    assert.ok(answer.textContent.includes("<nota>"));
   } finally {
     fixture.cleanup();
   }
