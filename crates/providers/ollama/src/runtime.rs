@@ -7,12 +7,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use fs2::FileExt;
-use futures_util::StreamExt;
 use mlx_ollama_core::ProviderError;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::sleep;
@@ -22,6 +20,7 @@ use uuid::Uuid;
 use crate::silence_console;
 
 mod archive;
+mod download;
 
 pub const MANAGED_OLLAMA_VERSION: &str = "0.30.7";
 const MIN_OLLAMA_VERSION: &str = "0.30.0";
@@ -285,6 +284,10 @@ impl OllamaRuntime {
 
     pub async fn prepare(&self, selected_model: Option<String>) -> Result<(), ProviderError> {
         let _operation = self.operation_lock.lock().await;
+        self.prepare_operation(selected_model).await
+    }
+
+    async fn prepare_operation(&self, selected_model: Option<String>) -> Result<(), ProviderError> {
         self.cancel.store(false, Ordering::SeqCst);
         self.reset_status(selected_model.clone()).await;
 
@@ -318,6 +321,10 @@ impl OllamaRuntime {
 
     pub async fn ensure_ready_for_model(&self, model: Option<&str>) -> Result<(), ProviderError> {
         let status = self.status().await;
+        let _operation = self.operation_lock.try_lock().map_err(|_| ProviderError::Unavailable {
+            details: format!("Ollama em preparacao: {} ({} bytes recebidos); aguarde ou retome pela tela de inicializacao",status.message,status.bytes_downloaded),
+        })?;
+        let status = self.status().await;
         if status.provider_ready {
             // A cached Ready status must not authorize a replacement server on the same port.
             let version = api_version(&self.client, &self.cfg.base_url).await?;
@@ -338,7 +345,12 @@ impl OllamaRuntime {
             }
             return Ok(());
         }
-        self.prepare(model.map(ToString::to_string)).await
+        self.prepare_operation(model.map(ToString::to_string))
+            .await?;
+        if let Some(model) = model.filter(|value| !value.trim().is_empty()) {
+            self.validate_model(model).await?;
+        }
+        Ok(())
     }
 
     async fn prepare_inner(&self, selected_model: Option<&str>) -> Result<(), ProviderError> {
@@ -583,7 +595,12 @@ impl OllamaRuntime {
             context: format!("criando staging {}", staging.display()),
             source,
         })?;
-        let archive_path = staging.join("ollama.archive.part");
+        let downloads = self.cfg.root.join("downloads");
+        fs::create_dir_all(&downloads).map_err(|source| ProviderError::Io {
+            context: format!("criando cache {}", downloads.display()),
+            source,
+        })?;
+        let archive_path = downloads.join(format!("{:x}.part", Sha256::digest(url.as_bytes())));
 
         let download_message = system
             .and_then(|runtime| runtime.client_version.as_deref())
@@ -622,6 +639,7 @@ impl OllamaRuntime {
             details: format!("falha aguardando extracao do runtime Ollama: {error}"),
         })?;
         if let Err(error) = extraction {
+            download::discard_cached_archive(&archive_path);
             let _ = fs::remove_dir_all(&staging);
             let _ = lock.unlock();
             return Err(error);
@@ -634,6 +652,7 @@ impl OllamaRuntime {
         let staged_executable = match find_file_recursive(&extracted, executable_name()) {
             Some(path) => path,
             None => {
+                download::discard_cached_archive(&archive_path);
                 let _ = fs::remove_dir_all(&staging);
                 let _ = lock.unlock();
                 return Err(ProviderError::Unavailable {
@@ -642,6 +661,7 @@ impl OllamaRuntime {
             }
         };
         if let Err(error) = validate_runtime_payload(&staged_executable) {
+            download::discard_cached_archive(&archive_path);
             let _ = fs::remove_dir_all(&staging);
             let _ = lock.unlock();
             return Err(error);
@@ -655,6 +675,7 @@ impl OllamaRuntime {
             }
         };
         if installed_version != MANAGED_OLLAMA_VERSION {
+            download::discard_cached_archive(&archive_path);
             let _ = fs::remove_dir_all(&staging);
             let _ = lock.unlock();
             return Err(ProviderError::Unavailable {
@@ -701,6 +722,7 @@ impl OllamaRuntime {
         };
         write_json_atomic(&self.cfg.root.join("active.json"), &manifest)?;
         let _ = fs::remove_dir_all(&staging);
+        download::discard_cached_archive(&archive_path);
         let _ = lock.unlock();
 
         let executable = final_dir.join(relative);
@@ -712,80 +734,6 @@ impl OllamaRuntime {
         })
         .await;
         Ok(executable)
-    }
-
-    async fn download_archive(
-        &self,
-        url: &str,
-        destination: &Path,
-        message: &str,
-    ) -> Result<(), ProviderError> {
-        let message = message.to_string();
-        self.update_status(|status| {
-            status.phase = RuntimePhase::Downloading;
-            status.step = "downloading".to_string();
-            status.message = message;
-            status.can_cancel = true;
-            status.progress_percent = None;
-            status.bytes_downloaded = 0;
-            status.bytes_total = None;
-            status.bytes_per_second = None;
-        })
-        .await;
-
-        let response =
-            self.client
-                .get(url)
-                .send()
-                .await
-                .map_err(|error| ProviderError::Unavailable {
-                    details: format!("falha baixando runtime Ollama: {error}"),
-                })?;
-        if !response.status().is_success() {
-            return Err(ProviderError::Unavailable {
-                details: format!(
-                    "download do runtime Ollama retornou HTTP {}",
-                    response.status()
-                ),
-            });
-        }
-        let total = response.content_length();
-        let mut stream = response.bytes_stream();
-        let mut file = tokio::fs::File::create(destination)
-            .await
-            .map_err(|source| ProviderError::Io {
-                context: format!("criando {}", destination.display()),
-                source,
-            })?;
-        let started = Instant::now();
-        let mut downloaded = 0_u64;
-        while let Some(chunk) = stream.next().await {
-            self.ensure_not_cancelled()?;
-            let chunk = chunk.map_err(|error| ProviderError::Unavailable {
-                details: format!("download do runtime Ollama foi interrompido: {error}"),
-            })?;
-            file.write_all(&chunk)
-                .await
-                .map_err(|source| ProviderError::Io {
-                    context: format!("escrevendo {}", destination.display()),
-                    source,
-                })?;
-            downloaded += chunk.len() as u64;
-            let elapsed = started.elapsed().as_secs_f64().max(0.001);
-            self.update_status(|status| {
-                status.bytes_downloaded = downloaded;
-                status.bytes_total = total;
-                status.bytes_per_second = Some((downloaded as f64 / elapsed) as u64);
-                status.progress_percent =
-                    total.map(|value| (downloaded as f64 / value as f64 * 100.0).min(100.0));
-            })
-            .await;
-        }
-        file.flush().await.map_err(|source| ProviderError::Io {
-            context: format!("finalizando {}", destination.display()),
-            source,
-        })?;
-        Ok(())
     }
 
     async fn start_and_validate(
@@ -909,12 +857,14 @@ impl OllamaRuntime {
         })
         .await;
 
-        let gpu_expected = self.status.read().await.gpu.expected;
-        let log_probe = wait_for_compute_backend(&log_path, Duration::from_secs(12)).await;
-        if let Some((backend, name, vram)) = log_probe {
+        // GPU discovery can happen lazily when a model is first loaded. A healthy API
+        // is sufficient for startup; the first chat validates model placement.
+        if let Some((backend, name, vram)) =
+            parse_compute_backend(&fs::read_to_string(&log_path).unwrap_or_default())
+        {
             self.update_status(|status| {
-                status.gpu.backend = Some(backend.clone());
                 status.gpu.detected = is_accelerated_backend(&backend);
+                status.gpu.backend = Some(backend);
                 if status.gpu.name.is_none() {
                     status.gpu.name = name;
                 }
@@ -923,33 +873,6 @@ impl OllamaRuntime {
                 }
             })
             .await;
-        }
-
-        let gpu_detected = self.status.read().await.gpu.detected;
-        if gpu_expected && !gpu_detected && !recovery {
-            warn!(
-                executable = %executable.display(),
-                pid,
-                "Ollama iniciou sem detectar a GPU esperada; executando unica recuperacao"
-            );
-            self.update_status(|status| {
-                status.message =
-                    "GPU nao detectada; reiniciando o servidor com ambiente corrigido".to_string();
-                status.recovery_attempted = true;
-            })
-            .await;
-            return Box::pin(self.start_and_validate(
-                executable,
-                selected_model,
-                true,
-                process_origin,
-            ))
-            .await;
-        }
-        if gpu_expected && !gpu_detected {
-            return Err(ProviderError::Unavailable {
-                details: gpu_failure_diagnostic(&log_path, executable),
-            });
         }
 
         let version = api_version(&self.client, &self.cfg.base_url).await?;
@@ -966,7 +889,9 @@ impl OllamaRuntime {
     ) -> Result<(), ProviderError> {
         require_compatible_version(&version)?;
         if let Some(model) = selected_model.filter(|value| !value.trim().is_empty()) {
-            self.validate_model(model).await?;
+            let available = self.model_is_available(model).await?;
+            self.update_status(|status| status.model_available = Some(available))
+                .await;
         }
 
         self.update_status(|status| {
@@ -996,15 +921,7 @@ impl OllamaRuntime {
         }
     }
 
-    async fn validate_model(&self, model: &str) -> Result<(), ProviderError> {
-        self.update_status(|status| {
-            status.phase = RuntimePhase::Validating;
-            status.step = "validating_model".to_string();
-            status.message = "Validando o modelo".to_string();
-            status.selected_model = Some(model.to_string());
-            status.model_available = None;
-        })
-        .await;
+    async fn model_is_available(&self, model: &str) -> Result<bool, ProviderError> {
         let tags_url = format!("{}/api/tags", self.cfg.base_url.trim_end_matches('/'));
         let tags: serde_json::Value = self
             .client
@@ -1015,7 +932,7 @@ impl OllamaRuntime {
             .json()
             .await
             .map_err(network_error)?;
-        let available = tags
+        Ok(tags
             .get("models")
             .and_then(serde_json::Value::as_array)
             .map(|models| {
@@ -1028,7 +945,19 @@ impl OllamaRuntime {
                         .unwrap_or(false)
                 })
             })
-            .unwrap_or(false);
+            .unwrap_or(false))
+    }
+
+    async fn validate_model(&self, model: &str) -> Result<(), ProviderError> {
+        self.update_status(|status| {
+            status.phase = RuntimePhase::Validating;
+            status.step = "validating_model".to_string();
+            status.message = "Validando o modelo".to_string();
+            status.selected_model = Some(model.to_string());
+            status.model_available = None;
+        })
+        .await;
+        let available = self.model_is_available(model).await?;
         self.update_status(|status| status.model_available = Some(available))
             .await;
         if !available {
@@ -1062,6 +991,7 @@ impl OllamaRuntime {
             });
         }
 
+        let mut cpu_fallback = false;
         if self.status.read().await.gpu.expected {
             let ps_url = format!("{}/api/ps", self.cfg.base_url.trim_end_matches('/'));
             let ps: serde_json::Value = self
@@ -1089,20 +1019,28 @@ impl OllamaRuntime {
                 .and_then(|entry| entry.get("size_vram"))
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
-            if size_vram == 0 {
-                return Err(ProviderError::Unavailable {
-                    details: format!(
-                        "modelo '{model}' seria executado somente em CPU, embora uma GPU NVIDIA compativel tenha sido detectada; operacao bloqueada"
-                    ),
-                });
-            }
+            cpu_fallback = size_vram == 0;
+            self.update_status(|status| {
+                status.gpu.detected = size_vram > 0;
+                status.gpu.backend = Some(if size_vram > 0 { "gpu" } else { "cpu" }.to_string());
+            })
+            .await;
         }
         self.update_status(|status| {
             status.model_available = Some(true);
             status.provider_ready = true;
-            status.phase = RuntimePhase::Ready;
+            status.phase = if cpu_fallback {
+                RuntimePhase::Degraded
+            } else {
+                RuntimePhase::Ready
+            };
             status.step = "ready".to_string();
-            status.message = "Pronto".to_string();
+            status.message = if cpu_fallback {
+                "Pronto em CPU; a GPU nao foi utilizada pelo modelo"
+            } else {
+                "Pronto"
+            }
+            .to_string();
         })
         .await;
         Ok(())
@@ -1204,7 +1142,9 @@ fn runtime_http_timeout(startup_timeout: Duration) -> Duration {
 
 impl Drop for OllamaRuntime {
     fn drop(&mut self) {
-        self.cancel.store(true, Ordering::SeqCst);
+        if Arc::strong_count(&self.cancel) == 1 {
+            self.cancel.store(true, Ordering::SeqCst);
+        }
     }
 }
 
@@ -1715,24 +1655,6 @@ async fn discover_nvidia_gpu() -> GpuStatus {
     GpuStatus::default()
 }
 
-async fn wait_for_compute_backend(
-    log_path: &Path,
-    timeout: Duration,
-) -> Option<(String, Option<String>, Option<u64>)> {
-    let started = Instant::now();
-    loop {
-        if let Ok(content) = fs::read_to_string(log_path) {
-            if let Some(result) = parse_compute_backend(&content) {
-                return Some(result);
-            }
-        }
-        if started.elapsed() >= timeout {
-            return None;
-        }
-        sleep(Duration::from_millis(250)).await;
-    }
-}
-
 fn parse_compute_backend(content: &str) -> Option<(String, Option<String>, Option<u64>)> {
     for line in content.lines().rev() {
         if !line.contains("inference compute") {
@@ -1822,29 +1744,6 @@ fn host_without_scheme(base_url: &str) -> String {
         .trim_start_matches("https://")
         .trim_end_matches('/')
         .to_string()
-}
-
-fn gpu_failure_diagnostic(log_path: &Path, executable: &Path) -> String {
-    let tail = fs::read_to_string(log_path)
-        .ok()
-        .map(|content| {
-            content
-                .lines()
-                .rev()
-                .take(12)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-                .collect::<Vec<_>>()
-                .join(" | ")
-        })
-        .unwrap_or_default();
-    format!(
-        "GPU NVIDIA detectada pelo sistema, mas o Ollama iniciou somente em CPU apos uma tentativa de recuperacao. Executavel: {}. Log: {}. Evidencia: {}",
-        executable.display(),
-        log_path.display(),
-        tail
-    )
 }
 
 fn paths_equal(left: &Path, right: &Path) -> bool {
@@ -1980,8 +1879,88 @@ fn epoch_ms() -> u128 {
 mod tests {
     use super::*;
     use std::sync::{Mutex as StdMutex, OnceLock};
-    use tokio::io::AsyncReadExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn chat_fails_fast_during_preparation_without_resetting_operation() {
+        let root = std::env::temp_dir().join(format!("mlx-busy-{}", Uuid::new_v4()));
+        let runtime = OllamaRuntime::new(OllamaRuntimeConfig {
+            root: root.clone(),
+            base_url: DEFAULT_MANAGED_URL.into(),
+            models_dir: root.join("models"),
+            startup_timeout: Duration::from_secs(1),
+            auto_install: true,
+            auto_start: true,
+        });
+        runtime
+            .update_status(|s| {
+                s.phase = RuntimePhase::Downloading;
+                s.operation_id = Some("existing-operation".into());
+                s.bytes_downloaded = 1024;
+            })
+            .await;
+        let _held = runtime.operation_lock.lock().await;
+        let result = tokio::time::timeout(
+            Duration::from_millis(100),
+            runtime.ensure_ready_for_model(Some("absent-model")),
+        )
+        .await
+        .unwrap();
+        assert!(result.unwrap_err().to_string().contains("em preparacao"));
+        let state = runtime.status().await;
+        assert_eq!(state.operation_id.as_deref(), Some("existing-operation"));
+        assert_eq!(state.phase, RuntimePhase::Downloading);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn boot_checks_missing_model_without_loading_or_downloading_it() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = [0; 2048];
+                let n = socket.read(&mut request).await.unwrap();
+                assert!(String::from_utf8_lossy(&request[..n]).starts_with("GET /api/tags"));
+                let body = r#"{"models":[]}"#;
+                socket
+                    .write_all(
+                        format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+            }
+        });
+        let root = std::env::temp_dir().join(format!("mlx-model-{}", Uuid::new_v4()));
+        let runtime = OllamaRuntime::new(OllamaRuntimeConfig {
+            root: root.clone(),
+            base_url: format!("http://{address}"),
+            models_dir: root.join("models"),
+            startup_timeout: Duration::from_secs(1),
+            auto_install: false,
+            auto_start: false,
+        });
+        runtime
+            .validate_serving_runtime(MANAGED_OLLAMA_VERSION.into(), Some("qwen3.5:9b"))
+            .await
+            .unwrap();
+        let state = runtime.status().await;
+        assert!(state.provider_ready);
+        assert_eq!(state.model_available, Some(false));
+        assert!(matches!(
+            runtime.validate_model("qwen3.5:9b").await,
+            Err(ProviderError::ModelNotFound { .. })
+        ));
+        server.await.unwrap();
+        // Both requests only list tags. Neither loads nor downloads the model.
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn compatible_version_range_is_pinned() {
@@ -2028,7 +2007,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn external_endpoint_validates_version_and_model_before_any_local_bootstrap() {
+    async fn external_endpoint_checks_version_and_tags_without_loading_model_or_bootstrapping_locally(
+    ) {
         for version in [MANAGED_OLLAMA_VERSION, "0.16.2"] {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = listener.local_addr().unwrap();
@@ -2041,7 +2021,6 @@ mod tests {
                         "GET /api/tags ",
                         serde_json::json!({"models":[{"name":"tiny"}]}),
                     ));
-                    replies.push(("POST /api/generate ", serde_json::json!({"done":true})));
                 }
                 for (route, payload) in replies {
                     let (mut socket, _) = listener.accept().await.unwrap();
