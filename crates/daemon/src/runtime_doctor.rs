@@ -671,19 +671,25 @@ fn choose_backend(
         };
     }
 
-    if llamacpp.healthy {
-        let exec = if system.gpu.iter().any(|gpu| gpu.backend == "cuda") {
-            "cuda"
-        } else if system.gpu.iter().any(|gpu| gpu.backend == "metal") {
-            "metal"
-        } else {
-            "cpu"
+    let ollama_has_usable_models = ollama.healthy && !ollama.models.is_empty();
+    let prefer_ollama = ollama_has_usable_models && llamacpp.models.is_empty();
+    if llamacpp.healthy && !prefer_ollama {
+        let path = llamacpp.configured_path.as_deref().unwrap_or("");
+        let segments = path.split(['/', '\\']).collect::<Vec<_>>();
+        let variant = segments
+            .windows(2)
+            .find(|pair| pair[0].eq_ignore_ascii_case("engine"))
+            .map(|pair| pair[1].to_ascii_lowercase());
+        let exec = match variant.as_deref() {
+            Some("vulkan") => "vulkan",
+            Some("cuda") => "cuda",
+            Some("cpu") => "cpu",
+            _ => "unverified",
         };
         return ActiveBackend {
             provider: "llama.cpp".to_string(),
             execution_backend: exec.to_string(),
-            reason: "llama.cpp esta disponivel e atende o fallback nativo direto do runtime."
-                .to_string(),
+            reason: "llama.cpp está instalado. A variante identifica o executável selecionado; o uso da GPU requer validação com um modelo.".to_string(),
             fallback_chain: vec![
                 "llama.cpp".to_string(),
                 "ollama".to_string(),
@@ -695,11 +701,7 @@ fn choose_backend(
     if ollama.healthy {
         return ActiveBackend {
             provider: "ollama".to_string(),
-            execution_backend: if system.gpu.iter().any(|gpu| gpu.backend == "cuda") {
-                "managed-gpu".to_string()
-            } else {
-                "managed".to_string()
-            },
+            execution_backend: "managed".to_string(),
             reason: "Ollama e o unico backend local saudavel detectado neste host; ele assume o modo estavel por padrao.".to_string(),
             fallback_chain: vec!["ollama".to_string(), "cpu".to_string()],
         };
@@ -956,6 +958,7 @@ async fn run_capture(program: &str, args: &[&str], timeout_secs: u64) -> ProbeRe
     crate::silence_console(&mut command);
     command
         .args(args)
+        .kill_on_drop(true)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -1052,6 +1055,72 @@ mod observation_tests {
         Json, Router,
     };
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn nvidia_hardware_does_not_mislabel_the_installed_vulkan_engine_as_cuda() {
+        let system = SystemInfo {
+            os: "windows".to_string(),
+            os_version: None,
+            architecture: "x86_64".to_string(),
+            gpu: vec![GpuInfo {
+                backend: "cuda".to_string(),
+                name: "NVIDIA RTX 3060".to_string(),
+                details: None,
+            }],
+            python_alias_healthy: false,
+            backend_priority: vec![],
+        };
+        let unavailable = ComponentStatus {
+            id: "mlx".to_string(),
+            installed: false,
+            healthy: false,
+            configured_path: None,
+            local_version: None,
+            latest_version: None,
+            outdated: false,
+            details: vec![],
+            models: vec![],
+        };
+        let mut engine = unavailable.clone();
+        engine.id = "llama.cpp".to_string();
+        engine.installed = true;
+        engine.healthy = true;
+        engine.configured_path = Some(
+            r"C:\Users\tester\AppData\Local\MLX Pilot\engine\vulkan\llama-server.exe".to_string(),
+        );
+        let chosen = choose_backend(&system, &unavailable, &engine, &unavailable);
+        assert_eq!(chosen.provider, "llama.cpp");
+        assert_eq!(chosen.execution_backend, "vulkan");
+        let mut ollama = unavailable.clone();
+        ollama.id = "ollama".to_string();
+        ollama.installed = true;
+        ollama.healthy = true;
+        ollama.models = vec![ModelSummary {
+            id: "qwen3:0.6b".to_string(),
+            provider: "ollama".to_string(),
+        }];
+        assert_eq!(
+            choose_backend(&system, &ollama, &engine, &unavailable).provider,
+            "ollama"
+        );
+        engine.models = vec![ModelSummary {
+            id: "test.gguf".to_string(),
+            provider: "llama.cpp".to_string(),
+        }];
+        assert_eq!(
+            choose_backend(&system, &ollama, &engine, &unavailable).provider,
+            "llama.cpp"
+        );
+        engine.configured_path = Some("llama-server".to_string());
+        assert_eq!(
+            choose_backend(&system, &unavailable, &engine, &unavailable).execution_backend,
+            "unverified"
+        );
+        assert_eq!(
+            choose_backend(&system, &engine, &unavailable, &unavailable).execution_backend,
+            "managed"
+        );
+    }
 
     #[tokio::test]
     async fn observation_and_validation_only_use_the_existing_ollama_http_api() {
