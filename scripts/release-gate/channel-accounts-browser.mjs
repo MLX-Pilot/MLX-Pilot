@@ -31,6 +31,7 @@ try {
   await page.goto(`http://127.0.0.1:${port}`);
   const $ = id => page.locator('#' + id);
   const form = async (id, enabled) => {
+    await page.waitForTimeout(550);
     const response = page.waitForResponse(r => r.request().method() === 'POST' && r.url().endsWith('/channels/upsert-account'));
     await $('agent-channel-save-btn').click();
     const payload = await (await response).json();
@@ -50,11 +51,12 @@ try {
   await page.locator('[data-config-section="integrations"]').click();
   await $('agent-channel-select').selectOption('mattermost');
   await $('agent-channel-account-id').fill('aula');
-  await $('agent-channel-credentials').fill(JSON.stringify({ webhook_url: receiver.baseUrl + '/webhook' }));
+  await $('agent-channel-credentials').fill(receiver.baseUrl + '/webhook');
   await $('agent-channel-set-default').check();
   await form('aula', true);
   assert.equal(await $('agent-channel-credentials').inputValue(), '');
   steps.push('create_default_account');
+  await page.waitForTimeout(800);
   await edit('aula');
   await $('agent-channel-enabled').uncheck();
   await form('aula', false);
@@ -66,11 +68,13 @@ try {
   assert.equal((await send(403)).error_code, 'permission_error');
   assert.equal(receiver.requests.length, 0);
   steps.push('edit_without_reentering_credentials', 'disabled_delivery_blocked');
+  await page.waitForTimeout(1000);
   await edit('aula');
   await $('agent-channel-enabled').check();
   await form('aula', true);
-  page.once('dialog', dialog => dialog.accept('semestre'));
   await page.locator('[data-channel-action="rename"][data-account="aula"]').click();
+  await $('agent-channel-dialog-value').fill('semestre');
+  await $('agent-channel-dialog-confirm').click();
   await page.locator('[data-channel-action="edit"][data-account="semestre"]').waitFor();
   await $('agent-send-channel').selectOption('mattermost');
   await $('agent-send-account').selectOption('semestre');
@@ -80,6 +84,7 @@ try {
   assert.match(JSON.stringify(receiver.requests[0].body), /Teste de entrega da aula/);
   await $('agent-channel-action-feedback').filter({ hasText: delivered.message_id }).waitFor();
   steps.push('rename_default_account', 'enabled_delivery_received_once');
+  await page.waitForTimeout(1200);
   await page.screenshot({ path: path.join(dir, 'channel-accounts.png') });
   console.log('Validated channel accounts:', dir);
 } catch (error) {

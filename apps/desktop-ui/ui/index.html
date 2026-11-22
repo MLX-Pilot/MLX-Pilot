@@ -549,6 +549,13 @@
                         </div>
                         <div id="agent-channel-list" class="channel-account-list" data-configured-only></div>
                       </div>
+                      <dialog class="channel-account-dialog" id="agent-channel-dialog">
+                        <form method="dialog">
+                          <h4 id="agent-channel-dialog-title"></h4>
+                          <label class="settings-field"><span id="agent-channel-dialog-message"></span><input class="input" id="agent-channel-dialog-value" /></label>
+                          <div class="channel-account-actions"><button class="primary-btn" value="confirm" id="agent-channel-dialog-confirm">Confirmar</button><button class="action-btn" value="cancel" formnovalidate>Cancelar</button></div>
+                        </form>
+                      </dialog>
                       <div id="agent-channel-qr-panel" hidden><canvas id="agent-channel-qr-canvas" width="220" height="220"></canvas><img id="agent-channel-qr-image" hidden alt="QR do WhatsApp" /><p id="agent-channel-qr-text" class="meta-note"></p></div>
                       <details class="channel-details"><summary>Testar conexão e envio</summary>
                         <div class="channel-account-layout">

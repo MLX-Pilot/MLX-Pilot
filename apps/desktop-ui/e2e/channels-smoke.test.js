@@ -560,7 +560,7 @@ test("channels smoke renders catalog, supports add/default, and shows logs", asy
     const telegramSection = dom.window.document.getElementById("agent-channel-list").textContent;
     assert.match(telegramSection, /bot-b/);
     assert.match(telegramSection, /\(default\)/);
-    assert.match(telegramSection, /adapter_config: configurado/);
+    assert.match(telegramSection, /Adaptador configurado/);
 
     assert.match(dom.window.document.getElementById("agent-channel-onboarding-title").textContent, /Telegram/);
     assert.match(dom.window.document.getElementById("agent-channel-credential-hint").textContent, /token/i);

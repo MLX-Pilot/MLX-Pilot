@@ -4197,3 +4197,16 @@ code { font-family: var(--font-mono); }
 .channel-details summary { cursor: pointer; color: var(--text-secondary); font-weight: 600; margin-bottom: 8px; }
 .channel-account-list .agent-channel-account-card { padding-block: 6px; }
 .channel-account-list .ghost-btn { padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; }
+
+.channel-account-layout .settings-field { display: grid; align-content: start; gap: 5px; margin: 0; font-size: 13px; }
+.channel-account-list { padding: 12px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-surface); font-size: 13px; }
+.channel-account-list .meta-note, .channel-account-form .meta-note, .channel-details, #agent-channel-action-feedback { font-size: 13px; }
+.channel-account-list .agent-skill-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.channel-account-list .agent-skill-badges[hidden] { display: none; }
+.channel-account-list .agent-channel-account-actions { margin-top: 8px; }
+.channel-details .channel-account-actions { margin-top: 8px; }
+
+.channel-account-dialog { margin: auto; width: min(400px, 90vw); border: 1px solid var(--border); border-radius: 12px; padding: 22px; background: var(--bg-surface); color: var(--text-primary); }
+.channel-account-dialog form { display: grid; gap: 16px; }
+.channel-account-dialog label { display: grid; gap: 8px; }
+.channel-account-dialog::backdrop { background: rgb(0 0 0 / 55%); }
