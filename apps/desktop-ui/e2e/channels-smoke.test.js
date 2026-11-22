@@ -323,6 +323,14 @@ class FakeChannelBackend {
       };
     }
 
+    if (path === "/agent/channels/rename-account" && options.method === "POST") {
+      const channel = this.findChannel(payload.channel);
+      const account = channel.accounts.find(entry => entry.account_id === payload.account_id);
+      account.account_id = payload.new_account_id;
+      if (account.is_default) channel.default_account_id = account.account_id;
+      return channel;
+    }
+
     if (path === "/agent/channels/remove-account" && options.method === "POST") {
       const channel = this.findChannel(payload.channel);
       channel.accounts = channel.accounts.filter((entry) => entry.account_id !== payload.account_id);

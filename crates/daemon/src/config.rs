@@ -399,6 +399,9 @@ impl Default for ChannelPersistedState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelAccountPersistedState {
+    /// Stable owner of the vault entry and session directory across account renames.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage_id: Option<String>,
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
@@ -416,6 +419,10 @@ pub struct ChannelAccountPersistedState {
 }
 
 impl ChannelAccountPersistedState {
+    pub fn storage_id<'a>(&'a self, account_id: &'a str) -> &'a str {
+        self.storage_id.as_deref().unwrap_or(account_id)
+    }
+
     pub fn is_configured(&self) -> bool {
         self.credentials_ref
             .as_deref()
@@ -431,6 +438,7 @@ impl ChannelAccountPersistedState {
 impl Default for ChannelAccountPersistedState {
     fn default() -> Self {
         Self {
+            storage_id: None,
             enabled: true,
             credentials_ref: None,
             metadata: BTreeMap::new(),
@@ -1448,6 +1456,7 @@ mod tests {
                 accounts: BTreeMap::from([(
                     "tg".to_string(),
                     ChannelAccountPersistedState {
+                        storage_id: None,
                         enabled: true,
                         credentials_ref: Some("channels.telegram.tg.credentials".to_string()),
                         metadata: BTreeMap::from([("owner".to_string(), "local".to_string())]),

@@ -2645,70 +2645,22 @@
   }
 
   function renderChannels() {
-    const list = document.getElementById('channel-list');
-    if (!list) {
-      updateAgentWorkspaceSummary();
-      return;
-    }
-    list.innerHTML = '';
-    if (state.channels.length === 0) {
-      list.innerHTML = '<div class="agent-empty-copy" style="display:flex;flex-direction:column;align-items:center;gap:8px"><svg viewBox="0 0 20 20" width="24" height="24" fill="none" stroke="var(--text-tertiary)" stroke-width="1.5" opacity="0.5"><path d="M3 5h14v10H3z"/><path d="M7 5V3h6v2"/></svg><span>Nenhum channel conectado. Clique em + Novo Channel para começar.</span></div>';
-      updateAgentWorkspaceSummary();
-      return;
-    }
-    state.channels.forEach(ch => {
-      const channelId = ch.channel_id || ch.id || ch.name || '?';
-      const accounts = ch.accounts || [];
-      if (accounts.length === 0) {
-        list.appendChild(makeChannelCard(channelId, null, channelId));
-      } else {
-        accounts.forEach(acc => {
-          list.appendChild(makeChannelCard(channelId, acc, `${channelId} — ${acc.account_id || acc.id || ''}`));
-        });
-      }
-    });
     updateAgentWorkspaceSummary();
   }
 
-  function makeChannelCard(channelId, account, displayName) {
-    const card = document.createElement('div');
-    card.className = 'channel-card';
-    const connected = account?.status === 'connected' || account?.enabled;
-    card.classList.add(connected ? 'connected' : 'disconnected');
-    card.innerHTML = `
-      <div class="channel-status">
-        <span class="channel-status-badge ${connected ? 'connected' : 'disconnected'}">${connected ? 'Conectado' : 'Desconectado'}</span>
-      </div>
-      <div class="channel-info">
-        <span class="channel-name">${esc(displayName)}</span>
-        <span class="channel-meta">${esc(channelId)}</span>
-      </div>
-      <div class="channel-actions">
-        ${connected ? '' : `<button class="action-btn" data-reconnect data-ch="${esc(channelId)}" data-acc="${esc(account?.account_id || account?.id || '')}">Reconectar</button>`}
-        <button class="action-btn danger" data-ch="${esc(channelId)}" data-acc="${esc(account?.account_id || account?.id || '')}">Remover</button>
-      </div>`;
-    card.querySelectorAll('.action-btn[data-reconnect]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        try {
-          const body = { channel: btn.dataset.ch };
-          if (btn.dataset.acc) body.account_id = btn.dataset.acc;
-          await api('/agent/channels/connect', { method: 'POST', headers: { 'x-channel-protocol-version': 'v1' }, body: JSON.stringify(body) });
-          loadChannels();
-        } catch (e) { alert('Erro: ' + e.message); }
-      });
-    });
-    card.querySelectorAll('.action-btn.danger').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        if (!confirm('Remover channel?')) return;
-        try {
-          const body = { channel: btn.dataset.ch };
-          if (btn.dataset.acc) body.account_id = btn.dataset.acc;
-          await api('/agent/channels/remove', { method: 'POST', headers: { 'x-channel-protocol-version': 'v1' }, body: JSON.stringify(body) });
-          loadChannels();
-        } catch (e) { alert('Erro: ' + e.message); }
-      });
-    });
-    return card;
+  let channelPanelController;
+  async function openChannelPanel() {
+    try {
+      if (!channelPanelController) {
+        channelPanelController = import('./agent-channels.js').then(({ mountChannelPanel }) =>
+          mountChannelPanel(api)
+        );
+      }
+      await (await channelPanelController).loadChannels();
+    } catch (error) {
+      channelPanelController = null;
+      setText('agent-channel-form-feedback', 'Falha ao carregar canais: ' + error.message);
+    }
   }
 
   // -- Audit --------------------------------------------------
@@ -4723,6 +4675,7 @@
       tab.setAttribute('aria-selected', 'true');
       const pane = document.querySelector(`[data-config-pane="${tab.dataset.configSection}"]`);
       if (pane) pane.classList.add('active');
+      if (tab.dataset.configSection === 'integrations') void openChannelPanel();
       if (tab.dataset.configSection === 'observability') loadAudit();
     });
   });
@@ -5206,20 +5159,6 @@
   document.getElementById('btn-export-session')?.addEventListener('click', () => {
     if (!state.currentSessionId) { alert('Nenhuma sessão selecionada'); return; }
     window.open(state.daemonUrl + '/agent/sessions/' + state.currentSessionId + '/export', '_blank');
-  });
-
-  // -- Agent: New Channel -------------------------------------
-  document.getElementById('btn-new-channel')?.addEventListener('click', async () => {
-    const channelId = prompt('Nome/ID do channel (ex: whatsapp, slack, http):');
-    if (!channelId) return;
-    try {
-      await api('/agent/channels/upsert', {
-        method: 'POST',
-        headers: { 'x-channel-protocol-version': 'v1' },
-        body: JSON.stringify({ channel: channelId, enabled: true, accounts: [] }),
-      });
-      loadChannels();
-    } catch (e) { alert('Erro: ' + e.message); }
   });
 
   // -- AI Visual Panel ----------------------------------------

@@ -119,11 +119,28 @@ Credencial mínima:
 }
 ```
 
+Login e probe verificam a identidade do bot com a API do provedor. O envio só
+retorna sucesso após receber a confirmação do serviço.
+
+| Provedor | Identidade | Envio | Confirmação |
+| --- | --- | --- | --- |
+| Telegram | `getMe` | `sendMessage` com ID do chat ou @username | `result.message_id` |
+| Discord | `GET /users/@me` | `POST /channels/{id}/messages` com ID numérico do canal | `id` |
+| Slack | `auth.test` | `chat.postMessage` com ID do canal | `ts` |
+
+O logout encerra a sessão local da conta. O provedor administra a revogação do
+token. [Telegram Bot API](https://core.telegram.org/bots/api) ·
+[Discord Messages](https://docs.discord.com/developers/resources/message#create-message) ·
+[Slack chat.postMessage](https://docs.slack.dev/reference/methods/chat.postMessage/).
+
 ### `native_runtime_v1`
 
 Usada por `whatsapp`.
 
-Sessão QR, auth-dir e reconnect são isolados por conta.
+O helper WhatsApp usa Baileys. Sessão QR, diretório de autenticação e reconexão
+são isolados por conta. O primeiro uso prepara as dependências do helper e
+requer Node.js 22+, npm e acesso ao registro. Para ativação em produção, o
+operador lê o QR com o aplicativo do telefone.
 
 ## Erros canônicos
 
@@ -171,3 +188,18 @@ Versão incompatível:
 ```
 
 O contrato completo por família está em [channel-bridge-protocol-v1.md](/Users/kaike/mlx-ollama-pilot/docs/channel-bridge-protocol-v1.md).
+
+## Reproduzir a validação de transportes
+
+```sh
+cargo build --locked -p mlx-ollama-daemon
+node scripts/release-gate/channels-real-validation.mjs
+node scripts/release-gate/whatsapp-helper-smoke.mjs
+```
+
+O primeiro comando Node testa o catálogo de 20 canais. O daemon usa o cofre
+e o estado de uma conta temporária. Os receptores de teste conferem a mensagem
+que chegou por HTTP ou TCP em cada um dos 19 adaptadores de transporte.
+O caso de WhatsApp exercita o ciclo da sessão local em modo simulado.
+O segundo comando testa o helper distribuído separadamente. O uso de contas
+externas e o pareamento físico exigem credenciais e destinatários de teste.
