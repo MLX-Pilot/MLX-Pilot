@@ -130,7 +130,7 @@ def main():
                     answer = request(daemon_base, '/chat', {
                         'model_id': f'ollama::{args.model}',
                         'messages': [{'role': 'user', 'content': 'Say hello in one short sentence. /no_think'}],
-                        'options': {'temperature': 0, 'max_tokens': 64},
+                        'options': {'temperature': 0, 'max_tokens': 128, 'thinking': False},
                     }, timeout=180)
                     assert answer.get('message', {}).get('content', '').strip(), answer
                     current['answer'] = answer['message']['content']

@@ -1087,7 +1087,9 @@ impl OllamaRuntime {
             .ok()
             .and_then(|bytes| serde_json::from_slice::<ProcessMarker>(&bytes).ok());
         if let Some(marker) = marker {
-            if paths_equal(Path::new(&marker.executable_path), executable)
+            if marker.base_url.trim_end_matches('/') == self.cfg.base_url.trim_end_matches('/')
+                && !process_is_alive(marker.owner_pid).await
+                && paths_equal(Path::new(&marker.executable_path), executable)
                 && process_executable_matches(marker.pid, executable).await
             {
                 warn!(
@@ -1097,6 +1099,7 @@ impl OllamaRuntime {
                 terminate_pid(marker.pid).await?;
                 for _ in 0..20 {
                     if api_version(&self.client, &self.cfg.base_url).await.is_err() {
+                        let _ = fs::remove_file(&marker_path);
                         return Ok(());
                     }
                     sleep(Duration::from_millis(150)).await;
@@ -1113,7 +1116,8 @@ impl OllamaRuntime {
 
     async fn stop_owned_process(&self) {
         let mut process = self.process.lock().await;
-        if let Some(managed) = process.as_mut() {
+        if let Some(mut managed) = process.take() {
+            let owned_pid = managed.child.id();
             info!(
                 executable = %managed.executable.display(),
                 pid = managed.child.id().unwrap_or_default(),
@@ -1121,9 +1125,15 @@ impl OllamaRuntime {
             );
             let _ = managed.child.kill().await;
             let _ = managed.child.wait().await;
+            let marker_path = self.cfg.root.join("process.json");
+            let marker = fs::read(&marker_path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<ProcessMarker>(&bytes).ok());
+            if marker.is_some_and(|m| Some(m.pid) == owned_pid && m.owner_pid == std::process::id())
+            {
+                let _ = fs::remove_file(marker_path);
+            }
         }
-        *process = None;
-        let _ = fs::remove_file(self.cfg.root.join("process.json"));
     }
 
     fn ensure_not_cancelled(&self) -> Result<(), ProviderError> {
@@ -1804,11 +1814,42 @@ fn attach_kill_on_close_job(child: &Child) -> Result<WindowsJob, ProviderError> 
     Ok(job)
 }
 
+async fn process_is_alive(pid: u32) -> bool {
+    if pid == std::process::id() || pid == 0 {
+        return true;
+    }
+    #[cfg(windows)]
+    let mut command = {
+        let mut cmd = Command::new("powershell.exe");
+        silence_console(&mut cmd);
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &format!("if (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{ exit 0 }} else {{ exit 1 }}")]);
+        cmd
+    };
+    #[cfg(unix)]
+    let mut command = {
+        let mut cmd = Command::new("ps");
+        cmd.args(["-p", &pid.to_string(), "-o", "pid="]);
+        cmd
+    };
+    #[cfg(any(windows, unix))]
+    {
+        command
+            .output()
+            .await
+            .map(|o| o.status.success())
+            .unwrap_or(true)
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        true
+    }
+}
+
 async fn process_executable_matches(pid: u32, expected: &Path) -> bool {
     #[cfg(windows)]
     {
         let script = format!(
-            "(Get-CimInstance Win32_Process -Filter \\\"ProcessId={}\\\").ExecutablePath",
+            "(Get-CimInstance Win32_Process -Filter 'ProcessId={}').ExecutablePath",
             pid
         );
         let mut command = Command::new("powershell.exe");
@@ -1828,7 +1869,22 @@ async fn process_executable_matches(pid: u32, expected: &Path) -> bool {
             })
             .unwrap_or(false)
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        fs::read_link(format!("/proc/{pid}/exe")).is_ok_and(|actual| paths_equal(&actual, expected))
+    }
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        let result = Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "comm="])
+            .output()
+            .await;
+        result.ok().filter(|o| o.status.success()).is_some_and(|o| {
+            let actual = String::from_utf8_lossy(&o.stdout);
+            paths_equal(Path::new(actual.trim()), expected)
+        })
+    }
+    #[cfg(not(any(windows, unix)))]
     {
         let _ = (pid, expected);
         false
@@ -1858,12 +1914,29 @@ async fn terminate_pid(pid: u32) -> Result<(), ProviderError> {
             stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
         })
     }
-    #[cfg(not(windows))]
+    #[cfg(unix)]
+    {
+        let result = Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .output()
+            .await
+            .map_err(|source| ProviderError::Io {
+                context: format!("encerrando Ollama obsoleto PID {pid}"),
+                source,
+            })?;
+        if result.status.success() {
+            return Ok(());
+        }
+        Err(ProviderError::CommandFailed {
+            command: format!("kill -TERM {pid}"),
+            stderr: String::from_utf8_lossy(&result.stderr).trim().into(),
+        })
+    }
+    #[cfg(not(any(windows, unix)))]
     {
         let _ = pid;
         Err(ProviderError::Unavailable {
-            details: "recuperacao de processo obsoleto ainda nao suportada nesta plataforma"
-                .to_string(),
+            details: "recuperacao de processo indisponivel nesta plataforma".into(),
         })
     }
 }
@@ -1881,6 +1954,113 @@ mod tests {
     use std::sync::{Mutex as StdMutex, OnceLock};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn new_runtime_does_not_remove_another_instances_process_marker() {
+        let root = std::env::temp_dir().join(format!("mlx-marker-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let marker = root.join("process.json");
+        fs::write(&marker, b"other-instance-marker").unwrap();
+        let runtime = OllamaRuntime::new(OllamaRuntimeConfig {
+            root: root.clone(),
+            models_dir: root.join("models"),
+            base_url: DEFAULT_MANAGED_URL.into(),
+            startup_timeout: Duration::from_secs(1),
+            auto_install: false,
+            auto_start: true,
+        });
+        runtime.stop_owned_process().await;
+        assert_eq!(fs::read(&marker).unwrap(), b"other-instance-marker");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn orphan_recovery_http_peer() {
+        let Ok(address) = std::env::var("MLX_OLLAMA_TEST_ORPHAN_ADDR") else {
+            return;
+        };
+        let listener = std::net::TcpListener::bind(address).unwrap();
+        for socket in listener.incoming() {
+            let mut socket = socket.unwrap();
+            let mut request = [0u8; 2048];
+            let _ = std::io::Read::read(&mut socket, &mut request);
+            let body = r#"{"version":"0.30.7"}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = std::io::Write::write_all(&mut socket, response.as_bytes());
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn orphan_recovery_requires_matching_endpoint_binary_and_dead_owner() {
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = port.local_addr().unwrap();
+        drop(port);
+        let executable = std::env::current_exe().unwrap();
+        let mut peer = Command::new(&executable)
+            .args(["--exact", "runtime::tests::orphan_recovery_http_peer"])
+            .env("MLX_OLLAMA_TEST_ORPHAN_ADDR", address.to_string())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let root = std::env::temp_dir().join(format!("mlx-orphan-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let runtime = OllamaRuntime::new(OllamaRuntimeConfig {
+            root: root.clone(),
+            models_dir: root.join("models"),
+            base_url: format!("http://{address}"),
+            startup_timeout: Duration::from_secs(1),
+            auto_install: false,
+            auto_start: true,
+        });
+        for _ in 0..50 {
+            if api_version(&runtime.client, &runtime.cfg.base_url)
+                .await
+                .is_ok()
+            {
+                break;
+            }
+            sleep(Duration::from_millis(30)).await;
+        }
+        assert!(api_version(&runtime.client, &runtime.cfg.base_url)
+            .await
+            .is_ok());
+        let mut marker = ProcessMarker {
+            pid: peer.id().unwrap(),
+            executable_path: executable.display().to_string(),
+            base_url: runtime.cfg.base_url.clone(),
+            owner_pid: std::process::id(),
+            started_at_epoch_ms: epoch_ms(),
+        };
+        let marker_path = root.join("process.json");
+        write_json_atomic(&marker_path, &marker).unwrap();
+        runtime.stop_owned_process().await;
+        assert!(marker_path.exists());
+        assert!(runtime.resolve_port_conflict(&executable).await.is_err());
+        assert!(peer.try_wait().unwrap().is_none());
+        marker.owner_pid = u32::MAX;
+        marker.base_url = "http://127.0.0.1:1".into();
+        write_json_atomic(&marker_path, &marker).unwrap();
+        assert!(runtime.resolve_port_conflict(&executable).await.is_err());
+        marker.base_url = runtime.cfg.base_url.clone();
+        marker.executable_path = root.join("unrelated").display().to_string();
+        write_json_atomic(&marker_path, &marker).unwrap();
+        assert!(runtime.resolve_port_conflict(&executable).await.is_err());
+        marker.executable_path = executable.display().to_string();
+        write_json_atomic(&marker_path, &marker).unwrap();
+        runtime.resolve_port_conflict(&executable).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(3), peer.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!marker_path.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[tokio::test]
     async fn chat_fails_fast_during_preparation_without_resetting_operation() {

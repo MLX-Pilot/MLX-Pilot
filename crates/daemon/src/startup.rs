@@ -219,7 +219,11 @@ impl StartupCoordinator {
         let first_error = failures.first().and_then(|provider| provider.error.clone());
         let any_ready = applicable.iter().any(|provider| provider.ready);
         let app_ready = terminal || any_ready;
-        let degraded = !failures.is_empty() && any_ready;
+        let degraded = any_ready
+            && (!failures.is_empty()
+                || applicable
+                    .iter()
+                    .any(|provider| provider.phase == "degraded"));
         let failed = terminal && !any_ready;
 
         let (phase, step, message) = if !terminal {
