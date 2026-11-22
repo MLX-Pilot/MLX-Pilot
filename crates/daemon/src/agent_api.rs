@@ -967,11 +967,11 @@ struct SkillIntegrityState {
 // ── Helpers ──────────────────────────────────────────────────────
 
 fn parse_execution_mode(s: Option<&str>) -> ExecutionMode {
-    match s.map(str::to_lowercase).as_deref() {
-        Some("read_only") | Some("readonly") => ExecutionMode::ReadOnly,
-        Some("locked") => ExecutionMode::Locked,
-        Some("dry_run") | Some("dryrun") => ExecutionMode::DryRun,
-        _ => ExecutionMode::Full,
+    match s.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+        None | Some("full") => ExecutionMode::Full,
+        Some("read-only" | "read_only" | "readonly") => ExecutionMode::ReadOnly,
+        Some("dry-run" | "dry_run" | "dryrun") => ExecutionMode::DryRun,
+        _ => ExecutionMode::Locked,
     }
 }
 
@@ -2923,6 +2923,7 @@ struct ResolvedProvider {
 
 #[derive(Clone)]
 struct DelegateExecutor {
+    approval_mode: String,
     state: super::AppState,
     agent_cfg: super::config::AgentUiConfig,
     resolved: ResolvedProvider,
@@ -2970,8 +2971,8 @@ impl crate::agent_runtime_tools::DelegateSessionExecutor for DelegateExecutor {
             fallback_enabled: Some(false),
             fallback_provider: None,
             fallback_model_id: None,
-            execution_mode: Some("full".to_string()),
-            approval_mode: Some(self.agent_cfg.approval_mode.clone()),
+            execution_mode: Some(ctx.mode.as_str().to_owned()),
+            approval_mode: Some(self.approval_mode.clone()),
             system_prompt: Some(build_delegate_system_prompt(
                 request.goal.as_deref(),
                 request.handoff_summary.as_deref(),
@@ -3315,6 +3316,10 @@ fn build_tool_registry(
     );
     let delegate_executor = if runtime_variant == RuntimeVariant::HermesInspired {
         Some(Arc::new(DelegateExecutor {
+            approval_mode: request
+                .approval_mode
+                .clone()
+                .unwrap_or_else(|| agent_cfg.approval_mode.clone()),
             state: state.clone(),
             agent_cfg: agent_cfg.clone(),
             resolved: resolved.clone(),
@@ -3582,7 +3587,7 @@ async fn run_agent_once(
             .as_deref()
             .or(Some(agent_cfg.approval_mode.as_str())),
     );
-    state.agent_state.approval.set_mode(approval_mode);
+    let run_approval = Arc::new(state.agent_state.approval.for_run(approval_mode));
 
     let known_skill_hashes = load_skill_integrity_state();
     let tool_policy = build_tool_policy_state(
@@ -3762,7 +3767,7 @@ async fn run_agent_once(
                 tool_registry,
                 skill_runtime,
                 policy,
-                state.agent_state.approval.clone(),
+                run_approval.clone(),
                 state.agent_state.event_bus.clone(),
                 state.agent_state.audit.clone(),
             );
@@ -3831,7 +3836,7 @@ async fn run_agent_once(
                     tool_registry,
                     skill_runtime,
                     policy,
-                    state.agent_state.approval.clone(),
+                    run_approval,
                     state.agent_state.audit.clone(),
                     &request.message,
                 )
@@ -5704,6 +5709,29 @@ mod tests {
     use super::*;
     use std::sync::{Mutex, OnceLock};
     use tempfile::tempdir;
+
+    #[test]
+    fn execution_modes_round_trip_for_desktop_and_delegated_runs() {
+        for mode in [
+            ExecutionMode::Full,
+            ExecutionMode::ReadOnly,
+            ExecutionMode::DryRun,
+            ExecutionMode::Locked,
+        ] {
+            assert_eq!(parse_execution_mode(Some(mode.as_str())), mode);
+        }
+        for value in ["read-only", "read_only", "ReadOnly"] {
+            assert_eq!(parse_execution_mode(Some(value)), ExecutionMode::ReadOnly);
+        }
+        for value in ["dry-run", "dry_run", "DryRun"] {
+            assert_eq!(parse_execution_mode(Some(value)), ExecutionMode::DryRun);
+        }
+        assert_eq!(parse_execution_mode(None), ExecutionMode::Full);
+        assert_eq!(
+            parse_execution_mode(Some(" future-mode ")),
+            ExecutionMode::Locked
+        );
+    }
 
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();

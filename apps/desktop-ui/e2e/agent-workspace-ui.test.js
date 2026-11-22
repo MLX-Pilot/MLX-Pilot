@@ -58,6 +58,7 @@ function createFixture({
   cachedModels,
   cachedCurrentModel,
   agentConfigResponse,
+  beforeAgentConfigSave,
   environmentResponseHidden,
   environmentResponseRevealed,
   catalogModelsResponse,
@@ -295,6 +296,8 @@ function createFixture({
     }
 
     if (path === "/agent/config" && method === "POST") {
+      await beforeAgentConfigSave?.(body);
+      agentConfigResponse = body;
       return jsonResponse(body);
     }
 
@@ -729,6 +732,92 @@ test("agent workspace boots with live summary and toggles config tab", async () 
   }
 });
 
+test("carregar ou abrir políticas reflete os modos salvos sem gravar configuração", async () => {
+  for (const [execution, choice, approval, approvalChoice] of [
+    ["locked", "locked", "risk_based", "risk_based"],
+    ["read_only", "read-only", "risk-based", "risk_based"],
+    ["read-only", "read-only", "ask", "ask"],
+    ["readonly", "read-only", "auto", "auto"],
+    ["dry_run", "dry-run", "deny", "deny"],
+    ["dry-run", "dry-run", "ask", "ask"],
+    ["dryrun", "dry-run", "deny", "deny"],
+    ["full", "full", "auto", "auto"],
+    ["compat-mode", null, "compat-approver", null],
+  ]) {
+    const fixture = createFixture({ agentConfigResponse: {
+      provider: "ollama", model_id: "qwen3.5:9b", execution_mode: execution, approval_mode: approval,
+    } });
+    try {
+      await flush(8);
+      const { document } = fixture;
+      document.querySelector('.tab[data-panel="agent"]').click();
+      document.getElementById("agent-policy-control").click();
+      await flush();
+      assert.equal(fixture.fetchCalls.filter(x => x.path === "/agent/config" && x.method === "POST").length, 0);
+      for (const [name, expected, raw] of [["exec", choice, execution], ["approval", approvalChoice, approval]]) {
+        const active = document.querySelector(`input[name="${name}"]:checked`);
+        assert.equal(active?.value ?? null, expected);
+        assert.equal(document.querySelector(`.radio-card.selected input[name="${name}"]`), active);
+        if (!active) assert.ok(document.getElementById(`agent-${name}-unknown`).textContent.includes(raw));
+      }
+    } finally {
+      fixture.cleanup();
+    }
+  }
+});
+
+test("mudanças explícitas de política preservam os demais campos e a ordem dos cliques", async () => {
+  let allowFirst;
+  const held = new Promise(resolve => { allowFirst = resolve; });
+  let saves = 0;
+  const fixture = createFixture({
+    agentConfigResponse: {
+      provider: "ollama", model_id: "qwen3.5:9b", execution_mode: "read_only", approval_mode: "compat-approver",
+      temperature: 0.3,
+    },
+    beforeAgentConfigSave: () => ++saves === 1 ? held : undefined,
+  });
+  try {
+    await flush(8);
+    const { document } = fixture;
+    const writes = () => fixture.fetchCalls.filter(x => x.path === "/agent/config" && x.method === "POST").map(x => x.body);
+    document.querySelector('input[name="approval"][value="risk_based"]').click();
+    document.querySelector('input[name="exec"][value="locked"]').click();
+    await flush();
+    assert.deepEqual(writes().map(x => [x.execution_mode, x.approval_mode]), [["read_only", "risk_based"]]);
+    allowFirst();
+    await flush(8);
+    assert.deepEqual(writes().map(x => [x.execution_mode, x.approval_mode]), [
+      ["read_only", "risk_based"], ["locked", "risk_based"],
+    ]);
+    assert.ok(writes().every(x => x.temperature === 0.3));
+    assert.equal(document.getElementById("agent-composer-policy").textContent, "Bloqueado");
+    assert.match(document.getElementById("agent-policy-control").getAttribute("aria-label"), /Por risco/);
+  } finally {
+    allowFirst();
+    fixture.cleanup();
+  }
+});
+
+test("salvar um modo preserva uma política desconhecida no outro grupo", async () => {
+  const fixture = createFixture({ agentConfigResponse: {
+    provider: "ollama", model_id: "qwen3.5:9b", execution_mode: "future-mode", approval_mode: "future-approval",
+  } });
+  try {
+    await flush(8);
+    fixture.document.getElementById("agent-save-provider-profiles").click();
+    await flush();
+    fixture.document.querySelector('input[name="exec"][value="dry-run"]').click();
+    await flush();
+    const writes = fixture.fetchCalls.filter(x => x.path === "/agent/config" && x.method === "POST");
+    assert.deepEqual(writes.map(x => [x.body.execution_mode, x.body.approval_mode]), [
+      ["future-mode", "future-approval"], ["dry-run", "future-approval"],
+    ]);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test("histórico do agente reabre a conversa e mantém o foco ao navegar pelo teclado", async () => {
   const fixture = createFixture();
   try {
@@ -802,6 +891,8 @@ test("agent workspace freeform submits runs and creates sessions", async () => {
     const runCall = fixture.fetchCalls.find((entry) => entry.path === "/agent/stream");
     assert.ok(runCall);
     assert.equal(runCall.body.model_id, "ollama::qwen3.5:9b");
+    assert.ok(!Object.hasOwn(runCall.body, "execution_mode"));
+    assert.ok(!Object.hasOwn(runCall.body, "approval_mode"));
     assert.match(fixture.document.getElementById("agent-chat-messages")?.textContent || "", /Resposta do agent/);
     assert.match(fixture.document.getElementById("agent-chat-messages")?.textContent || "", /read_file/);
     assert.match(fixture.document.querySelector("#agent-chat-messages .thinking-content")?.textContent || "", /Validando politica final/);

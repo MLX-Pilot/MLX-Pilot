@@ -424,20 +424,24 @@
                         </p>
                       </div>
                       <div class="policy-card">
-                        <h4>Execution Mode</h4>
-                        <div class="radio-cards compact">
-                          <label class="radio-card selected"><input type="radio" name="exec" value="full" checked /><div class="radio-card-body"><span class="radio-card-name">Full</span></div></label>
-                          <label class="radio-card"><input type="radio" name="exec" value="read-only" /><div class="radio-card-body"><span class="radio-card-name">Read-only</span></div></label>
-                          <label class="radio-card"><input type="radio" name="exec" value="dry-run" /><div class="radio-card-body"><span class="radio-card-name">Dry-run</span></div></label>
+                        <h4 id="agent-exec-heading">Execução</h4>
+                        <div class="radio-cards compact agent-policy-options" role="radiogroup" aria-labelledby="agent-exec-heading">
+                          <label class="radio-card"><input type="radio" name="exec" value="locked" disabled /><span class="radio-card-body"><span class="radio-card-name">Bloqueado</span></span></label>
+                          <label class="radio-card"><input type="radio" name="exec" value="read-only" disabled /><span class="radio-card-body"><span class="radio-card-name">Somente leitura</span></span></label>
+                          <label class="radio-card"><input type="radio" name="exec" value="dry-run" disabled /><span class="radio-card-body"><span class="radio-card-name">Simulação</span></span></label>
+                          <label class="radio-card"><input type="radio" name="exec" value="full" disabled /><span class="radio-card-body"><span class="radio-card-name">Completo</span></span></label>
                         </div>
+                        <span class="meta-note" id="agent-exec-unknown" hidden></span>
                       </div>
                       <div class="policy-card">
-                        <h4>Approval Mode</h4>
-                        <div class="radio-cards compact">
-                          <label class="radio-card"><input type="radio" name="approval" value="auto" /><div class="radio-card-body"><span class="radio-card-name">Auto</span></div></label>
-                          <label class="radio-card selected"><input type="radio" name="approval" value="ask" checked /><div class="radio-card-body"><span class="radio-card-name">Ask</span></div></label>
-                          <label class="radio-card"><input type="radio" name="approval" value="deny" /><div class="radio-card-body"><span class="radio-card-name">Deny</span></div></label>
+                        <h4 id="agent-approval-heading">Aprovação</h4>
+                        <div class="radio-cards compact agent-policy-options" role="radiogroup" aria-labelledby="agent-approval-heading">
+                          <label class="radio-card"><input type="radio" name="approval" value="deny" disabled /><span class="radio-card-body"><span class="radio-card-name">Negar</span></span></label>
+                          <label class="radio-card"><input type="radio" name="approval" value="ask" disabled /><span class="radio-card-body"><span class="radio-card-name">Solicitar</span></span></label>
+                          <label class="radio-card"><input type="radio" name="approval" value="risk_based" disabled /><span class="radio-card-body"><span class="radio-card-name">Por risco</span></span></label>
+                          <label class="radio-card"><input type="radio" name="approval" value="auto" disabled /><span class="radio-card-body"><span class="radio-card-name">Automática</span></span></label>
                         </div>
+                        <span class="meta-note" id="agent-approval-unknown" hidden></span>
                       </div>
                       <div class="policy-card full-width">
                         <h4>Tools Disponiveis</h4>
