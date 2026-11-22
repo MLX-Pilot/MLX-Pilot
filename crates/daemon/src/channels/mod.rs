@@ -937,6 +937,7 @@ impl ChannelService {
         request: LegacyChannelRemoveRequest,
     ) -> Result<(), String> {
         let channel_id = self.resolve_channel_id(&request.channel_id)?;
+        let _guard = self.config_updates.lock().await;
         let mut cfg = self.load_config();
         self.migrate_legacy_channels(&mut cfg);
         cfg.compatibility.channels.remove(&channel_id);

@@ -210,7 +210,7 @@ export async function runLoadSmoke() {
     return {
       block: "load_smoke",
       title: "Bloco 2 - Carga curta e concorrencia",
-      status: !crashDetected && !criticalLogHit ? "pass" : "fail",
+      status: !crashDetected && !criticalLogHit && erroringRuns.length === 0 ? "pass" : "fail",
       summary: {
         endpoint_batches: endpointRuns.length,
         crash_detected: crashDetected,
@@ -218,6 +218,8 @@ export async function runLoadSmoke() {
         functional_health_after_load: finalProbe[0]?.status || "unknown",
       },
       blockers: [
+        ...erroringRuns.map(({ endpoint, metrics }) =>
+          `Falha em ${endpoint} com concorrência ${metrics.concurrency}: HTTP ${JSON.stringify(metrics.status_codes)}.`),
         ...(crashDetected ? ["Daemon encerrou durante o teste de carga."] : []),
         ...(criticalLogHit ? [`Log do daemon contem marcador critico: ${criticalLogHit}.`] : []),
       ],
