@@ -59,6 +59,35 @@ jobs:
           path: ${{ runner.temp }}/plugin-security-audit
           if-no-files-found: error
 
+      - name: Install the Reading Notes build tools
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl --fail --silent --show-error --location --retry 3 -o extism.gz https://github.com/extism/js-pdk/releases/download/v1.7.0/extism-js-x86_64-linux-v1.7.0.gz
+          echo '63b72da2f5e88655522dc21477de549f238a2f40546a69ce4e0fce7e78654035  extism.gz' | sha256sum --check
+          curl --fail --silent --show-error --location --retry 3 -o binaryen.tar.gz https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-linux.tar.gz
+          echo '2dc9c7813f5375db93d96ead4b78222fcc3e2677bbb832297af4797782a37489  binaryen.tar.gz' | sha256sum --check
+          tar xzf binaryen.tar.gz
+          gzip -dc extism.gz > binaryen-version_133/bin/extism-js
+          chmod +x binaryen-version_133/bin/extism-js
+          echo "$PWD/binaryen-version_133/bin" >> "$GITHUB_PATH"
+      - name: Build the plugin and install Chromium
+        run: |
+          npm ci --prefix plugins/reading-notes
+          npm run build --prefix plugins/reading-notes
+          npm run pack --prefix plugins/reading-notes
+          npm exec --prefix apps/desktop-ui -- playwright install --with-deps chromium
+      - name: Exercise Reading Notes and Presentation Studio in Chromium
+        env:
+          RELEASE_GATE_OUTPUT_DIR: ${{ runner.temp }}/plugin-browser
+        run: node scripts/release-gate/plugin-browser-smoke.mjs
+      - name: Preserve browser recording, exports and results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-browser
+          path: ${{ runner.temp }}/plugin-browser
+          if-no-files-found: error
+
   preview-servers:
     name: Preview Servers
     runs-on: ubuntu-latest

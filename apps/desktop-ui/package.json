@@ -11,6 +11,8 @@
     "test:e2e:agent-workspace-ui": "node --test e2e/agent-workspace-ui.test.js"
   },
   "devDependencies": {
-    "jsdom": "^26.1.0"
+    "jsdom": "^26.1.0",
+    "jszip": "3.10.1",
+    "playwright": "1.65.1"
   }
 }
