@@ -2876,7 +2876,16 @@ mod tests {
 
     #[test]
     fn account_storage_requires_a_single_portable_name() {
-        for name in ["", ".", "..", "two/names", "two\\names", "NUL", "test.", "COM1.txt"] {
+        for name in [
+            "",
+            ".",
+            "..",
+            "two/names",
+            "two\\names",
+            "NUL",
+            "test.",
+            "COM1.txt",
+        ] {
             assert!(validate_account_id(name).is_err(), "{name:?}");
         }
         assert!(validate_account_id("team-são.2026").is_ok());
@@ -2888,31 +2897,81 @@ mod tests {
         let service = ChannelService::new(dir.path().join("settings.json"));
         let upsert = |id: &str, extra: Value| {
             let mut data = json!({ "channel": "mattermost", "account_id": id });
-            data.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            data.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
             serde_json::from_value::<ChannelUpsertAccountRequest>(data).unwrap()
         };
         let first = json!({"webhook_url": "http://127.0.0.1:1/ops"});
-        service.upsert_account(upsert("ops", json!({"credentials": first, "set_as_default": true}))).await.unwrap();
-        let disabled = service.upsert_account(upsert("ops", json!({"enabled": false}))).await.unwrap();
+        service
+            .upsert_account(upsert(
+                "ops",
+                json!({"credentials": first, "set_as_default": true}),
+            ))
+            .await
+            .unwrap();
+        let disabled = service
+            .upsert_account(upsert("ops", json!({"enabled": false})))
+            .await
+            .unwrap();
         assert!(!disabled.accounts[0].enabled);
-        let auth = ChannelAuthRequest { channel: "mattermost".into(), account_id: "ops".into() };
-        assert!(service.login(auth).await.unwrap_err().starts_with("permission_error"));
-        let send: MessageSendRequest = serde_json::from_value(json!({"channel":"mattermost","target":"room","message":"check"})).unwrap();
-        assert!(service.send_message(send).await.unwrap_err().starts_with("permission_error"));
+        let auth = ChannelAuthRequest {
+            channel: "mattermost".into(),
+            account_id: "ops".into(),
+        };
+        assert!(service
+            .login(auth)
+            .await
+            .unwrap_err()
+            .starts_with("permission_error"));
+        let send: MessageSendRequest = serde_json::from_value(
+            json!({"channel":"mattermost","target":"room","message":"check"}),
+        )
+        .unwrap();
+        assert!(service
+            .send_message(send)
+            .await
+            .unwrap_err()
+            .starts_with("permission_error"));
         let other_ref = json!({"credentials_ref": "channels.mattermost.ops.credentials"});
-        assert!(service.upsert_account(upsert("another", other_ref)).await.unwrap_err().starts_with("permission_error"));
+        assert!(service
+            .upsert_account(upsert("another", other_ref))
+            .await
+            .unwrap_err()
+            .starts_with("permission_error"));
 
-        let rename = ChannelRenameAccountRequest { channel: "mattermost".into(), account_id: "ops".into(), new_account_id: "team".into() };
+        let rename = ChannelRenameAccountRequest {
+            channel: "mattermost".into(),
+            account_id: "ops".into(),
+            new_account_id: "team".into(),
+        };
         let renamed = service.rename_account(rename).await.unwrap();
         assert_eq!(renamed.default_account_id.as_deref(), Some("team"));
         assert_eq!(renamed.accounts.len(), 1);
         let second = json!({"webhook_url": "http://127.0.0.1:1/other"});
-        service.upsert_account(upsert("ops", json!({"credentials": second}))).await.unwrap();
-        service.remove_account(ChannelRemoveAccountRequest { channel: "mattermost".into(), account_id: "ops".into() }).await.unwrap();
+        service
+            .upsert_account(upsert("ops", json!({"credentials": second})))
+            .await
+            .unwrap();
+        service
+            .remove_account(ChannelRemoveAccountRequest {
+                channel: "mattermost".into(),
+                account_id: "ops".into(),
+            })
+            .await
+            .unwrap();
         let reloaded = ChannelService::new(dir.path().join("settings.json"));
-        let available = reloaded.upsert_account(upsert("team", json!({"enabled":true}))).await.unwrap();
+        let available = reloaded
+            .upsert_account(upsert("team", json!({"enabled":true})))
+            .await
+            .unwrap();
         assert!(available.accounts[0].enabled);
-        assert_eq!(reloaded.load_credentials(available.accounts[0].credentials_ref.as_deref()).unwrap(), Some(first));
+        assert_eq!(
+            reloaded
+                .load_credentials(available.accounts[0].credentials_ref.as_deref())
+                .unwrap(),
+            Some(first)
+        );
     }
 
     #[tokio::test]
@@ -2920,14 +2979,24 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let service = ChannelService::new(dir.path().join("settings.json"));
         let count = std::sync::atomic::AtomicUsize::new(0);
-        let policy = ChannelAccountPolicy { max_retries: 2, backoff_base_ms: 1, ..Default::default() };
+        let policy = ChannelAccountPolicy {
+            max_retries: 2,
+            backoff_base_ms: 1,
+            ..Default::default()
+        };
         let attempt = || {
             count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             async { Err::<(), _>("network_error: connection closed".to_string()) }
         };
-        assert!(service.execute_with_policy("mattermost", "ops", "send_message", None, &policy, attempt).await.is_err());
+        assert!(service
+            .execute_with_policy("mattermost", "ops", "send_message", None, &policy, attempt)
+            .await
+            .is_err());
         assert_eq!(count.load(std::sync::atomic::Ordering::Relaxed), 1);
-        assert!(service.execute_with_policy("mattermost", "ops", "probe", None, &policy, attempt).await.is_err());
+        assert!(service
+            .execute_with_policy("mattermost", "ops", "probe", None, &policy, attempt)
+            .await
+            .is_err());
         assert_eq!(count.load(std::sync::atomic::Ordering::Relaxed), 4);
     }
 

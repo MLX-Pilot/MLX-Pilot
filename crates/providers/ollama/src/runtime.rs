@@ -342,6 +342,18 @@ impl OllamaRuntime {
     }
 
     async fn prepare_inner(&self, selected_model: Option<&str>) -> Result<(), ProviderError> {
+        if !self.cfg.auto_start {
+            // The configured endpoint owns its process and model storage in this mode.
+            // A remote Ollama server needs neither a local executable nor an installer.
+            let version = api_version(&self.client, &self.cfg.base_url).await?;
+            self.update_status(|status| {
+                status.process_origin = "external".to_string();
+                status.external_server_detected = true;
+                status.external_server_version = Some(version.clone());
+            })
+            .await;
+            return self.validate_serving_runtime(version, selected_model).await;
+        }
         fs::create_dir_all(&self.cfg.root).map_err(|source| ProviderError::Io {
             context: format!("criando runtime Ollama em {}", self.cfg.root.display()),
             source,
@@ -433,13 +445,6 @@ impl OllamaRuntime {
             }
             Err(error) => return Err(error),
         };
-
-        if !self.cfg.auto_start {
-            return Err(ProviderError::Unavailable {
-                details: "runtime Ollama pronto, mas inicializacao automatica esta desativada"
-                    .to_string(),
-            });
-        }
 
         let startup = self
             .start_and_validate(&executable, selected_model, false, process_origin)
@@ -948,12 +953,22 @@ impl OllamaRuntime {
         }
 
         let version = api_version(&self.client, &self.cfg.base_url).await?;
+        self.validate_serving_runtime(version, selected_model)
+            .await?;
+        self.persist_last_validation().await;
+        Ok(())
+    }
+
+    async fn validate_serving_runtime(
+        &self,
+        version: String,
+        selected_model: Option<&str>,
+    ) -> Result<(), ProviderError> {
         require_compatible_version(&version)?;
         if let Some(model) = selected_model.filter(|value| !value.trim().is_empty()) {
             self.validate_model(model).await?;
         }
 
-        self.persist_last_validation().await;
         self.update_status(|status| {
             status.phase = RuntimePhase::Ready;
             status.step = "ready".to_string();
@@ -2010,6 +2025,67 @@ mod tests {
         assert!(!runtime.status().await.provider_ready);
         server.await.unwrap();
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn external_endpoint_validates_version_and_model_before_any_local_bootstrap() {
+        for version in [MANAGED_OLLAMA_VERSION, "0.16.2"] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let compatible = version == MANAGED_OLLAMA_VERSION;
+            let server = tokio::spawn(async move {
+                let mut replies =
+                    vec![("GET /api/version ", serde_json::json!({"version":version}))];
+                if compatible {
+                    replies.push((
+                        "GET /api/tags ",
+                        serde_json::json!({"models":[{"name":"tiny"}]}),
+                    ));
+                    replies.push(("POST /api/generate ", serde_json::json!({"done":true})));
+                }
+                for (route, payload) in replies {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    let mut buf = [0u8; 2048];
+                    let n = socket.read(&mut buf).await.unwrap();
+                    assert!(String::from_utf8_lossy(&buf[..n]).starts_with(route));
+                    let body = payload.to_string();
+                    let reply = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                    socket.write_all(reply.as_bytes()).await.unwrap();
+                }
+            });
+            let root = std::env::temp_dir().join(format!("mlx-external-ollama-{}", Uuid::new_v4()));
+            let runtime = OllamaRuntime::new(OllamaRuntimeConfig {
+                root: root.clone(),
+                models_dir: root.join("models"),
+                base_url: format!("http://{address}"),
+                startup_timeout: Duration::from_secs(2),
+                auto_install: true,
+                auto_start: false,
+            });
+            let result = runtime.prepare(Some("tiny".into())).await;
+            let state = runtime.status().await;
+            if compatible {
+                result.unwrap();
+                assert_eq!(state.phase, RuntimePhase::Ready);
+                assert_eq!(state.model_available, Some(true));
+            } else {
+                assert!(is_incompatible_server_version(&result.unwrap_err()));
+                assert_eq!(state.phase, RuntimePhase::Failed);
+            }
+            assert_eq!(state.provider_ready, compatible);
+            assert_eq!(state.external_server_version.as_deref(), Some(version));
+            assert!(state.external_server_detected);
+            assert_eq!(state.process_origin, "external");
+            assert!(state.executable_path.is_none() && state.pid.is_none());
+            for file in ["install.lock", "process.json", "active.json", "models"] {
+                assert!(!root.join(file).exists());
+            }
+            tokio::time::timeout(Duration::from_secs(2), server)
+                .await
+                .unwrap()
+                .unwrap();
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]

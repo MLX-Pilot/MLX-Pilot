@@ -75,3 +75,27 @@ Comandos executados:
 
 Resultado:
 - todos passaram neste workspace em `2026-04-18`
+
+## Aceite de chat e runtime em novembro de 2026
+
+A UI trata texto das mensagens, trechos de código e atributos como dados ao
+renderizar o Markdown. Links aceitam HTTP, HTTPS e e-mail. A regressão envia
+uma resposta em streaming com aspas e parâmetros na URL, um destino local e
+uma anotação entre sinais de menor e maior. Ela verifica o DOM que o usuário
+recebe.
+
+O bloco `security_audit_smoke` exercita as rotas HTTP do daemon com serviços
+de inferência em loopback. Ele verifica a rejeição de entradas inválidas antes
+da inferência, o fluxo permitido e negado de execução de ferramentas e o uso
+do cofre para segredos do agente, dos canais e das skills. Os resultados de
+execução e a revisão testada estão no [relatório do gate](release-gate-report.md).
+
+Para repetir as verificações com a candidata compilada e as dependências da UI
+instaladas, execute os comandos na raiz do repositório.
+
+```sh
+cargo build --locked -p mlx-ollama-daemon
+npm ci --prefix apps/desktop-ui
+node --test apps/desktop-ui/e2e/agent-workspace-ui.test.js
+node scripts/release-gate/security-audit-smoke.mjs
+```

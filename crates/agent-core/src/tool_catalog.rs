@@ -466,7 +466,7 @@ pub fn resolve_tool_access(
         matched: true,
     }];
 
-    apply_rules(
+    let globally_denied = apply_rules(
         &mut allowed,
         &mut final_rule,
         &mut trace,
@@ -475,28 +475,32 @@ pub fn resolve_tool_access(
         &entry.name,
     );
 
-    let normalized_agent = normalize_scope_key(agent_id);
-    if let Some(rules) = policy.agents.get(&normalized_agent) {
-        apply_rules(
-            &mut allowed,
-            &mut final_rule,
-            &mut trace,
-            &format!("agent:{normalized_agent}"),
-            rules,
-            &entry.name,
-        );
-    }
-
-    if let Some(session) = session_id.map(normalize_scope_key) {
-        if let Some(rules) = policy.sessions.get(&session) {
+    // Global prohibitions apply to every agent and session. Narrower overrides still
+    // refine the profile and global grants for other tools.
+    if !globally_denied {
+        let normalized_agent = normalize_scope_key(agent_id);
+        if let Some(rules) = policy.agents.get(&normalized_agent) {
             apply_rules(
                 &mut allowed,
                 &mut final_rule,
                 &mut trace,
-                &format!("session:{session}"),
+                &format!("agent:{normalized_agent}"),
                 rules,
                 &entry.name,
             );
+        }
+
+        if let Some(session) = session_id.map(normalize_scope_key) {
+            if let Some(rules) = policy.sessions.get(&session) {
+                apply_rules(
+                    &mut allowed,
+                    &mut final_rule,
+                    &mut trace,
+                    &format!("session:{session}"),
+                    rules,
+                    &entry.name,
+                );
+            }
         }
     }
 
@@ -625,7 +629,7 @@ fn apply_rules(
     scope: &str,
     rules: &ToolRuleSet,
     tool_name: &str,
-) {
+) -> bool {
     if let Some(rule) = first_match(&rules.allow, tool_name) {
         *allowed = true;
         *final_rule = format!("{scope}:allow:{rule}");
@@ -646,7 +650,9 @@ fn apply_rules(
             rule,
             matched: true,
         });
+        return true;
     }
+    false
 }
 
 fn first_match(patterns: &[String], tool_name: &str) -> Option<String> {
@@ -711,6 +717,28 @@ mod tests {
 
         assert!(decision.allowed);
         assert_eq!(decision.final_rule, "session:s-1:allow:exec");
+    }
+
+    #[test]
+    fn global_deny_remains_effective_for_agent_and_session() {
+        let allow = ToolRuleSet {
+            allow: vec!["read_file".into()],
+            ..Default::default()
+        };
+        let policy = ToolPolicyState {
+            profile: ToolProfileName::Full,
+            global: ToolRuleSet {
+                deny: vec!["read_*".into()],
+                ..Default::default()
+            },
+            agents: BTreeMap::from([("default".into(), allow.clone())]),
+            sessions: BTreeMap::from([("s-1".into(), allow)]),
+        };
+        for session in [None, Some("s-1")] {
+            let decision = resolve_tool_access("read_file", &policy, "default", session, None);
+            assert!(!decision.allowed);
+            assert_eq!(decision.final_rule, "global:deny:read_*");
+        }
     }
 
     #[test]

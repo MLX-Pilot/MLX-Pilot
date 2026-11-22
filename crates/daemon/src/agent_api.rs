@@ -3095,9 +3095,7 @@ fn resolve_provider(
     let provider_id = provider.trim().to_ascii_lowercase();
     let normalized_model = normalize_agent_model_id(&provider_id, model_id);
     let model = normalized_model.trim();
-    if model.is_empty() {
-        return Err(AgentApiError::bad_request("model_id cannot be empty"));
-    }
+    crate::chat_input::validate_model_id(model_id).map_err(AgentApiError::bad_request)?;
 
     let runtime = configured_runtime(api_key, base_url, headers);
 
@@ -3770,7 +3768,7 @@ async fn run_agent_once(
             );
 
             let response = agent
-                .run(request.message.trim())
+                .run(&request.message)
                 .await
                 .map_err(AgentApiError::from_agent_error)?;
 
@@ -3835,7 +3833,7 @@ async fn run_agent_once(
                     policy,
                     state.agent_state.approval.clone(),
                     state.agent_state.audit.clone(),
-                    request.message.trim(),
+                    &request.message,
                 )
                 .await
                 .map(|result| {
@@ -3880,10 +3878,8 @@ pub(crate) async fn execute_agent_request(
     request: AgentRunRequest,
 ) -> Result<AgentRunResponse, AgentApiError> {
     let started_at = Instant::now();
+    crate::chat_input::validate_agent(&request).map_err(AgentApiError::bad_request)?;
     let message = request.message.trim();
-    if message.is_empty() {
-        return Err(AgentApiError::bad_request("message cannot be empty"));
-    }
 
     let cfg = super::config::AppConfig::load_settings().apply_env();
     let agent_cfg = cfg.agent.clone();
@@ -4093,12 +4089,16 @@ pub(crate) async fn execute_agent_request(
 
 /// POST /agent/run — run the agent loop and return the final response.
 fn gateway_event_message(request: &AgentGatewayEventRequest) -> Option<String> {
-    first_non_empty([
+    [
         request.message.as_deref(),
         request.text.as_deref(),
         request.prompt.as_deref(),
         request.input.as_deref(),
-    ])
+    ]
+    .into_iter()
+    .flatten()
+    .find(|value| !value.trim().is_empty())
+    .map(str::to_owned)
 }
 
 fn first_non_empty<'a>(values: impl IntoIterator<Item = Option<&'a str>>) -> Option<String> {
@@ -4248,9 +4248,7 @@ pub async fn agent_stream(
     State(state): State<super::AppState>,
     Json(mut request): Json<AgentRunRequest>,
 ) -> Result<Response, AgentApiError> {
-    if request.message.trim().is_empty() {
-        return Err(AgentApiError::bad_request("message cannot be empty"));
-    }
+    crate::chat_input::validate_agent(&request).map_err(AgentApiError::bad_request)?;
 
     let session_id = request
         .session_id
@@ -5926,6 +5924,16 @@ mod tests {
 
         assert!(!exec.allowed);
         assert_eq!(exec.final_rule, "session:session-a:deny:exec");
+    }
+
+    #[test]
+    fn gateway_message_keeps_original_markdown_and_alias_priority() {
+        let prompt = "    trecho preservado\n\tsegunda linha 🌳\n";
+        let request: AgentGatewayEventRequest = serde_json::from_value(json!({
+            "message": "  ", "text": prompt, "input": "fallback"
+        }))
+        .unwrap();
+        assert_eq!(gateway_event_message(&request).as_deref(), Some(prompt));
     }
 
     fn test_agent_request() -> AgentRunRequest {
