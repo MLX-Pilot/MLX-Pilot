@@ -1134,15 +1134,14 @@
   async function probeDaemon(url, timeoutMs = 1200) {
     if (!url) return null;
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
       const response = await fetch(url + '/health', {
         method: 'GET',
         headers: { Accept: 'application/json' },
         signal: controller.signal,
       });
-      clearTimeout(timeoutId);
 
       if (!response.ok) return null;
       const text = await response.text();
@@ -1150,6 +1149,8 @@
       return JSON.parse(text);
     } catch {
       return null;
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 
@@ -1168,7 +1169,15 @@
     );
 
     for (const candidate of candidates) {
-      const health = await probeDaemon(candidate);
+      let health = await probeDaemon(candidate);
+      // The embedded daemon starts on a separate thread and may bind after WKWebView loads.
+      if (!health && injectedUrl && candidate === injectedUrl) {
+        for (const waitMs of [200, 400, 800, 1200, 1600]) {
+          await new Promise(resolve => setTimeout(resolve, waitMs));
+          health = await probeDaemon(candidate);
+          if (health) break;
+        }
+      }
       if (!health) continue;
 
       state.daemonUrl = candidate;
@@ -1241,7 +1250,7 @@
     const degraded = phase === 'degraded';
     const starting = phase === 'starting'
       || ['checking', 'downloading', 'installing', 'updating', 'validating'].includes(phase);
-    const label = online ? 'Online' : degraded ? 'Degradado' : starting ? 'Iniciando' : 'Offline';
+    const label = online ? 'Online' : degraded ? 'Degradado' : starting ? 'Iniciando' : phase === 'failed' ? 'Sem runtime' : 'Offline';
     const badge = document.getElementById('status-badge');
     if (badge) {
       badge.innerHTML = `<span class="badge-dot ${online ? 'online' : 'offline'}"></span><span>${label}</span>`;
@@ -1256,7 +1265,7 @@
       runtimeBadge.classList.toggle('status-offline', !online);
     }
 
-    updateSidebarConnectionStatus(online);
+    updateSidebarConnectionStatus(phase !== 'offline');
     updateAgentWorkspaceSummary();
   }
 
@@ -1299,26 +1308,52 @@
     return state.plugins.filter(plugin => plugin.enabled).length;
   }
 
+  let renderedAgentSession = null;
+  let agentHistoryRequest = 0;
+
   function renderAgentChatEmptyState() {
     const box = document.getElementById('agent-chat-messages');
-    if (!box) return;
-    box.innerHTML = `
-      <div class="agent-chat-empty">
-        <div class="agent-chat-empty-icon">
-          <svg viewBox="0 0 48 48" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5">
-            <rect x="8" y="8" width="32" height="24" rx="8" />
-            <path d="M16 18h16M16 24h10M20 32l-4 8" />
-          </svg>
-        </div>
-        <h3>Converse com o Agent</h3>
-        <p>Use a lista lateral para trocar de sessao e mantenha a conversa operacional no painel principal.</p>
-      </div>`;
+    const template = document.getElementById('agent-empty-template');
+    if (!box || !template) return;
+    renderedAgentSession = state.currentSessionId;
+    agentHistoryRequest++;
+    box.replaceChildren(template.content.cloneNode(true));
+  }
+
+  async function loadAgentConversation(sessionId) {
+    const box = document.getElementById('agent-chat-messages');
+    if (!box || !sessionId) return;
+    const request = ++agentHistoryRequest;
+    renderedAgentSession = sessionId;
+    const note = document.createElement('p');
+    note.className = 'agent-thread-note';
+    note.textContent = 'Carregando conversa…';
+    box.replaceChildren(note);
+    try {
+      const messages = await api(`/agent/sessions/${encodeURIComponent(sessionId)}`);
+      if (request !== agentHistoryRequest || state.currentSessionId !== sessionId) return;
+      const visible = (Array.isArray(messages) ? messages : []).filter(message =>
+        ['user', 'assistant'].includes(message.role) && String(message.content || '').trim()
+      );
+      if (!visible.length) { renderAgentChatEmptyState(); return; }
+      box.replaceChildren();
+      for (const message of visible) {
+        const assistant = message.role === 'assistant';
+        const element = addMessage(message.role, assistant ? '' : message.content, box);
+        if (assistant) renderAssistantOutput(element, { rawAnswer: message.content, finalize: true });
+      }
+      box.scrollTop = box.scrollHeight;
+    } catch (error) {
+      if (request !== agentHistoryRequest) return;
+      renderedAgentSession = null;
+      note.textContent = 'Falha ao carregar conversa: ' + error.message;
+    }
   }
 
   function ensureAgentChatReady() {
     const box = document.getElementById('agent-chat-messages');
     if (!box) return null;
-    if (box.querySelector('.agent-chat-empty')) box.innerHTML = '';
+    if (box.querySelector('.agent-chat-empty, .agent-thread-note')) box.replaceChildren();
     return box;
   }
 
@@ -1336,19 +1371,27 @@
     const providerLabel = currentProviderLabel();
 
     setText('agent-session-count', String(state.agentSessions.length));
-    setText('agent-provider-pill', `Provider ${providerLabel}`);
-    setText('agent-model-pill', `Model ${modelLabel}`);
-    setText('agent-exec-pill', `Exec ${execMode}`);
-    setText('agent-approval-pill', `Approval ${approvalMode}`);
-    setText('agent-current-session', currentSession ? (currentSession.name || `Sessao ${currentSession.id?.substring(0, 6) || '?'}`) : 'Nenhuma sessao ativa');
-    setText('agent-current-session-meta', currentSession ? `${currentSession.message_count || 0} msg${(currentSession.message_count || 0) === 1 ? '' : 's'} nesta sessao` : 'Crie uma sessao ou use uma existente na lista lateral.');
+    setText('agent-provider-pill', providerLabel);
+    setText('agent-model-pill', humanizeModelLabel(modelLabel) || 'Selecionar modelo');
+    setText('agent-current-session', currentSession?.name?.trim() || 'Nova conversa');
     setText('agent-current-model', modelLabel);
     setText('agent-current-provider', `Provider ${providerLabel}`);
     setText('agent-current-execution', `Exec ${execMode}`);
     setText('agent-current-approval', `Approval ${approvalMode}`);
-    setText('agent-composer-provider', `Provider: ${providerLabel}`);
-    setText('agent-composer-model', `Model: ${modelLabel}`);
-    setText('agent-composer-policy', `Exec/Approval: ${execMode} / ${approvalMode}`);
+    const executionLabel = { full: 'Acesso completo', 'read-only': 'Somente leitura', 'dry-run': 'Simulação' }[execMode] || execMode;
+    const approvalLabel = { auto: 'automática', ask: 'solicitar', deny: 'negar' }[approvalMode] || approvalMode;
+    setText('agent-composer-policy', executionLabel);
+    const policyControl = document.getElementById('agent-policy-control');
+    if (policyControl) {
+      const policyDescription = `${executionLabel}. Aprovação: ${approvalLabel}. Configurar permissões`;
+      policyControl.title = policyDescription;
+      policyControl.setAttribute('aria-label', policyDescription);
+    }
+    const modelControl = document.getElementById('agent-model-control');
+    if (modelControl) {
+      modelControl.title = `Selecionar modelo · ${providerLabel}`;
+      modelControl.setAttribute('aria-label', `Selecionar modelo: ${modelLabel}`);
+    }
     setText('agent-channel-count', String(state.channels.length));
     setText('agent-plugin-count', String(enabledPluginsCount()));
     setText('agent-skill-count', String(enabledSkillsCount()));
@@ -2201,12 +2244,11 @@
   }
 
   // -- Message DOM helpers ------------------------------------
-  function addMessage(role, content) {
-    const container = document.getElementById('chat-messages');
+  function addMessage(role, content, container = document.getElementById('chat-messages')) {
     if (!container) return null;
     const div = document.createElement('div');
     div.className = `message ${role}-message`;
-    const letter = role === 'user' ? 'U' : 'AI';
+    const letter = role === 'user' ? 'U' : container.id === 'agent-chat-messages' ? '›_' : 'AI';
     const cls = role === 'assistant' ? ' assistant' : '';
     const now = new Date();
     const time = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
@@ -2452,6 +2494,7 @@
       state.agentSessions = Array.isArray(sessions) ? sessions : [];
       if (state.currentSessionId && !state.agentSessions.some(session => session.id === state.currentSessionId)) state.currentSessionId = null;
       if (!state.currentSessionId && state.agentSessions[0]?.id) state.currentSessionId = state.agentSessions[0].id;
+      if (state.activePanel === 'agent' && state.currentSessionId && renderedAgentSession !== state.currentSessionId) void loadAgentConversation(state.currentSessionId);
       renderSidebarHistory();
     } catch {
       state.agentSessions = [];
@@ -2471,35 +2514,37 @@
     container.innerHTML = '';
     if (state.agentSessions.length === 0) {
       container.innerHTML = variant === 'agent'
-        ? '<div class="agent-empty-copy">Nenhuma sessao ainda</div>'
+        ? '<p class="agent-rail-empty">Nenhuma conversa salva.</p>'
         : '<div style="padding:8px 12px;font-size:12px;color:var(--text-tertiary)">Nenhuma sessao ainda</div>';
       return;
     }
     state.agentSessions.forEach(s => {
-      const item = document.createElement('div');
+      const item = document.createElement(variant === 'agent' ? 'button' : 'div');
       const name = s.name || `Sessao ${s.id?.substring(0, 6) || '?'}`;
       const count = s.message_count || 0;
       const active = s.id === state.currentSessionId;
       if (variant === 'agent') {
+        item.type = 'button';
+        item.dataset.sessionId = s.id;
         item.className = 'agent-session-item' + (active ? ' active' : '');
-        item.innerHTML = `
-          <div class="agent-session-title">
-            <span class="agent-session-name" title="${esc(name)}">${esc(name)}</span>
-            <span class="agent-session-count">${fmtNum(count)}</span>
-          </div>
-          <div class="agent-session-meta">${count} msg${count === 1 ? '' : 's'}</div>`;
+        item.setAttribute('aria-current', active ? 'true' : 'false');
+        item.innerHTML = `<span class="agent-session-name" title="${esc(name)}">${esc(name)}</span>
+          <span class="agent-session-count" aria-label="${count} mensagens">${fmtNum(count)}</span>`;
       } else {
         item.className = 'history-item' + (active ? ' active' : '');
         item.innerHTML = `<span class="history-icon">&#9679;</span><span class="history-label" title="${esc(name)}">${esc(name)} <span style="opacity:0.5;font-size:11px">(${count})</span></span>`;
       }
-      item.addEventListener('click', () => {
+      item.addEventListener('click', event => {
         state.currentSessionId = s.id;
         if (variant === 'agent') {
-          renderAgentChatEmptyState();
+          if (renderedAgentSession !== s.id) void loadAgentConversation(s.id);
         } else {
           void loadChatSessionIntoView(s.id);
         }
         renderSidebarHistory();
+        if (variant === 'agent' && event.detail === 0) {
+          container.querySelector('.agent-session-item.active')?.focus();
+        }
       });
       container.appendChild(item);
     });
@@ -2784,7 +2829,7 @@
     const refreshedEl = document.getElementById('console-last-refresh');
     const runtime = state.desktopRuntimeInfo || {};
 
-    if (healthEl) healthEl.textContent = health?.status === 'ok' ? 'Online' : 'Offline';
+    if (healthEl) healthEl.textContent = health ? 'Online' : 'Offline';
     if (daemonUrlEl) daemonUrlEl.textContent = state.daemonUrl || runtime.daemon_url || '-';
     if (processEl) processEl.textContent = runtime.pid ? `PID ${runtime.pid}` : 'Navegador';
     if (runtimeEl) runtimeEl.textContent = runtime.embedded_daemon_enabled === false ? 'Daemon externo' : 'Daemon embutido';
@@ -4613,15 +4658,62 @@
   }
 
   // -- Tab Navigation -----------------------------------------
-  function switchTab(target) {
+  const sectionsDisclosure = document.getElementById('sections-disclosure');
+  const sectionsToggle = document.getElementById('sections-toggle');
+  const sectionsMenu = document.getElementById('more-sections');
+  const sectionButtons = [...sectionsMenu.querySelectorAll('[data-panel]')];
+  const navigationButtons = document.querySelectorAll('.tab-bar [data-panel]');
 
-    state.activePanel = target;
-    document.querySelectorAll('.tab').forEach(t => { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
-    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  function showMoreSections(open) {
+    sectionsToggle.setAttribute('aria-expanded', String(open));
+    sectionsMenu.hidden = !open;
+  }
+
+  sectionsToggle.addEventListener('click', () => showMoreSections(sectionsMenu.hidden));
+  sectionsDisclosure.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !sectionsMenu.hidden) {
+      event.preventDefault();
+      showMoreSections(false);
+      sectionsToggle.focus();
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    const direction = event.key === 'ArrowDown' ? 1 : -1;
+    const index = sectionButtons.indexOf(document.activeElement);
+    showMoreSections(true);
+    if (index === -1) {
+      sectionButtons.at(direction > 0 ? 0 : -1).focus();
+    } else {
+      sectionButtons[(index + direction + sectionButtons.length) % sectionButtons.length].focus();
+    }
+  });
+  sectionsDisclosure.addEventListener('focusout', (event) => {
+    if (event.relatedTarget && !sectionsDisclosure.contains(event.relatedTarget)) showMoreSections(false);
+  });
+  document.addEventListener('click', (event) => {
+    if (!sectionsMenu.hidden && !sectionsDisclosure.contains(event.target)) showMoreSections(false);
+  }, true);
+
+  function switchTab(target) {
     const tab = document.querySelector(`[data-panel="${target}"]`);
     const panel = document.getElementById(`panel-${target}`);
-    if (tab) { tab.classList.add('active'); tab.setAttribute('aria-selected', 'true'); }
-    if (panel) panel.classList.add('active');
+    if (!tab || !panel) return;
+    const menuHadFocus = sectionsMenu.contains(document.activeElement);
+    state.activePanel = target;
+    navigationButtons.forEach(button => {
+      button.classList.toggle('active', button === tab);
+      if (button === tab) button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
+    });
+    document.querySelectorAll('.panel').forEach(item => item.classList.toggle('active', item === panel));
+    const secondary = sectionsMenu.contains(tab);
+    const label = secondary ? tab.querySelector('.section-label').textContent : 'Mais';
+    document.getElementById('sections-toggle-label').textContent = label;
+    sectionsToggle.classList.toggle('active', secondary);
+    sectionsToggle.setAttribute('aria-label', secondary ? `${label}, mais seções` : 'Mais seções');
+    showMoreSections(false);
+    if (menuHadFocus) (secondary ? sectionsToggle : tab).focus();
     syncShellLayout(target);
     renderModelPicker();
 
@@ -4631,6 +4723,7 @@
       if (state.activeDiscoverTab === 'installed') showInstalledModels();
     }
     if (target === 'agent') {
+      if (state.currentSessionId && renderedAgentSession !== state.currentSessionId) void loadAgentConversation(state.currentSessionId);
       void ensureAgentCompatibleModel({ persist: true });
       updateAgentWorkspaceSummary();
     }
@@ -4639,14 +4732,60 @@
     if (target === 'console') void loadConsoleSnapshot();
   }
 
-  document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => switchTab(tab.dataset.panel)));
+  navigationButtons.forEach(tab => tab.addEventListener('click', () => switchTab(tab.dataset.panel)));
 
+  const historyToggle = document.getElementById('agent-history-toggle');
+  const historyRail = document.getElementById('agent-history-rail');
+  const compactHistory = window.matchMedia?.('(max-width: 1040px)');
+  let historyPreference = readStorage('mlxPilotAgentHistory');
+  function updateHistoryVisibility() {
+    if (!historyRail || !historyToggle) return;
+    const expanded = historyPreference ? historyPreference === 'open' : !compactHistory?.matches;
+    historyRail.hidden = !expanded;
+    historyToggle.setAttribute('aria-expanded', String(expanded));
+    const label = expanded ? 'Recolher histórico' : 'Mostrar histórico';
+    historyToggle.title = label;
+    historyToggle.setAttribute('aria-label', label);
+  }
+  historyToggle?.addEventListener('click', () => {
+    historyPreference = historyRail.hidden ? 'open' : 'closed';
+    try { localStorage.setItem('mlxPilotAgentHistory', historyPreference); } catch {}
+    updateHistoryVisibility();
+    if (historyPreference === 'open') historyRail.querySelector('.agent-session-item.active, .agent-session-item')?.focus();
+  });
+  compactHistory?.addEventListener('change', updateHistoryVisibility);
+  updateHistoryVisibility();
+
+  document.getElementById('agent-model-control')?.addEventListener('click', event => {
+    event.stopPropagation();
+    const trigger = document.getElementById('model-trigger');
+    trigger?.click();
+    trigger?.focus();
+  });
+  document.getElementById('agent-policy-control')?.addEventListener('click', () => {
+    document.getElementById('agent-tab-config')?.click();
+    document.querySelector('.agent-config-tab[data-config-section="runtime"]')?.click();
+    document.querySelector('input[name="exec"]:checked')?.focus();
+  });
+  document.querySelector('.agent-desk-tabs')?.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const tabs = Array.from(event.currentTarget.querySelectorAll('[role="tab"]'));
+    const selected = tabs.indexOf(event.target);
+    const index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
+      : (selected + (event.key === 'ArrowLeft' ? -1 : 1) + tabs.length) % tabs.length;
+    tabs[index].click();
+    tabs[index].focus();
+  });
   document.querySelectorAll('.agent-view-tab').forEach(tab => {
     tab.addEventListener('click', () => {
       document.querySelectorAll('.agent-view-tab').forEach(t => {
         t.classList.remove('active');
         t.setAttribute('aria-selected', 'false');
+        t.tabIndex = -1;
       });
+      tab.tabIndex = 0;
+      if (historyToggle) historyToggle.hidden = tab.dataset.agentView === 'config';
       document.querySelectorAll('.agent-view').forEach(view => {
         view.classList.remove('active');
         view.style.display = 'none';
@@ -4866,24 +5005,29 @@
   const agentInput = document.getElementById('agent-command-input');
   const agentSendBtn = document.getElementById('agent-send-btn');
 
-  document.querySelectorAll('.agent-prompt-card').forEach(card => {
-    card.addEventListener('click', () => {
-      if (!agentInput) return;
-      state.pendingAgentShortcut = card.dataset.agentShortcut || null;
-      agentInput.value = card.dataset.agentPrompt || '';
-      resizeTextArea(agentInput, 220);
-      agentInput.focus();
-    });
+  renderAgentChatEmptyState();
+  document.getElementById('agent-chat-messages')?.addEventListener('click', event => {
+    const card = event.target.closest?.('.agent-prompt-card');
+    if (!agentInput || !card) return;
+    state.pendingAgentShortcut = card.dataset.agentShortcut || null;
+    agentInput.value = card.dataset.agentPrompt || '';
+    resizeTextArea(agentInput);
+    agentInput.focus();
   });
-
-  agentInput?.addEventListener('input', () => resizeTextArea(agentInput, 220));
+  agentInput?.addEventListener('input', () => {
+    state.pendingAgentShortcut = null;
+    resizeTextArea(agentInput);
+  });
   agentSendBtn?.addEventListener('click', async () => {
     if (!agentInput?.value.trim()) return;
     const msg = agentInput.value.trim();
+    const startedInSession = state.currentSessionId;
+    renderedAgentSession = startedInSession;
+    agentHistoryRequest++;
     const shortcut = state.pendingAgentShortcut;
     state.pendingAgentShortcut = null;
     agentInput.value = '';
-    resizeTextArea(agentInput, 220);
+    resizeTextArea(agentInput);
 
     const box = ensureAgentChatReady();
     if (!box) return;
@@ -4891,7 +5035,7 @@
     box.insertAdjacentHTML('beforeend', `<div class="message user-message"><div class="msg-avatar">U</div><div class="msg-body"><div class="msg-content">${esc(msg)}</div></div></div>`);
     const agDiv = document.createElement('div');
     agDiv.className = 'message assistant-message';
-    agDiv.innerHTML = `<div class="msg-avatar assistant">AG</div><div class="msg-body"><div class="msg-content markdown-body"><div class="thinking-indicator"><span>Processando</span><span class="dots"><span>.</span><span>.</span><span>.</span></span></div></div></div>`;
+    agDiv.innerHTML = `<div class="msg-avatar assistant" aria-label="Agente">›_</div><div class="msg-body"><div class="msg-content markdown-body"><div class="thinking-indicator"><span>Processando</span><span class="dots"><span>.</span><span>.</span><span>.</span></span></div></div></div>`;
     box.appendChild(agDiv);
     box.scrollTop = box.scrollHeight;
 
@@ -4923,7 +5067,10 @@
         await loadSessions();
       }
       if (res?.session_id) {
-        state.currentSessionId = res.session_id;
+        if (state.currentSessionId === startedInSession) {
+          state.currentSessionId = res.session_id;
+          renderedAgentSession = res.session_id;
+        }
         await loadSessions();
       } else {
         updateAgentWorkspaceSummary();
@@ -4941,7 +5088,7 @@
     box.scrollTop = box.scrollHeight;
   });
   agentInput?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       agentSendBtn?.click();
     }
@@ -5149,6 +5296,7 @@
       if (session?.id) {
         state.currentSessionId = session.id;
         await loadSessions();
+        document.getElementById('agent-tab-workspace')?.click();
         renderAgentChatEmptyState();
         updateAgentWorkspaceSummary();
         agentInput?.focus();

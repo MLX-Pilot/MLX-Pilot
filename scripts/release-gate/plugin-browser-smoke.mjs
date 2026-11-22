@@ -88,6 +88,10 @@ export async function runPluginBrowserSmoke({ outputDir = process.env.RELEASE_GA
     await page.addInitScript(url => { window.__MLX_PILOT_DAEMON_URL__ = url; }, daemon.baseUrl);
     const ok = (method, route, body) => assertOkJson(daemon.baseUrl, method, route, body);
     const pluginList = () => ok('GET', '/agent/wasm-plugins');
+    const openSection = async (section) => {
+      await page.getByRole('button', { name: /mais seções/i }).click();
+      await page.locator(`#more-sections [data-panel="${section}"]`).click();
+    };
     const frame = page.frameLocator('#pm-frame iframe');
     const card = page.locator('[data-plugin-card="reading_notes"]');
     const open = card.locator('[data-open]');
@@ -121,7 +125,7 @@ export async function runPluginBrowserSmoke({ outputDir = process.env.RELEASE_GA
     };
     current = 'install';
     await page.goto(desktop.baseUrl);
-    await page.locator('[data-panel="plugins"]').click();
+    await openSection('plugins');
     await page.locator('#plugin-manager[aria-busy]').waitFor({ state: 'hidden' });
     await page.locator('[data-plugin-card="presentation"]').waitFor();
     const fileInput = page.locator('#pm-file:enabled');
@@ -171,7 +175,7 @@ export async function runPluginBrowserSmoke({ outputDir = process.env.RELEASE_GA
     assert.ok(original.slides.some(slide => slide.notes.includes(book.title)));
     // Reopening the desktop refreshes the editor's project inventory through the real API.
     await page.reload();
-    await page.locator('[data-panel="presentations"]').click();
+    await openSection('presentations');
     await page.locator('#ps-projects').selectOption(doc.id);
     await page.waitForFunction(title => document.querySelector('#ps-title')?.value === title, original.title);
     const studioTitle = 'Caderno de design editorial';
@@ -213,7 +217,7 @@ export async function runPluginBrowserSmoke({ outputDir = process.env.RELEASE_GA
     pass({ formats: Object.keys(artifacts.exports) });
 
     current = 'revoke';
-    await page.locator('[data-panel="plugins"]').click();
+    await openSection('plugins');
     await page.locator('#plugin-manager[aria-busy]').waitFor({ state: 'hidden' });
     await open.click();
     await frame.locator('#query').waitFor();
