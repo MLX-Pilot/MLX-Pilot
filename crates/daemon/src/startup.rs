@@ -150,7 +150,8 @@ impl StartupCoordinator {
                                 ProviderStartupStatus::ready("mlx", "MLX pronto", Some(command));
                         }
                         Err(error) => {
-                            let applicable = !cfg!(target_os = "windows");
+                            let applicable =
+                                cfg!(all(target_os = "macos", target_arch = "aarch64"));
                             *status.write().await = ProviderStartupStatus::unavailable(
                                 "mlx",
                                 error.to_string(),
@@ -217,8 +218,8 @@ impl StartupCoordinator {
             .collect::<Vec<_>>();
         let first_error = failures.first().and_then(|provider| provider.error.clone());
         let any_ready = applicable.iter().any(|provider| provider.ready);
-        let app_ready = terminal;
-        let degraded = terminal && !failures.is_empty() && any_ready;
+        let app_ready = terminal || any_ready;
+        let degraded = !failures.is_empty() && any_ready;
         let failed = terminal && !any_ready;
 
         let (phase, step, message) = if !terminal {
@@ -304,9 +305,42 @@ fn ollama_provider_view(status: &OllamaRuntimeStatus) -> ProviderStartupStatus {
         external_server_version: status.external_server_version.clone(),
         external_server_pid: status.external_server_pid,
         gpu_expected: Some(status.gpu.expected),
-        gpu_detected: Some(status.gpu.detected),
+        gpu_detected: status.gpu.backend.as_ref().map(|_| status.gpu.detected),
         gpu_name: status.gpu.name.clone(),
         vram_bytes: status.gpu.vram_bytes,
         backend: status.gpu.backend.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ollama_provider::OllamaProviderConfig;
+
+    #[tokio::test]
+    async fn an_available_engine_opens_the_app_while_other_runtimes_prepare() {
+        let startup = StartupCoordinator::default();
+        *startup.llamacpp.write().await = ProviderStartupStatus::ready(
+            "llamacpp",
+            "llama.cpp pronto",
+            Some("llama-server".into()),
+        );
+        let ollama = OllamaProvider::new(OllamaProviderConfig::default());
+        let status = startup.snapshot(&ollama).await;
+        assert!(status.app_ready);
+        assert!(status.degraded);
+        assert_eq!(status.providers.iter().filter(|p| p.ready).count(), 1);
+        assert_eq!(status.phase, "checking");
+        assert_eq!(status.providers[0].gpu_detected, None);
+    }
+
+    #[tokio::test]
+    async fn all_engines_pending_does_not_claim_inference_is_ready() {
+        let startup = StartupCoordinator::default();
+        let ollama = OllamaProvider::new(OllamaProviderConfig::default());
+        let status = startup.snapshot(&ollama).await;
+        assert!(!status.app_ready);
+        assert!(!status.providers.iter().any(|p| p.ready));
+        assert!(!status.degraded);
     }
 }

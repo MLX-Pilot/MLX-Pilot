@@ -951,6 +951,14 @@
         </span>
       `).join('');
     }
+    const open = document.getElementById('startup-open');
+    if (open) open.hidden = !runtimePending(snapshot);
+    const notice = document.getElementById('runtime-notice');
+    if (notice) {
+      const preparing = runtimePending(snapshot);
+      notice.hidden = !preparing;
+      notice.textContent = preparing ? `Preparando runtimes locais · ${snapshot.message || snapshot.phase}${determinate ? ` · ${Math.round(percent)}%` : ''}. O chat estará disponível para cada modelo quando seu runtime estiver pronto.` : '';
+    }
     if (cancel) cancel.hidden = !snapshot.can_cancel;
     if (retry) retry.hidden = !['failed', 'cancelled', 'degraded'].includes(snapshot.phase);
     if (technical) {
@@ -963,6 +971,38 @@
     }
   }
 
+  let startupSkipped = false;
+  let runtimePoll = null;
+  const runtimePending = snapshot => (snapshot?.providers || []).some(provider =>
+    provider.applicable !== false && ['checking', 'downloading', 'installing', 'updating', 'starting', 'validating'].includes(provider.phase));
+
+  document.getElementById('startup-open')?.addEventListener('click', () => {
+    startupSkipped = true;
+  });
+
+  function monitorRuntimePreparation() {
+    if (runtimePoll || !runtimePending(state.runtimeStartup)) return;
+    let polling = false;
+    runtimePoll = setInterval(async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        const snapshot = await api('/runtime/startup', { timeoutMs: 5000 });
+        renderStartupStatus(snapshot);
+        updateStatusBadge(snapshot.phase === 'ready', snapshot.degraded ? 'degraded' : snapshot.phase);
+        if (!runtimePending(snapshot)) {
+          clearInterval(runtimePoll);
+          runtimePoll = null;
+          await loadModels({ force: true });
+        }
+      } catch (error) {
+        pushConsoleEntry('warn', 'startup', error.message);
+      } finally {
+        polling = false;
+      }
+    }, 1500);
+  }
+
   async function waitForRuntimeStartup() {
     let consecutiveErrors = 0;
     while (true) {
@@ -970,7 +1010,7 @@
         const snapshot = await api('/runtime/startup', { timeoutMs: 5000 });
         consecutiveErrors = 0;
         renderStartupStatus(snapshot);
-        if (snapshot?.app_ready || ['failed', 'cancelled'].includes(snapshot?.phase)) {
+        if (startupSkipped || snapshot?.app_ready || ['failed', 'cancelled'].includes(snapshot?.phase)) {
           return snapshot;
         }
       } catch (error) {
@@ -1007,8 +1047,10 @@
     if (retry) retry.hidden = true;
     try {
       renderStartupStatus(await api('/runtime/startup/retry', { method: 'POST' }));
+      startupSkipped = false;
       const snapshot = await waitForRuntimeStartup();
-      updateStatusBadge(snapshot?.phase === 'ready', snapshot?.phase);
+      monitorRuntimePreparation();
+      updateStatusBadge(snapshot?.phase === 'ready', snapshot?.degraded ? 'degraded' : snapshot?.phase);
       if (snapshot?.app_ready) revealApp();
     } catch (error) {
       pushConsoleEntry('error', 'startup', error.message);
@@ -1213,8 +1255,9 @@
     }
 
     const startup = await waitForRuntimeStartup();
+    monitorRuntimePreparation();
     state.healthOk = startup?.phase === 'ready';
-    updateStatusBadge(state.healthOk, startup?.phase);
+    updateStatusBadge(state.healthOk, startup?.degraded ? 'degraded' : startup?.phase);
     revealApp();
 
     await Promise.allSettled([

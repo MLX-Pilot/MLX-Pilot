@@ -1206,6 +1206,11 @@ fn seed_agent_tool_defaults(agent: &mut AgentUiConfig) {
     if agent.memory_snapshot_mode.trim().is_empty() {
         agent.memory_snapshot_mode = default_agent_memory_snapshot_mode();
     }
+    if !cfg!(all(target_os = "macos", target_arch = "aarch64"))
+        && agent.fallback_provider.trim().eq_ignore_ascii_case("mlx")
+    {
+        agent.fallback_provider = "ollama".to_string();
+    }
     if agent.provider_profiles.is_empty() {
         agent
             .provider_profiles
@@ -1601,7 +1606,42 @@ mod tests {
     }
 
     #[test]
-    fn legacy_agent_default_model_is_upgraded_to_qwen35() {
+    fn starter_defaults_do_not_choose_a_large_model_or_an_unsupported_fallback() {
+        let cfg = AppConfig::default();
+        assert_eq!(cfg.agent.model_id, "qwen3:0.6b");
+        let expected = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            "mlx"
+        } else {
+            "ollama"
+        };
+        assert_eq!(cfg.agent.fallback_provider, expected);
+    }
+
+    #[test]
+    fn existing_model_choice_and_limits_survive_normalization() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            serde_json::to_vec(&json!({
+                "schema_version": APP_CONFIG_SCHEMA_VERSION,
+                "agent": { "model_id": "qwen3.5:9b", "fallback_provider": "mlx",
+                    "max_prompt_tokens": 2200, "temperature": 0.1 }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let cfg = AppConfig::load_settings_from(&path);
+        assert_eq!(cfg.agent.model_id, "qwen3.5:9b");
+        assert_eq!(cfg.agent.max_prompt_tokens, Some(2200));
+        assert_eq!(cfg.agent.temperature, Some(0.1));
+        if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            assert_eq!(cfg.agent.fallback_provider, "ollama");
+        }
+    }
+
+    #[test]
+    fn legacy_agent_default_model_is_upgraded_to_small_starter_model() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("settings.json");
         let legacy = json!({
@@ -1619,7 +1659,7 @@ mod tests {
         .expect("write legacy settings");
 
         let loaded = AppConfig::load_settings_from(&path);
-        assert_eq!(loaded.agent.model_id, "qwen3.5:9b");
+        assert_eq!(loaded.agent.model_id, "qwen3:0.6b");
     }
 }
 
@@ -1764,11 +1804,15 @@ fn default_agent_provider() -> String {
 }
 
 fn default_agent_fallback_provider() -> String {
-    "mlx".to_string()
+    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        "mlx".to_string()
+    } else {
+        "ollama".to_string()
+    }
 }
 
 fn default_agent_model() -> String {
-    "qwen3.5:9b".to_string()
+    "qwen3:0.6b".to_string()
 }
 
 fn default_agent_execution_mode() -> String {

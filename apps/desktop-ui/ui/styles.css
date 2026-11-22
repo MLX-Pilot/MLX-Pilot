@@ -3925,3 +3925,11 @@ code { font-family: var(--font-mono); }
 .channel-account-dialog form { display: grid; gap: 16px; }
 .channel-account-dialog label { display: grid; gap: 8px; }
 .channel-account-dialog::backdrop { background: rgb(0 0 0 / 55%); }
+
+.runtime-notice {
+  padding: 8px 20px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--amber-soft);
+}
+.runtime-notice[hidden] { display: none; }
