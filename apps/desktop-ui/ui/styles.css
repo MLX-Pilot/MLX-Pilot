@@ -4188,3 +4188,12 @@ code { font-family: var(--font-mono); }
 .workflow-inspector-advanced > .settings-field:first-of-type {
   margin-top: 8px;
 }
+
+.channel-account-layout { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 20px; }
+.channel-account-form, .channel-account-list { min-width: 0; display: grid; align-content: start; gap: 10px; }
+.channel-account-actions, .agent-channel-account-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.channel-account-actions label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.channel-details { margin-block: 10px; }
+.channel-details summary { cursor: pointer; color: var(--text-secondary); font-weight: 600; margin-bottom: 8px; }
+.channel-account-list .agent-channel-account-card { padding-block: 6px; }
+.channel-account-list .ghost-btn { padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; }

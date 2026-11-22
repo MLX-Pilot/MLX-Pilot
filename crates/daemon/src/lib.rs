@@ -764,6 +764,7 @@ pub async fn run() -> anyhow::Result<()> {
             "/agent/channels/remove-account",
             post(agent_channels_remove_account),
         )
+        .route("/agent/channels/rename-account", post(agent_channels_rename_account))
         .route("/agent/channels/login", post(agent_channels_login))
         .route("/agent/channels/logout", post(agent_channels_logout))
         .route("/agent/channels/probe", post(agent_channels_probe))
@@ -1238,6 +1239,15 @@ async fn agent_channels_upsert_account(
         .await
         .map(Json)
         .map_err(map_channel_service_error)
+}
+
+async fn agent_channels_rename_account(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(request): Json<channels::ChannelRenameAccountRequest>,
+) -> Result<Json<channels::ChannelView>, AppError> {
+    ensure_channel_protocol(&headers)?;
+    state.channel_service.rename_account(request).await.map(Json).map_err(map_channel_service_error)
 }
 
 async fn agent_channels_remove_account(

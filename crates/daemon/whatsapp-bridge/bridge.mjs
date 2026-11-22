@@ -450,6 +450,8 @@ async function loginStart({ sessionRoot, accountId, timeoutMs }) {
     };
   }
 
+  // A previous probe or logout left a terminal state. Wait for this worker's result.
+  await writeSessionState(sessionRoot, buildSessionState({ status: "connecting", sessionRoot }));
   const child = spawn(
     process.execPath,
     [
@@ -624,6 +626,11 @@ async function probe({ sessionRoot }) {
       message: "Aguardando leitura do QR code do WhatsApp.",
       qr_code: session.qr_code,
     };
+  }
+
+  if (session?.status === "connecting") {
+    // A probe may run before the new worker has written its PID or received its QR.
+    return { status: "not_logged_in", message: "Aguardando o QR code do WhatsApp." };
   }
 
   if (await webAuthExists(authDir)) {

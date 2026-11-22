@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { startBotFixture } from "./channel-fixtures.mjs";
+
 import fs from "node:fs/promises";
 
 import {
@@ -92,12 +94,15 @@ export async function runLoadSmoke() {
   const daemonPort = await pickPort();
   let daemon;
   let provider;
+  let bot;
 
   try {
+    bot = await startBotFixture("tg-load-secret");
     await seedReleaseGateSkills(harness.skillsDir);
     await writeJson(harness.settingsPath, buildLegacySettings(harness.workspace));
     provider = await startOpenAiMockServer({ delayMs: 20, finalPrefix: "load-smoke" });
     daemon = startDaemon({
+      env: { MLX_CHANNEL_BOT_FIXTURE_URL: bot.baseUrl },
       workspace: harness.workspace,
       settingsPath: harness.settingsPath,
       port: daemonPort,
@@ -231,6 +236,7 @@ export async function runLoadSmoke() {
   } finally {
     await stopDaemon(daemon);
     await provider?.close?.();
+    await bot?.close();
   }
 }
 

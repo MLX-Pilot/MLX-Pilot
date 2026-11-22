@@ -1,3 +1,9 @@
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[c]);
+}
+
 const CHANNEL_PROTOCOL_VERSION = "v1";
 const CHANNEL_PROTOCOL_HEADER = "x-channel-protocol-version";
 
@@ -266,7 +272,7 @@ export function createAgentChannelsController({
     }
     if (elements.agentChannelOnboardingSteps) {
       elements.agentChannelOnboardingSteps.innerHTML = (blueprint.steps || [])
-        .map((step) => `<li>${step}</li>`)
+        .map((step) => `<li>${escapeHtml(step)}</li>`)
         .join("");
     }
     if (elements.agentChannelCredentialsLabel) {
@@ -319,7 +325,7 @@ export function createAgentChannelsController({
     }
     const values = Array.from(capabilities || []).sort();
     elements.agentChannelSessionCapabilities.innerHTML = values.map(
-      (capability) => `<span class="agent-skill-tag">${capability}</span>`,
+      (capability) => `<span class="agent-skill-tag">${escapeHtml(capability)}</span>`,
     ).join("");
   }
 
@@ -551,7 +557,7 @@ export function createAgentChannelsController({
     const channel = findChannelView(channelId);
     const accountOptions = (channel?.accounts || []).map((account) => {
       const suffix = account.is_default ? " (default)" : "";
-      return `<option value="${account.account_id}">${account.account_id}${suffix}</option>`;
+      return `<option value="${escapeHtml(account.account_id)}">${escapeHtml(account.account_id)}${suffix}</option>`;
     }).join("");
 
     if (elements.agentSendAccountSelect) {
@@ -574,7 +580,7 @@ export function createAgentChannelsController({
     const channel = findChannelView(channelId);
     const accountOptions = (channel?.accounts || []).map((account) => {
       const suffix = account.is_default ? " (default)" : "";
-      return `<option value="${account.account_id}">${account.account_id}${suffix}</option>`;
+      return `<option value="${escapeHtml(account.account_id)}">${escapeHtml(account.account_id)}${suffix}</option>`;
     }).join("");
 
     if (elements.agentChannelLogsAccountSelect) {
@@ -589,7 +595,7 @@ export function createAgentChannelsController({
   function syncAgentChannelSelectors() {
     const currentChannel = elements.agentChannelSelect?.value || elements.agentSendChannelSelect?.value || "";
     const options = channelsCache.map(
-      (channel) => `<option value="${channel.id}">${channel.name}</option>`
+      (channel) => `<option value="${escapeHtml(channel.id)}">${escapeHtml(channel.name)}</option>`
     ).join("");
 
     if (elements.agentChannelSelect) {
@@ -675,12 +681,14 @@ export function createAgentChannelsController({
       return;
     }
 
-    elements.agentChannelList.innerHTML = channelsCache.map((channel) => {
+    const configuredOnly = elements.agentChannelList.hasAttribute("data-configured-only");
+    const displayed = configuredOnly ? channelsCache.filter(channel => channel.accounts?.length) : channelsCache;
+    elements.agentChannelList.innerHTML = displayed.map((channel) => {
       const warning = channel.ambiguity_warning
-        ? `<p class="meta-note agent-inline-note-danger">${channel.ambiguity_warning}</p>`
+        ? `<p class="meta-note agent-inline-note-danger">${escapeHtml(channel.ambiguity_warning)}</p>`
         : "";
       const protocol = channel.protocol_family
-        ? `<div class="meta-note">protocolo: ${channel.protocol_family} ${channel.protocol_version || ""}</div>`
+        ? `<div class="meta-note">protocolo: ${escapeHtml(channel.protocol_family)} ${escapeHtml(channel.protocol_version || "")}</div>`
         : "";
       const accounts = (channel.accounts || []).map((account) => {
         const health = account.health_state?.status || "-";
@@ -691,35 +699,35 @@ export function createAgentChannelsController({
         const adapterConfigured = nonEmptyObject(account.adapter_config);
         const accountCapabilities = Array.isArray(account.capabilities) && account.capabilities.length
           ? `<div class="agent-skill-badges">${account.capabilities
-              .map((capability) => `<span class="agent-skill-tag">${capability}</span>`)
+              .map((capability) => `<span class="agent-skill-tag">${escapeHtml(capability)}</span>`)
               .join("")}</div>`
           : "";
         const qrStatusTag = qrCodeReady
           ? `<div class="agent-skill-badges"><span class="agent-skill-tag">qr pronto</span></div>`
           : "";
         const qrAction = qrCodeReady
-          ? `<button class="ghost-btn text-sm" type="button" data-channel-action="show-qr" data-channel="${channel.id}" data-account="${account.account_id}">Ver QR</button>`
+          ? `<button class="ghost-btn text-sm" type="button" data-channel-action="show-qr" data-channel="${escapeHtml(channel.id)}" data-account="${escapeHtml(account.account_id)}">Ver QR</button>`
           : "";
         return `
           <div class="agent-channel-account-card">
             <div class="agent-channel-account-head">
               <div>
-                <strong>${account.account_id}</strong>${account.is_default ? ' <span class="meta-note">(default)</span>' : ""}
-                <div class="meta-note">health: ${health} • session: ${session}</div>
-                <div class="meta-note">credencial: ${account.credentials_ref || "nao definida"}</div>
+                <strong>${escapeHtml(account.account_id)}</strong>${account.is_default ? ' <span class="meta-note">(default)</span>' : ""}
+                <div class="meta-note">${account.enabled ? "Ativa" : "Desativada"} · ${escapeHtml(health)} · ${escapeHtml(session)}</div>
+                <div class="meta-note">${account.credentials_ref ? "Credencial salva" : "Sem credencial"}</div>
                 <div class="meta-note">adapter_config: ${adapterConfigured ? "configurado" : "vazio"}</div>
                 ${protocol}
                 ${qrStatusTag}
                 ${accountCapabilities}
               </div>
               <div class="agent-channel-account-actions">
-                <button class="ghost-btn text-sm" type="button" data-channel-action="edit" data-channel="${channel.id}" data-account="${account.account_id}">Editar</button>
-                <button class="ghost-btn text-sm" type="button" data-channel-action="login" data-channel="${channel.id}" data-account="${account.account_id}">${loginLabel}</button>
+                <button class="ghost-btn text-sm" type="button" data-channel-action="edit" data-channel="${escapeHtml(channel.id)}" data-account="${escapeHtml(account.account_id)}">Editar</button>
+                <button class="ghost-btn text-sm" type="button" data-channel-action="login" data-channel="${escapeHtml(channel.id)}" data-account="${escapeHtml(account.account_id)}">${escapeHtml(loginLabel)}</button>
                 ${qrAction}
-                <button class="ghost-btn text-sm" type="button" data-channel-action="logout" data-channel="${channel.id}" data-account="${account.account_id}">Logout</button>
-                <button class="ghost-btn text-sm" type="button" data-channel-action="default" data-channel="${channel.id}" data-account="${account.account_id}">Default</button>
-                <button class="ghost-btn text-sm" type="button" data-channel-action="rename" data-channel="${channel.id}" data-account="${account.account_id}">Renomear</button>
-                <button class="ghost-btn text-sm danger" type="button" data-channel-action="remove" data-channel="${channel.id}" data-account="${account.account_id}">Remover</button>
+                <button class="ghost-btn text-sm" type="button" data-channel-action="logout" data-channel="${escapeHtml(channel.id)}" data-account="${escapeHtml(account.account_id)}">Logout</button>
+                <button class="ghost-btn text-sm" type="button" data-channel-action="default" data-channel="${escapeHtml(channel.id)}" data-account="${escapeHtml(account.account_id)}">Default</button>
+                <button class="ghost-btn text-sm" type="button" data-channel-action="rename" data-channel="${escapeHtml(channel.id)}" data-account="${escapeHtml(account.account_id)}">Renomear</button>
+                <button class="ghost-btn text-sm danger" type="button" data-channel-action="remove" data-channel="${escapeHtml(channel.id)}" data-account="${escapeHtml(account.account_id)}">Remover</button>
               </div>
             </div>
           </div>
@@ -730,11 +738,11 @@ export function createAgentChannelsController({
         <section class="glass agent-channel-card">
           <div class="agent-channel-card-head">
             <div class="agent-channel-card-meta">
-              <h4>${channel.name}</h4>
-              <p class="meta-note">aliases: ${(channel.aliases || []).join(", ") || "-"}</p>
-              <p class="meta-note">family: ${channel.protocol_family} • version: ${channel.protocol_version}</p>
+              <h4>${escapeHtml(channel.name)}</h4>
+              <p class="meta-note">aliases: ${escapeHtml((channel.aliases || []).join(", ") || "-")}</p>
+              <p class="meta-note">family: ${escapeHtml(channel.protocol_family)} • version: ${escapeHtml(channel.protocol_version)}</p>
               <div class="agent-skill-badges">${(channel.capabilities || [])
-                .map((capability) => `<span class="agent-skill-tag">${capability}</span>`)
+                .map((capability) => `<span class="agent-skill-tag">${escapeHtml(capability)}</span>`)
                 .join("")}</div>
             </div>
             <span class="meta-note">${(channel.accounts || []).length} conta(s)</span>
@@ -745,6 +753,7 @@ export function createAgentChannelsController({
       `;
     }).join("");
 
+    if (configuredOnly && !displayed.length) elements.agentChannelList.textContent = "Nenhuma conta configurada.";
     syncAgentChannelSelectors();
   }
 
@@ -770,7 +779,7 @@ export function createAgentChannelsController({
       const action = entry.action || entry.operation || "-";
       const result = entry.result || entry.status || "-";
       const errorCode = entry.error_code ? ` • ${entry.error_code}` : "";
-      return `<li class="agent-audit-item">${ts} • ${entry.channel}:${entry.account_id} • ${action} • ${result}${errorCode}${entry.error ? ` • ${entry.error}` : ""}</li>`;
+      return `<li class="agent-audit-item">${escapeHtml(ts)} • ${escapeHtml(entry.channel)}:${escapeHtml(entry.account_id)} • ${escapeHtml(action)} • ${escapeHtml(result)}${escapeHtml(errorCode)}${entry.error ? ` • ${escapeHtml(entry.error)}` : ""}</li>`;
     }).join("");
   }
 
@@ -826,6 +835,7 @@ export function createAgentChannelsController({
       headers: protocolHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(payload),
     });
+    if (elements.agentChannelCredentialsInput) elements.agentChannelCredentialsInput.value = "";
     if (elements.agentChannelFormFeedback) {
       elements.agentChannelFormFeedback.textContent = `Conta ${channel}:${accountId} salva.`;
     }
@@ -848,20 +858,12 @@ export function createAgentChannelsController({
       return;
     }
 
-    await executeChannelOperation("/agent/channels/upsert-account", {
-      channel: channelId,
-      account_id: nextAccountId,
-      enabled: account.enabled,
-      credentials_ref: account.credentials_ref || null,
-      metadata: account.metadata || {},
-      routing_defaults: account.routing_defaults || {},
-      set_as_default: account.is_default,
-      adapter_config: account.adapter_config || null,
-    });
-    await executeChannelOperation("/agent/channels/remove-account", {
+    await executeChannelOperation("/agent/channels/rename-account", {
       channel: channelId,
       account_id: accountId,
+      new_account_id: nextAccountId,
     });
+    populateChannelForm(channelId, nextAccountId);
   }
 
   async function handleAgentChannelListAction(action, channelId, accountId) {
@@ -917,7 +919,6 @@ export function createAgentChannelsController({
         channel: channelId,
         account_id: accountId,
         enabled: account.enabled,
-        credentials_ref: account.credentials_ref || null,
         metadata: account.metadata || {},
         routing_defaults: account.routing_defaults || {},
         set_as_default: true,
@@ -1181,4 +1182,45 @@ export function createAgentChannelsController({
     loadChannels: loadAgentChannels,
     loadLogs: loadAgentChannelLogs,
   };
+}
+
+export function mountChannelPanel(fetchJson) {
+  const byId = id => document.getElementById(id);
+  const elements = {
+    agentChannelsRefreshBtn: byId("agent-channels-refresh-btn"),
+    agentChannelSelect: byId("agent-channel-select"),
+    agentChannelAccountIdInput: byId("agent-channel-account-id"),
+    agentChannelCredentialsLabel: byId("agent-channel-credentials-label"),
+    agentChannelCredentialsInput: byId("agent-channel-credentials"),
+    agentChannelCredentialHint: byId("agent-channel-credential-hint"),
+    agentChannelMetadataInput: byId("agent-channel-metadata"),
+    agentChannelRoutingDefaultsInput: byId("agent-channel-routing-defaults"),
+    agentChannelAdapterConfigInput: byId("agent-channel-adapter-config"),
+    agentChannelEnabledToggle: byId("agent-channel-enabled"),
+    agentChannelSetDefaultToggle: byId("agent-channel-set-default"),
+    agentChannelSaveBtn: byId("agent-channel-save-btn"),
+    agentChannelClearBtn: byId("agent-channel-clear-btn"),
+    agentChannelFormFeedback: byId("agent-channel-form-feedback"),
+    agentChannelQrPanel: byId("agent-channel-qr-panel"),
+    agentChannelQrCanvas: byId("agent-channel-qr-canvas"),
+    agentChannelQrImage: byId("agent-channel-qr-image"),
+    agentChannelQrText: byId("agent-channel-qr-text"),
+    agentSendChannelSelect: byId("agent-send-channel"),
+    agentSendAccountSelect: byId("agent-send-account"),
+    agentSendTargetInput: byId("agent-send-target"),
+    agentSendMessageInput: byId("agent-send-message"),
+    agentSendTestBtn: byId("agent-send-test-btn"),
+    agentProbeChannelBtn: byId("agent-probe-channel-btn"),
+    agentResolveTargetBtn: byId("agent-resolve-target-btn"),
+    agentChannelActionFeedback: byId("agent-channel-action-feedback"),
+    agentChannelList: byId("agent-channel-list"),
+    agentChannelLogsRefreshBtn: byId("agent-channel-logs-refresh-btn"),
+    agentChannelLogsList: byId("agent-channel-logs-list"),
+  };
+  return createAgentChannelsController({
+    elements, fetchJson,
+    promptText: ({ message, defaultValue }) => window.prompt(message, defaultValue),
+    confirmAction: ({ message }) => window.confirm(message),
+    renderQrCode: (canvas, text) => window.QRCode.toCanvas(canvas, text, { width: 220 }),
+  });
 }

@@ -1,4 +1,5 @@
 pub(crate) mod protocol;
+mod token_bot;
 mod whatsapp_bridge;
 
 use crate::config::{
@@ -25,6 +26,7 @@ use self::protocol::{
     bridge_channel_capabilities, family_for_channel, validate_account_payload,
     CHANNEL_PROTOCOL_VERSION,
 };
+use self::token_bot::{BotProvider, TokenBotAdapter};
 use self::whatsapp_bridge::{
     whatsapp_login_via_embedded, whatsapp_logout_via_embedded, whatsapp_probe_via_embedded,
     whatsapp_send_via_embedded,
@@ -38,7 +40,6 @@ pub struct ChannelUpsertAccountRequest {
     pub channel: String,
     pub account_id: String,
     #[serde(default)]
-    #[allow(dead_code)]
     pub enabled: Option<bool>,
     #[serde(default)]
     pub credentials: Option<Value>,
@@ -60,6 +61,13 @@ pub struct ChannelUpsertAccountRequest {
 pub struct ChannelRemoveAccountRequest {
     pub channel: String,
     pub account_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChannelRenameAccountRequest {
+    pub channel: String,
+    pub account_id: String,
+    pub new_account_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -329,10 +337,6 @@ trait ChannelAdapter: Send + Sync {
 }
 
 struct WhatsAppAdapter;
-struct TokenBotAdapter {
-    channel_id: &'static str,
-    capabilities: &'static [&'static str],
-}
 struct WebhookAdapter {
     channel_id: &'static str,
     capabilities: &'static [&'static str],
@@ -360,6 +364,7 @@ pub(crate) struct ChannelService {
     registry: ChannelRegistry,
     adapters: HashMap<String, Arc<dyn ChannelAdapter>>,
     runtime: Mutex<ChannelRuntimeState>,
+    config_updates: Mutex<()>,
     audit_log: ChannelAuditLog,
 }
 
@@ -373,27 +378,16 @@ impl ChannelService {
         let mut adapters: HashMap<String, Arc<dyn ChannelAdapter>> = HashMap::new();
 
         adapters.insert("whatsapp".to_string(), Arc::new(WhatsAppAdapter));
-        adapters.insert(
-            "telegram".to_string(),
-            Arc::new(TokenBotAdapter {
-                channel_id: "telegram",
-                capabilities: &["send-messages", "receive-messages", "bot-token", "probe"],
-            }),
-        );
-        adapters.insert(
-            "discord".to_string(),
-            Arc::new(TokenBotAdapter {
-                channel_id: "discord",
-                capabilities: &["send-messages", "receive-messages", "bot-token", "probe"],
-            }),
-        );
-        adapters.insert(
-            "slack".to_string(),
-            Arc::new(TokenBotAdapter {
-                channel_id: "slack",
-                capabilities: &["send-messages", "workspace-app", "bot-token", "probe"],
-            }),
-        );
+        for provider in [
+            BotProvider::Telegram,
+            BotProvider::Discord,
+            BotProvider::Slack,
+        ] {
+            adapters.insert(
+                provider.id().into(),
+                Arc::new(TokenBotAdapter::new(provider)),
+            );
+        }
         adapters.insert("irc".to_string(), Arc::new(IrcAdapter));
         adapters.insert(
             "googlechat".to_string(),
@@ -472,6 +466,7 @@ impl ChannelService {
             registry,
             adapters,
             runtime: Mutex::new(ChannelRuntimeState::default()),
+            config_updates: Mutex::new(()),
         }
     }
 
@@ -518,24 +513,8 @@ impl ChannelService {
         request: ChannelUpsertAccountRequest,
     ) -> Result<ChannelView, String> {
         let channel_id = self.resolve_channel_id(&request.channel)?;
-        let provided_credentials = request.credentials.clone();
-        let referenced_credentials = if let Some(secret_ref) = request.credentials_ref.as_deref() {
-            self.load_credentials(Some(secret_ref))?
-        } else {
-            None
-        };
-        validate_account_payload(
-            &channel_id,
-            &request.account_id,
-            provided_credentials
-                .as_ref()
-                .or(referenced_credentials.as_ref()),
-            &request.routing_defaults,
-        )?;
-        self.registry
-            .get(&channel_id)
-            .ok_or_else(|| format!("unknown channel '{}'", request.channel))?;
-
+        validate_account_id(&request.account_id)?;
+        let _guard = self.config_updates.lock().await;
         let mut cfg = self.load_config();
         self.migrate_legacy_channels(&mut cfg);
         let entry = cfg
@@ -544,10 +523,49 @@ impl ChannelService {
             .entry(channel_id.clone())
             .or_default();
 
+        // A renamed account may still own its original vault key and session folder.
+        // Allocate fresh storage when a new account reuses that visible name.
+        if !entry.accounts.contains_key(&request.account_id) {
+            let mut account = ChannelAccountPersistedState::default();
+            if entry.accounts.iter().any(|(id, account)| {
+                account
+                    .storage_id(id)
+                    .eq_ignore_ascii_case(&request.account_id)
+            }) {
+                account.storage_id = Some(Uuid::new_v4().to_string());
+            }
+            entry.accounts.insert(request.account_id.clone(), account);
+        }
         let account = entry
             .accounts
-            .entry(request.account_id.clone())
-            .or_default();
+            .get_mut(&request.account_id)
+            .expect("account inserted");
+        let stored_ref = account.credentials_ref.as_deref();
+        let owned_key = channel_secret_key(&channel_id, account.storage_id(&request.account_id));
+        if request
+            .credentials_ref
+            .as_deref()
+            .is_some_and(|key| Some(key) != stored_ref || key != owned_key)
+        {
+            return Err(channel_error(
+                "permission_error",
+                "Credential reference does not belong to this account",
+            ));
+        }
+        let stored_credentials = if request.credentials.is_none() {
+            self.account_credentials(&channel_id, &request.account_id, account)?
+        } else {
+            None
+        };
+        validate_account_payload(
+            &channel_id,
+            &request.account_id,
+            request.credentials.as_ref().or(stored_credentials.as_ref()),
+            &request.routing_defaults,
+        )?;
+        if let Some(enabled) = request.enabled {
+            account.enabled = enabled;
+        }
         account.metadata = request.metadata;
         account.routing_defaults = request.routing_defaults;
         account.limits = request.limits.unwrap_or_else(|| account.limits.clone());
@@ -555,14 +573,12 @@ impl ChannelService {
             account.adapter_config = request.adapter_config;
         }
         if let Some(credentials) = request.credentials {
-            let secret_key = channel_secret_key(&channel_id, &request.account_id);
+            let secret_key = owned_key;
             open_channel_vault(&self.settings_dir)
                 .map_err(|error| error.to_string())?
                 .set_secret(&secret_key, &credentials.to_string())
                 .map_err(|error| error.to_string())?;
             account.credentials_ref = Some(secret_key);
-        } else if let Some(credentials_ref) = request.credentials_ref {
-            account.credentials_ref = Some(credentials_ref);
         }
         if request.set_as_default {
             entry.default_account_id = Some(request.account_id.clone());
@@ -578,11 +594,57 @@ impl ChannelService {
         Ok(self.build_channel_view(&cfg, &runtime, descriptor))
     }
 
+    pub(crate) async fn rename_account(
+        &self,
+        request: ChannelRenameAccountRequest,
+    ) -> Result<ChannelView, String> {
+        let channel_id = self.resolve_channel_id(&request.channel)?;
+        validate_account_id(&request.account_id)?;
+        validate_account_id(&request.new_account_id)?;
+        let _guard = self.config_updates.lock().await;
+        let mut cfg = self.load_config();
+        self.migrate_legacy_channels(&mut cfg);
+        let entry = cfg
+            .compatibility
+            .channels
+            .get_mut(&channel_id)
+            .ok_or_else(|| channel_error("invalid_request", "No accounts in this channel"))?;
+        if entry.accounts.contains_key(&request.new_account_id) {
+            return Err(channel_error(
+                "invalid_request",
+                "The new account ID already exists",
+            ));
+        }
+        let mut account = entry
+            .accounts
+            .remove(&request.account_id)
+            .ok_or_else(|| channel_error("invalid_request", "Account not found"))?;
+        account
+            .storage_id
+            .get_or_insert_with(|| request.account_id.clone());
+        entry
+            .accounts
+            .insert(request.new_account_id.clone(), account);
+        if entry.default_account_id.as_deref() == Some(&request.account_id) {
+            entry.default_account_id = Some(request.new_account_id);
+        }
+        self.save_config(&cfg).map_err(|error| error.to_string())?;
+        let descriptor = self
+            .registry
+            .get(&channel_id)
+            .cloned()
+            .expect("resolved channel");
+        let runtime = self.runtime.lock().await;
+        Ok(self.build_channel_view(&cfg, &runtime, descriptor))
+    }
+
     pub(crate) async fn remove_account(
         &self,
         request: ChannelRemoveAccountRequest,
     ) -> Result<(), String> {
         let channel_id = self.resolve_channel_id(&request.channel)?;
+        validate_account_id(&request.account_id)?;
+        let _guard = self.config_updates.lock().await;
         let mut cfg = self.load_config();
         self.migrate_legacy_channels(&mut cfg);
         let Some(entry) = cfg.compatibility.channels.get_mut(&channel_id) else {
@@ -595,12 +657,15 @@ impl ChannelService {
         if entry.default_account_id.as_deref() == Some(request.account_id.as_str()) {
             entry.default_account_id = entry.accounts.keys().next().cloned();
         }
-        if let Some(secret_ref) = removed.credentials_ref {
+        self.save_config(&cfg).map_err(|error| error.to_string())?;
+        let storage = removed.storage_id(&request.account_id);
+        let owned_key = channel_secret_key(&channel_id, storage);
+        if removed.credentials_ref.as_deref() == Some(&owned_key) {
+            let secret_ref = owned_key;
             let _ = open_channel_vault(&self.settings_dir)
                 .and_then(|vault| vault.remove_secret(&secret_ref));
         }
-        self.remove_session_state(&channel_id, &request.account_id)?;
-        self.save_config(&cfg).map_err(|error| error.to_string())?;
+        self.remove_session_state(&channel_id, storage)?;
         self.audit(
             "remove_account",
             &channel_id,
@@ -619,6 +684,7 @@ impl ChannelService {
     ) -> Result<ChannelActionResponse, String> {
         let channel_id = self.resolve_channel_id(&request.channel)?;
         let protocol_family = family_for_channel(&channel_id).as_str().to_string();
+        let storage = self.account_storage_id(&channel_id, &request.account_id)?;
         let response = self
             .run_account_operation(
                 &channel_id,
@@ -629,7 +695,7 @@ impl ChannelService {
             )
             .await?;
         if let Some(session_state) = response.session_state.clone() {
-            self.save_session_state(&channel_id, &request.account_id, &session_state)?;
+            self.save_session_state(&channel_id, &storage, &session_state)?;
         }
         Ok(ChannelActionResponse {
             channel: channel_id,
@@ -648,6 +714,7 @@ impl ChannelService {
     ) -> Result<ChannelActionResponse, String> {
         let channel_id = self.resolve_channel_id(&request.channel)?;
         let protocol_family = family_for_channel(&channel_id).as_str().to_string();
+        let storage = self.account_storage_id(&channel_id, &request.account_id)?;
         let response = self
             .run_account_operation(
                 &channel_id,
@@ -658,9 +725,9 @@ impl ChannelService {
             )
             .await?;
         if let Some(session_state) = response.session_state.clone() {
-            self.save_session_state(&channel_id, &request.account_id, &session_state)?;
+            self.save_session_state(&channel_id, &storage, &session_state)?;
         } else {
-            self.remove_session_state(&channel_id, &request.account_id)?;
+            self.remove_session_state(&channel_id, &storage)?;
         }
         Ok(ChannelActionResponse {
             channel: channel_id,
@@ -973,7 +1040,7 @@ impl ChannelService {
                 limits: account.limits.clone(),
                 adapter_config: account.adapter_config.clone(),
                 session: self
-                    .load_session_state(&descriptor.id, account_id)
+                    .load_session_state(&descriptor.id, account.storage_id(account_id))
                     .unwrap_or_default(),
                 capabilities: match family_for_channel(&descriptor.id) {
                     protocol::ChannelTransportFamily::BridgeHttpV1 => {
@@ -1044,6 +1111,7 @@ impl ChannelService {
                 channel.accounts.insert(
                     account_id.clone(),
                     ChannelAccountPersistedState {
+                        storage_id: None,
                         enabled: true,
                         credentials_ref: None,
                         metadata: channel.metadata.clone(),
@@ -1058,11 +1126,26 @@ impl ChannelService {
         }
     }
 
-    fn session_dir(&self, channel: &str, account_id: &str) -> PathBuf {
-        self.settings_dir
+    fn account_storage_id(&self, channel: &str, account_id: &str) -> Result<String, String> {
+        validate_account_id(account_id)?;
+        let mut cfg = self.load_config();
+        self.migrate_legacy_channels(&mut cfg);
+        let account = cfg
+            .compatibility
+            .channels
+            .get(channel)
+            .and_then(|entry| entry.accounts.get(account_id))
+            .ok_or_else(|| channel_error("invalid_request", "Account not found"))?;
+        Ok(account.storage_id(account_id).to_string())
+    }
+
+    fn session_dir(&self, channel: &str, account_id: &str) -> Result<PathBuf, String> {
+        validate_account_id(account_id)?;
+        Ok(self
+            .settings_dir
             .join(CHANNEL_SESSIONS_DIR)
             .join(channel)
-            .join(account_id)
+            .join(account_id))
     }
 
     fn load_session_state(
@@ -1070,7 +1153,7 @@ impl ChannelService {
         channel: &str,
         account_id: &str,
     ) -> Result<ChannelSessionState, String> {
-        let path = self.session_dir(channel, account_id).join("session.json");
+        let path = self.session_dir(channel, account_id)?.join("session.json");
         if !path.exists() {
             return Ok(ChannelSessionState::default());
         }
@@ -1084,7 +1167,7 @@ impl ChannelService {
         account_id: &str,
         session_state: &ChannelSessionState,
     ) -> Result<(), String> {
-        let dir = self.session_dir(channel, account_id);
+        let dir = self.session_dir(channel, account_id)?;
         std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
         let path = dir.join("session.json");
         let raw = serde_json::to_string_pretty(session_state).map_err(|error| error.to_string())?;
@@ -1092,7 +1175,7 @@ impl ChannelService {
     }
 
     fn remove_session_state(&self, channel: &str, account_id: &str) -> Result<(), String> {
-        let dir = self.session_dir(channel, account_id);
+        let dir = self.session_dir(channel, account_id)?;
         if dir.exists() {
             std::fs::remove_dir_all(dir).map_err(|error| error.to_string())?;
         }
@@ -1123,8 +1206,12 @@ impl ChannelService {
         let account = entry.accounts.get(account_id).cloned().ok_or_else(|| {
             format!("account '{account_id}' not found for channel '{channel_id}'")
         })?;
-        if !account.enabled {
-            return Err(format!("account '{account_id}' is disabled"));
+        validate_account_id(account_id)?;
+        if !account.enabled && operation != "logout" {
+            return Err(channel_error(
+                "permission_error",
+                "Channel account is disabled",
+            ));
         }
 
         self.enforce_rate_limit(&channel_id, account_id, &account.limits)
@@ -1139,11 +1226,11 @@ impl ChannelService {
         let ctx = AdapterContext {
             channel: channel_id.clone(),
             account_id: account_id.to_string(),
-            session_root: self.session_dir(&channel_id, account_id),
+            session_root: self.session_dir(&channel_id, account.storage_id(account_id))?,
             _metadata: account.metadata.clone(),
             _routing_defaults: account.routing_defaults.clone(),
             _adapter_config: account.adapter_config.clone(),
-            credentials: self.load_credentials(account.credentials_ref.as_deref())?,
+            credentials: self.account_credentials(&channel_id, account_id, &account)?,
         };
 
         let result = self
@@ -1160,6 +1247,7 @@ impl ChannelService {
             )
             .await;
 
+        let _guard = self.config_updates.lock().await;
         match &result {
             Ok(_) => {
                 self.update_health(&channel_id, account_id, |health| {
@@ -1214,8 +1302,14 @@ impl ChannelService {
         F: FnMut() -> Fut,
         Fut: Future<Output = Result<T, String>>,
     {
+        // A timeout can occur after the provider already accepted a message.
+        let max_retries = if operation == "send_message" {
+            0
+        } else {
+            policy.max_retries
+        };
         let mut last_error = None;
-        for attempt in 0..=policy.max_retries {
+        for attempt in 0..=max_retries {
             let timed =
                 tokio::time::timeout(Duration::from_millis(policy.timeout_ms), action()).await;
             match timed {
@@ -1223,7 +1317,7 @@ impl ChannelService {
                 Ok(Err(error)) => last_error = Some(error),
                 Err(_) => last_error = Some(format!("operation '{operation}' timed out")),
             }
-            if attempt < policy.max_retries {
+            if attempt < max_retries {
                 let backoff = policy.backoff_base_ms.saturating_mul(2_u64.pow(attempt));
                 tokio::time::sleep(Duration::from_millis(backoff)).await;
             }
@@ -1286,6 +1380,27 @@ impl ChannelService {
             .ok_or_else(|| format!("account '{account_id}' not found for channel '{channel}'"))?;
         mutate(health);
         self.save_config(&cfg).map_err(|error| error.to_string())
+    }
+
+    fn account_credentials(
+        &self,
+        channel: &str,
+        account_id: &str,
+        account: &ChannelAccountPersistedState,
+    ) -> Result<Option<Value>, String> {
+        validate_account_id(account.storage_id(account_id))?;
+        let key = channel_secret_key(channel, account.storage_id(account_id));
+        if account
+            .credentials_ref
+            .as_ref()
+            .is_some_and(|stored| stored != &key)
+        {
+            return Err(channel_error(
+                "permission_error",
+                "Re-enter this account's credentials",
+            ));
+        }
+        self.load_credentials(account.credentials_ref.as_deref())
     }
 
     fn load_credentials(&self, credentials_ref: Option<&str>) -> Result<Option<Value>, String> {
@@ -1423,76 +1538,6 @@ impl ChannelAdapter for WhatsAppAdapter {
         }
         Ok(SendResult {
             message_id: format!("wa-{}", hash_message_target(&target)),
-        })
-    }
-}
-
-#[async_trait]
-impl ChannelAdapter for TokenBotAdapter {
-    fn capabilities(&self) -> Vec<String> {
-        self.capabilities
-            .iter()
-            .map(|value| (*value).to_string())
-            .collect()
-    }
-
-    async fn login(&self, ctx: AdapterContext) -> Result<AdapterResponse, String> {
-        require_token_credentials(&ctx)?;
-        std::fs::create_dir_all(&ctx.session_root).map_err(|error| error.to_string())?;
-        Ok(AdapterResponse {
-            status: "connected".to_string(),
-            message: format!("{} account authenticated.", self.channel_id),
-            details: Value::Null,
-            session_state: Some(ChannelSessionState {
-                status: "connected".to_string(),
-                session_dir: Some(ctx.session_root.display().to_string()),
-                qr_code: None,
-                qr_image_data_url: None,
-                connected_at_epoch_ms: Some(epoch_ms_now()),
-                disconnected_at_epoch_ms: None,
-            }),
-        })
-    }
-
-    async fn logout(&self, ctx: AdapterContext) -> Result<AdapterResponse, String> {
-        Ok(AdapterResponse {
-            status: "logged_out".to_string(),
-            message: format!("{} account disconnected.", self.channel_id),
-            details: Value::Null,
-            session_state: Some(ChannelSessionState {
-                status: "logged_out".to_string(),
-                session_dir: Some(ctx.session_root.display().to_string()),
-                qr_code: None,
-                qr_image_data_url: None,
-                connected_at_epoch_ms: None,
-                disconnected_at_epoch_ms: Some(epoch_ms_now()),
-            }),
-        })
-    }
-
-    async fn probe(&self, ctx: AdapterContext) -> Result<ProbeResult, String> {
-        require_token_credentials(&ctx)?;
-        Ok(ProbeResult {
-            status: "healthy".to_string(),
-            message: format!("{} token/account metadata looks valid.", self.channel_id),
-        })
-    }
-
-    async fn resolve(&self, _ctx: AdapterContext, target: String) -> Result<ResolveResult, String> {
-        Ok(ResolveResult {
-            resolved_target: normalize_target(target),
-        })
-    }
-
-    async fn send_message(
-        &self,
-        ctx: AdapterContext,
-        target: String,
-        _message: String,
-    ) -> Result<SendResult, String> {
-        require_token_credentials(&ctx)?;
-        Ok(SendResult {
-            message_id: format!("{}-{}", self.channel_id, hash_message_target(&target)),
         })
     }
 }
@@ -1999,6 +2044,29 @@ fn open_channel_vault(settings_dir: &Path) -> Result<SecretsVault, std::io::Erro
     SecretsVault::open(settings_dir)
 }
 
+fn validate_account_id(account_id: &str) -> Result<(), String> {
+    let basename = account_id
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_uppercase();
+    let reserved = matches!(basename.as_str(), "CON" | "NUL" | "PRN" | "AUX")
+        || (basename.starts_with("COM") || basename.starts_with("LPT"))
+            && basename.len() == 4
+            && basename.as_bytes()[3].is_ascii_digit();
+    if reserved
+        || account_id.trim().is_empty()
+        || account_id.trim() != account_id
+        || account_id.ends_with('.')
+        || account_id.chars().any(|c| {
+            matches!(c, '/' | '\\' | ':' | '<' | '>' | '"' | '|' | '?' | '*') || c.is_control()
+        })
+    {
+        return Err(channel_error("invalid_request", "Invalid account ID"));
+    }
+    Ok(())
+}
+
 fn channel_secret_key(channel: &str, account_id: &str) -> String {
     format!("channels.{channel}.{account_id}.credentials")
 }
@@ -2129,9 +2197,10 @@ async fn http_json_request_json(
     extra_headers: Option<&[(&str, &str)]>,
 ) -> Result<Value, String> {
     let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(5))
         .build()
-        .map_err(|error| channel_error("provider_error", &format!("http client error: {error}")))?;
+        .map_err(|_| channel_error("provider_error", "could not initialize HTTP client"))?;
     let mut request = client.request(method, url);
     if let Some(token) = bearer {
         request = request.bearer_auth(token);
@@ -2146,7 +2215,6 @@ async fn http_json_request_json(
     }
     let response = request.send().await.map_err(map_reqwest_error)?;
     let status = response.status();
-    let text = response.text().await.map_err(map_reqwest_error)?;
     if !status.is_success() {
         let code = match status.as_u16() {
             401 | 403 => "auth_error",
@@ -2159,9 +2227,10 @@ async fn http_json_request_json(
         };
         return Err(channel_error(
             code,
-            &format!("http {status} from {url}: {}", truncate_text(&text, 200)),
+            &format!("channel endpoint returned HTTP {}", status.as_u16()),
         ));
     }
+    let text = response.text().await.map_err(map_reqwest_error)?;
     if text.trim().is_empty() {
         return Ok(Value::Null);
     }
@@ -2173,9 +2242,9 @@ fn map_reqwest_error(error: reqwest::Error) -> String {
         return channel_error("network_error", "request timed out");
     }
     if error.is_connect() {
-        return channel_error("network_error", &format!("connection failed: {error}"));
+        return channel_error("network_error", "could not connect to channel endpoint");
     }
-    channel_error("provider_error", &error.to_string())
+    channel_error("provider_error", "channel HTTP request failed")
 }
 
 fn channel_error(code: &str, message: &str) -> String {
@@ -2217,12 +2286,7 @@ fn logged_out_session_state(ctx: &AdapterContext) -> ChannelSessionState {
 
 fn redact_url(url: &str) -> String {
     reqwest::Url::parse(url)
-        .map(|parsed| {
-            let mut out = parsed;
-            let _ = out.set_password(None);
-            out.set_query(None);
-            out.to_string()
-        })
+        .map(|parsed| parsed.origin().ascii_serialization())
         .unwrap_or_else(|_| "<invalid-url>".to_string())
 }
 
@@ -2388,6 +2452,12 @@ mod tests {
                         body.clone(),
                     ));
                     let payload = match path.as_str() {
+                        "/botbot-a/getMe" | "/botbot-b/getMe" => {
+                            json!({"ok": true, "result": {"id": 123, "is_bot": true}})
+                        }
+                        "/botbot-a/sendMessage" => {
+                            json!({"ok": true, "result": {"message_id": 44}})
+                        }
                         "/login" => json!({"status":"connected","message":"ok"}),
                         "/logout" => json!({"status":"logged_out","message":"bye"}),
                         "/probe" => json!({"status":"healthy","message":"probe-ok"}),
@@ -2537,7 +2607,15 @@ mod tests {
     #[tokio::test]
     async fn telegram_multi_account_requires_explicit_resolution_when_ambiguous() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let service = ChannelService::new(dir.path().join("settings.json"));
+        let mut service = ChannelService::new(dir.path().join("settings.json"));
+        let fixture = spawn_json_server(Default::default()).await;
+        service.adapters.insert(
+            "telegram".into(),
+            Arc::new(TokenBotAdapter::with_fixture(
+                BotProvider::Telegram,
+                fixture,
+            )),
+        );
 
         for account_id in ["bot-a", "bot-b"] {
             service
@@ -2587,6 +2665,7 @@ mod tests {
             .await
             .expect("send explicit account");
         assert_eq!(sent.account_id, "bot-a");
+        assert_eq!(sent.message_id, "44");
     }
 
     #[tokio::test]
@@ -2793,6 +2872,63 @@ mod tests {
         let joined = commands.lock().expect("lock").join("\n");
         assert!(joined.contains("NICK mlxbot"));
         assert!(joined.contains("PRIVMSG #mlx :hello"));
+    }
+
+    #[test]
+    fn account_storage_requires_a_single_portable_name() {
+        for name in ["", ".", "..", "two/names", "two\\names", "NUL", "test.", "COM1.txt"] {
+            assert!(validate_account_id(name).is_err(), "{name:?}");
+        }
+        assert!(validate_account_id("team-são.2026").is_ok());
+    }
+
+    #[tokio::test]
+    async fn saved_credentials_follow_the_account_and_cannot_be_borrowed() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = ChannelService::new(dir.path().join("settings.json"));
+        let upsert = |id: &str, extra: Value| {
+            let mut data = json!({ "channel": "mattermost", "account_id": id });
+            data.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            serde_json::from_value::<ChannelUpsertAccountRequest>(data).unwrap()
+        };
+        let first = json!({"webhook_url": "http://127.0.0.1:1/ops"});
+        service.upsert_account(upsert("ops", json!({"credentials": first, "set_as_default": true}))).await.unwrap();
+        let disabled = service.upsert_account(upsert("ops", json!({"enabled": false}))).await.unwrap();
+        assert!(!disabled.accounts[0].enabled);
+        let auth = ChannelAuthRequest { channel: "mattermost".into(), account_id: "ops".into() };
+        assert!(service.login(auth).await.unwrap_err().starts_with("permission_error"));
+        let send: MessageSendRequest = serde_json::from_value(json!({"channel":"mattermost","target":"room","message":"check"})).unwrap();
+        assert!(service.send_message(send).await.unwrap_err().starts_with("permission_error"));
+        let other_ref = json!({"credentials_ref": "channels.mattermost.ops.credentials"});
+        assert!(service.upsert_account(upsert("another", other_ref)).await.unwrap_err().starts_with("permission_error"));
+
+        let rename = ChannelRenameAccountRequest { channel: "mattermost".into(), account_id: "ops".into(), new_account_id: "team".into() };
+        let renamed = service.rename_account(rename).await.unwrap();
+        assert_eq!(renamed.default_account_id.as_deref(), Some("team"));
+        assert_eq!(renamed.accounts.len(), 1);
+        let second = json!({"webhook_url": "http://127.0.0.1:1/other"});
+        service.upsert_account(upsert("ops", json!({"credentials": second}))).await.unwrap();
+        service.remove_account(ChannelRemoveAccountRequest { channel: "mattermost".into(), account_id: "ops".into() }).await.unwrap();
+        let reloaded = ChannelService::new(dir.path().join("settings.json"));
+        let available = reloaded.upsert_account(upsert("team", json!({"enabled":true}))).await.unwrap();
+        assert!(available.accounts[0].enabled);
+        assert_eq!(reloaded.load_credentials(available.accounts[0].credentials_ref.as_deref()).unwrap(), Some(first));
+    }
+
+    #[tokio::test]
+    async fn unconfirmed_sends_only_attempt_delivery_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = ChannelService::new(dir.path().join("settings.json"));
+        let count = std::sync::atomic::AtomicUsize::new(0);
+        let policy = ChannelAccountPolicy { max_retries: 2, backoff_base_ms: 1, ..Default::default() };
+        let attempt = || {
+            count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            async { Err::<(), _>("network_error: connection closed".to_string()) }
+        };
+        assert!(service.execute_with_policy("mattermost", "ops", "send_message", None, &policy, attempt).await.is_err());
+        assert_eq!(count.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert!(service.execute_with_policy("mattermost", "ops", "probe", None, &policy, attempt).await.is_err());
+        assert_eq!(count.load(std::sync::atomic::Ordering::Relaxed), 4);
     }
 
     #[tokio::test]

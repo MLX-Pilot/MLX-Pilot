@@ -522,14 +522,45 @@
                     </section>
 
                     <section class="agent-config-pane" data-config-pane="integrations">
-                      <p class="agent-config-pane-hint">Canais conectados ao agente (Slack, GitHub, webhooks, etc).</p>
-                      <div class="agent-section-head" style="margin-bottom:12px">
-                        <h4>Channels</h4>
-                        <button class="add-btn" id="btn-new-channel">+ Novo Channel</button>
+                      <div class="agent-section-head">
+                        <h4>Contas de canais</h4>
+                        <button class="action-btn" id="agent-channels-refresh-btn" type="button">Atualizar</button>
                       </div>
-                      <div class="channel-cards" id="channel-list">
-                        <div style="padding:16px;text-align:center;color:var(--text-tertiary)">Carregando channels...</div>
+                      <div class="channel-account-layout">
+                        <div class="channel-account-form">
+                          <label class="settings-field">Canal<select class="input" id="agent-channel-select"></select></label>
+                          <label class="settings-field">Identificador da conta<input class="input" id="agent-channel-account-id" autocomplete="off" placeholder="equipe" /></label>
+                          <label class="settings-field"><span id="agent-channel-credentials-label">Credencial</span><input type="password" class="input" id="agent-channel-credentials" autocomplete="new-password" spellcheck="false" /></label>
+                          <p class="meta-note" id="agent-channel-credential-hint"></p>
+                          <details class="channel-details"><summary>Opções avançadas</summary>
+                            <label class="settings-field">Metadados (JSON)<textarea class="input" id="agent-channel-metadata" rows="2"></textarea></label>
+                            <label class="settings-field">Roteamento (JSON)<textarea class="input" id="agent-channel-routing-defaults" rows="2"></textarea></label>
+                            <label class="settings-field">Adaptador (JSON)<textarea class="input" id="agent-channel-adapter-config" rows="2"></textarea></label>
+                          </details>
+                          <div class="channel-account-actions">
+                            <label><input type="checkbox" id="agent-channel-enabled" checked /> Conta ativa</label>
+                            <label><input type="checkbox" id="agent-channel-set-default" /> Padrão do canal</label>
+                          </div>
+                          <div class="channel-account-actions">
+                            <button class="primary-btn" id="agent-channel-save-btn" type="button">Salvar conta</button>
+                            <button class="action-btn" id="agent-channel-clear-btn" type="button">Nova conta</button>
+                          </div>
+                          <p class="meta-note" id="agent-channel-form-feedback" role="status"></p>
+                        </div>
+                        <div id="agent-channel-list" class="channel-account-list" data-configured-only></div>
                       </div>
+                      <div id="agent-channel-qr-panel" hidden><canvas id="agent-channel-qr-canvas" width="220" height="220"></canvas><img id="agent-channel-qr-image" hidden alt="QR do WhatsApp" /><p id="agent-channel-qr-text" class="meta-note"></p></div>
+                      <details class="channel-details"><summary>Testar conexão e envio</summary>
+                        <div class="channel-account-layout">
+                          <label class="settings-field">Canal<select id="agent-send-channel" class="input"></select></label>
+                          <label class="settings-field">Conta<select id="agent-send-account" class="input"></select></label>
+                          <label class="settings-field">Destino<input id="agent-send-target" class="input" /></label>
+                          <label class="settings-field">Mensagem<input id="agent-send-message" class="input" /></label>
+                        </div>
+                        <div class="channel-account-actions"><button id="agent-probe-channel-btn" type="button" class="action-btn">Verificar conexão</button><button id="agent-resolve-target-btn" type="button" class="action-btn">Verificar destino</button><button id="agent-send-test-btn" type="button" class="action-btn">Enviar mensagem</button></div>
+                      </details>
+                      <p class="meta-note" id="agent-channel-action-feedback" role="status"></p>
+                      <details class="channel-details"><summary>Histórico de operações</summary><ul id="agent-channel-logs-list"></ul><button id="agent-channel-logs-refresh-btn" type="button" class="action-btn">Atualizar histórico</button></details>
                     </section>
 
                     <section class="agent-config-pane" data-config-pane="observability">
@@ -1079,6 +1110,7 @@
   <!-- Wave-1 feature overlays (presets manager, etc.) -->
   <div id="wave1-modal-root"></div>
 
+  <script src="vendor/qrcode.bundle.js"></script>
   <script src="app.js"></script>
   <script src="wave1.js"></script>
   <script src="wave5.js"></script>

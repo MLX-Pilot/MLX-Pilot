@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { startBotFixture } from "./channel-fixtures.mjs";
+
 import {
   assertOkJson,
   buildLegacySettings,
@@ -21,13 +23,16 @@ export async function runReleaseDryRunChecklist() {
   const daemonPort = await pickPort();
   let daemon;
   let provider;
+  let bot;
 
   try {
+    bot = await startBotFixture("tg-dry-run");
     await seedReleaseGateSkills(harness.skillsDir);
     await writeJson(harness.settingsPath, buildLegacySettings(harness.workspace));
     provider = await startOpenAiMockServer({ finalPrefix: "dry-run" });
 
     daemon = startDaemon({
+      env: { MLX_CHANNEL_BOT_FIXTURE_URL: bot.baseUrl },
       workspace: harness.workspace,
       settingsPath: harness.settingsPath,
       port: daemonPort,
@@ -124,6 +129,7 @@ export async function runReleaseDryRunChecklist() {
   } finally {
     await stopDaemon(daemon);
     await provider?.close?.();
+    await bot?.close();
   }
 }
 
