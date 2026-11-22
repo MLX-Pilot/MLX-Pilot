@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { runPluginBrowserSmoke, REQUIRED_PLUGIN_BROWSER_CASES } from "./plugin-browser-smoke.mjs";
 import { runChannelsRealValidation } from "./channels-real-validation.mjs";
 import { runLoadSmoke } from "./load-smoke.mjs";
 import { runMigrationUpgradeRollback } from "./migration-upgrade-rollback.mjs";
@@ -20,6 +21,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 
 const defaultRunners = {
+  plugin_browser_smoke: runPluginBrowserSmoke,
   channels_real_validation: runChannelsRealValidation,
   load_smoke: runLoadSmoke,
   migration_upgrade_rollback: runMigrationUpgradeRollback,
@@ -65,38 +67,40 @@ export function computeDecision(blocks) {
     else if (!passed(id)) blockers.push(`${id}: ${entries[0].status} (must execute and pass)`);
   }
 
-  const plugin = matches("plugin_security_smoke")[0];
-  const cases = Array.isArray(plugin?.cases) ? plugin.cases : [];
-  const seenCases = new Set();
-  let casesOk = REQUIRED_PLUGIN_SECURITY_CASES.length > 0 && cases.length > 0;
-  for (const entry of cases) {
-    if (!entry?.id || seenCases.has(entry.id) || entry.status !== "pass" || entry.executed === false) {
-      casesOk = false;
-      blockers.push(`Plugin case ${entry?.id || "<missing id>"}: duplicate, invalid or not passed (${entry?.status})`);
+  function passedCases(blockId, required) {
+    const cases = matches(blockId)[0]?.cases;
+    if (!Array.isArray(cases) || !required.length || !cases.length) {
+      blockers.push(`${blockId}: no required cases executed`);
+      return false;
     }
-    seenCases.add(entry?.id);
-  }
-  for (const id of REQUIRED_PLUGIN_SECURITY_CASES) {
-    if (!seenCases.has(id)) {
-      casesOk = false;
-      blockers.push(`Plugin case ${id}: not executed`);
+    const initialBlockers = blockers.length;
+    for (const id of required) {
+      const entries = cases.filter((entry) => entry?.id === id);
+      if (entries.length !== 1 || entries[0].status !== "pass" || entries[0].executed === false) {
+        blockers.push(`${blockId}/${id}: expected one executed pass`);
+      }
     }
+    for (const entry of cases) {
+      if (!required.includes(entry?.id)) blockers.push(`${blockId}: unexpected case ${entry?.id}`);
+    }
+    return initialBlockers === blockers.length;
   }
-  if (!cases.length) blockers.push("Plugin security: no cases executed");
-  if (!REQUIRED_PLUGIN_SECURITY_CASES.length) blockers.push("Plugin security: required case list is empty");
+  const casesOk = passedCases("plugin_security_smoke", REQUIRED_PLUGIN_SECURITY_CASES);
+  const browserCasesOk = passedCases("plugin_browser_smoke", REQUIRED_PLUGIN_BROWSER_CASES);
 
   const securityHighFindings = blocks.flatMap((block) => block.findings || [])
     .filter((entry) => ["high", "critical"].includes(entry.severity));
   blockers.push(...securityHighFindings.map((entry) => `Security ${entry.severity}: ${entry.title}`));
   const allBlocksPassed = REQUIRED_BLOCK_IDS.every(passed) && blocks.every((block) => block.status === "pass" && block.executed !== false);
   const pluginOk = passed("plugin_security_smoke") && casesOk;
-  const go = allBlocksPassed && pluginOk && securityHighFindings.length === 0 && blockers.length === 0;
+  const go = allBlocksPassed && pluginOk && browserCasesOk && securityHighFindings.length === 0 && blockers.length === 0;
 
   return {
     status: go ? "GO" : "NO-GO",
     criteria: {
       all_required_blocks_executed_and_passed: allBlocksPassed,
       plugin_security_cases_executed_and_passed: pluginOk,
+      plugin_browser_cases_executed_and_passed: passed("plugin_browser_smoke") && browserCasesOk,
       no_release_blocking_security_findings: passed("security_audit_smoke") && securityHighFindings.length === 0,
       no_state_loss_in_migration_or_restart: passed("migration_upgrade_rollback") && passed("crash_recovery_smoke"),
       no_crash_under_short_load: passed("load_smoke"),
@@ -141,6 +145,11 @@ export function renderMarkdown(report) {
       ? "- No findings in the completed security audit."
       : "- Security audit did not pass or was not executed; see blockers.");
 
+  const browser = report.results.plugin_browser_smoke;
+  const browserLines = REQUIRED_PLUGIN_BROWSER_CASES.map((id) => {
+    const entry = browser?.cases?.find((item) => item?.id === id);
+    return `- ${id}: ${String(entry?.status || "not_run").toUpperCase()}`;
+  }).join("\n");
   const plugin = report.results.plugin_security_smoke;
   const pluginCases = Array.isArray(plugin?.cases) ? plugin.cases : [];
   const pluginLines = REQUIRED_PLUGIN_SECURITY_CASES.map((id) => {
@@ -190,6 +199,10 @@ ${loadLines || (loadBlock?.status === "pass"
 ## Security Findings
 
 ${securityFindings}
+
+## Browser and daemon
+
+${browserLines}
 
 ## Plugin Security
 

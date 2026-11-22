@@ -86,3 +86,32 @@ node --test scripts/tests/release-gate.test.mjs scripts/tests/plugin-bridge-secu
 O CI roda essas regressões, compila o daemon, executa a auditoria de plugins e
 publica o artefato `plugin-security-audit`, inclusive quando a auditoria falha.
 Os demais blocos do release gate continuam exigindo sua própria execução.
+
+## Reading Notes no navegador
+
+O bloco `plugin_browser_smoke` abre o frontend distribuído e usa o daemon local
+com estado temporário. A pesquisa usa uma resposta de catálogo em loopback para
+que os livros e os documentos tenham o mesmo conteúdo em todas as execuções.
+
+Com Extism JS PDK e Binaryen no PATH (o workflow fixa as versões e verifica os
+downloads), prepare o pacote e o navegador na raiz do projeto.
+
+```sh
+cargo build --locked -p mlx-ollama-daemon
+npm ci --prefix apps/desktop-ui
+npm ci --prefix packages/plugin-sdk
+npm ci --prefix plugins/reading-notes
+npm run build --prefix plugins/reading-notes
+npm run pack --prefix plugins/reading-notes
+npm exec --prefix apps/desktop-ui -- playwright install chromium
+RELEASE_GATE_OUTPUT_DIR=output/playwright/plugins node scripts/release-gate/plugin-browser-smoke.mjs
+```
+
+O diretório de saída reúne a gravação da interface, os arquivos exportados e
+os resultados do percurso. Com Google Chrome instalado, a variável
+`RELEASE_GATE_BROWSER_CHANNEL=chrome` seleciona esse navegador. A execução
+completa por `run-all.mjs` exige o bloco e todos os seus casos.
+
+Para verificar também o serviço externo com o pacote compilado, execute
+`node scripts/release-gate/reading-notes-live.mjs`. Esse resultado depende da
+disponibilidade da Open Library no momento da consulta.
