@@ -1,0 +1,11 @@
+{
+  "kind": "inference_provider",
+  "api_version": 2,
+  "provider_abi": 1,
+  "id": "fixture",
+  "name": "Fixture provider",
+  "version": "1.0.0",
+  "permissions": ["compute"],
+  "capabilities": {"streaming": false, "tool_calls": false},
+  "config_schema": {"type": "object", "additionalProperties": false}
+}

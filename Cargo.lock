@@ -2203,6 +2203,7 @@ dependencies = [
  "anyhow",
  "extism",
  "jsonschema",
+ "mlx-ollama-core",
  "serde",
  "serde_json",
  "sha2",

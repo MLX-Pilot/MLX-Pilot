@@ -60,6 +60,8 @@ O frontend roda em iframe de origem opaca. O host verifica a janela emissora e u
 
 ### Contrato de plugin
 
+Para autoria de providers de inferência, consulte a proposta de ABI com prova de carregamento executável. [RFC de providers](provider-plugin-abi.md).
+
 Um `.mlxplugin.json` contém `manifest` e `wasm_base64`. O manifesto declara `api_version: 1`, `id`, `name`, `version`, `permissions`, `tools` e, opcionalmente, `services` e `frontend: {html, css, javascript}` (até 1 MiB). O inventário retorna `has_frontend` sem incluir os assets; eles são carregados ao abrir o plugin. Cada ferramenta contém `name`, `description`, `parameters` (JSON Schema de objeto), `export` e `mutating`.
 
 `services` contém até 20 declarações `{id, name, base_url, methods, credential?}`. O campo opcional `credential` descreve `{id, header, prefix}` e nunca contém uma chave. IDs usam `snake_case`; `methods` lista métodos HTTP autorizáveis. A URL declarada usa HTTPS; HTTP no manifesto só é aceito em loopback. URLs não podem conter usuário/senha, query ou fragmento. O usuário pode configurar o destino autorizado no workspace, respeitando HTTPS ou a autorização explícita de rede local.
