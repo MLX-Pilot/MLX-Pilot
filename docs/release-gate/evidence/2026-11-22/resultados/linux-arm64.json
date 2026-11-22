@@ -1,0 +1,51 @@
+{
+  "package": "MLX Pilot_0.1.0_arm64.deb",
+  "sha256": "181a960569cf77a8eef62db54f3352bcff9966f1ab079384a27925ff94f05b23",
+  "architecture": "arm64",
+  "installed_version": "0.1.0",
+  "status": "pass",
+  "ollama_model": "qwen3:0.6b",
+  "health": {
+    "status": "degraded",
+    "provider": "ollama",
+    "provider_ready": true,
+    "degraded": true
+  },
+  "listener_owned_by_app": true,
+  "persisted_answer": "Hello! How can I assist you today?",
+  "startup_policy": {
+    "provider": "ollama",
+    "model_id": "qwen3:0.6b",
+    "execution_mode": "locked",
+    "temperature": 0.0
+  },
+  "ui_policy": {
+    "provider": "ollama",
+    "model_id": "qwen3:0.6b",
+    "execution_mode": "locked",
+    "temperature": 0.0
+  },
+  "post_conversation_policy": {
+    "provider": "ollama",
+    "model_id": "qwen3:0.6b",
+    "execution_mode": "locked",
+    "temperature": 0.0
+  },
+  "sessao_criada": true,
+  "source": "Commit 24b9525e26bf0194228703d9f2c23ccd008f5a71",
+  "ambiente": {
+    "commit": "24b9525e26bf0194228703d9f2c23ccd008f5a71",
+    "host_macos": "26.3.1",
+    "host_arch": "arm64",
+    "lima": "limactl version 2.2.1",
+    "virtualization": "vz",
+    "guest_arch": "aarch64",
+    "guest_kernel": "6.8.0-142-generic",
+    "guest_os": "Ubuntu 24.04.5 LTS",
+    "webkitgtk": "2.52.6",
+    "rustc": "rustc 1.93.0 (254b59607 2026-01-19)"
+  },
+  "window_title": "MLX Pilot — Orbital Command",
+  "session_tool_events": 0,
+  "audit_tool_events": 0
+}

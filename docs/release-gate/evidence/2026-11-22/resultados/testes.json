@@ -1,0 +1,37 @@
+{
+  "workspace-rust": {
+    "aprovados": 502,
+    "falhas": 0,
+    "comando": "cargo test --workspace --locked"
+  },
+  "interface-desktop": {
+    "aprovados": 51,
+    "falhas": 0,
+    "comando": "node --test apps/desktop-ui/e2e/agent-control-plane.test.js apps/desktop-ui/e2e/agent-workspace-ui.test.js apps/desktop-ui/e2e/channels-smoke.test.js apps/desktop-ui/e2e/hardware-mac-simulator.test.js apps/desktop-ui/e2e/plugin-manager.test.js apps/desktop-ui/e2e/skills-smoke.test.js"
+  },
+  "regressoes-gate": {
+    "aprovados": 53,
+    "falhas": 0,
+    "comando": "node --test scripts/tests/plugin-bridge-security.test.mjs scripts/tests/presentation-verifier.test.mjs scripts/tests/preview-servers.test.mjs scripts/tests/release-gate.test.mjs"
+  },
+  "studio": {
+    "aprovados": 67,
+    "falhas": 0,
+    "comando": "npm test --prefix plugins/presentation-studio"
+  },
+  "sdk": {
+    "aprovados": 10,
+    "falhas": 0,
+    "comando": "npm test --prefix packages/plugin-sdk"
+  },
+  "reading-notes": {
+    "aprovados": 8,
+    "falhas": 0,
+    "comando": "npm test --prefix plugins/reading-notes"
+  },
+  "prova-provider-wasm": {
+    "aprovados": 2,
+    "falhas": 0,
+    "comando": "cargo test --locked -p mlx-plugin-runtime --test provider_abi"
+  }
+}

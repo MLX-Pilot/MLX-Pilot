@@ -1,99 +1,89 @@
 {
-  "generated_at": "2026-10-30T21:21:28.863Z",
+  "generated_at": "2026-11-22T09:54:53.931Z",
   "repo": ".",
   "revision": {
-    "commit": "47d941d398f44d4a99d89c3c3dc87de5313c6e62",
-    "dirty": true
+    "commit": "24b9525e26bf0194228703d9f2c23ccd008f5a71",
+    "dirty": false
   },
   "environment": {
-    "node": "v22.19.0",
-    "platform": "win32",
-    "architecture": "x64"
+    "node": "v22.22.0",
+    "platform": "darwin",
+    "architecture": "arm64"
   },
-  "scope": "partial",
+  "scope": "full",
   "selected_blocks": [
+    "plugin_browser_smoke",
+    "channels_real_validation",
+    "load_smoke",
+    "migration_upgrade_rollback",
+    "security_audit_smoke",
+    "crash_recovery_smoke",
+    "release_dry_run",
     "plugin_security_smoke"
   ],
   "decision": {
-    "status": "NO-GO",
+    "status": "GO",
     "criteria": {
-      "all_required_blocks_executed_and_passed": false,
+      "all_required_blocks_executed_and_passed": true,
       "plugin_security_cases_executed_and_passed": true,
-      "no_release_blocking_security_findings": false,
-      "no_state_loss_in_migration_or_restart": false,
-      "no_crash_under_short_load": false,
-      "pending_channels_tested_with_explicit_result": false,
-      "dry_run_completed_or_checklist_validated": false
+      "plugin_browser_cases_executed_and_passed": true,
+      "no_release_blocking_security_findings": true,
+      "no_state_loss_in_migration_or_restart": true,
+      "no_crash_under_short_load": true,
+      "pending_channels_tested_with_explicit_result": true,
+      "dry_run_completed_or_checklist_validated": true
     },
-    "blockers": [
-      "channels_real_validation: not selected by --only plugin_security_smoke",
-      "load_smoke: not selected by --only plugin_security_smoke",
-      "migration_upgrade_rollback: not selected by --only plugin_security_smoke",
-      "security_audit_smoke: not selected by --only plugin_security_smoke",
-      "crash_recovery_smoke: not selected by --only plugin_security_smoke",
-      "release_dry_run: not selected by --only plugin_security_smoke",
-      "channels_real_validation: not_run (must execute and pass)",
-      "load_smoke: not_run (must execute and pass)",
-      "migration_upgrade_rollback: not_run (must execute and pass)",
-      "security_audit_smoke: not_run (must execute and pass)",
-      "crash_recovery_smoke: not_run (must execute and pass)",
-      "release_dry_run: not_run (must execute and pass)"
-    ]
+    "blockers": []
   },
   "blocks": [
     {
+      "id": "plugin_browser_smoke",
+      "title": "Reading Notes and Studio in Chromium",
+      "status": "pass",
+      "executed": true,
+      "blockers": []
+    },
+    {
       "id": "channels_real_validation",
-      "title": "channels_real_validation",
-      "status": "not_run",
-      "executed": false,
-      "blockers": [
-        "channels_real_validation: not selected by --only plugin_security_smoke"
-      ]
+      "title": "Bloco 1 - Canais e controle de contas",
+      "status": "pass",
+      "executed": true,
+      "blockers": []
     },
     {
       "id": "load_smoke",
-      "title": "load_smoke",
-      "status": "not_run",
-      "executed": false,
-      "blockers": [
-        "load_smoke: not selected by --only plugin_security_smoke"
-      ]
+      "title": "Bloco 2 - Carga curta e concorrencia",
+      "status": "pass",
+      "executed": true,
+      "blockers": []
     },
     {
       "id": "migration_upgrade_rollback",
-      "title": "migration_upgrade_rollback",
-      "status": "not_run",
-      "executed": false,
-      "blockers": [
-        "migration_upgrade_rollback: not selected by --only plugin_security_smoke"
-      ]
+      "title": "Bloco 3 - Upgrade e rollback de migracao",
+      "status": "pass",
+      "executed": true,
+      "blockers": []
     },
     {
       "id": "security_audit_smoke",
-      "title": "security_audit_smoke",
-      "status": "not_run",
-      "executed": false,
-      "blockers": [
-        "security_audit_smoke: not selected by --only plugin_security_smoke"
-      ]
+      "title": "Bloco 4 - Auditoria pratica de seguranca",
+      "status": "pass",
+      "executed": true,
+      "blockers": []
     },
     {
       "id": "crash_recovery_smoke",
-      "title": "crash_recovery_smoke",
-      "status": "not_run",
-      "executed": false,
-      "blockers": [
-        "crash_recovery_smoke: not selected by --only plugin_security_smoke"
-      ]
+      "title": "Bloco 5 - Recuperacao de falha",
+      "status": "pass",
+      "executed": true,
+      "blockers": []
     },
     {
       "id": "release_dry_run",
-      "title": "release_dry_run",
-      "status": "not_run",
-      "executed": false,
-      "blockers": [
-        "release_dry_run: not selected by --only plugin_security_smoke"
-      ]
+      "title": "Bloco 6 - Release dry-run",
+      "status": "pass",
+      "executed": true,
+      "blockers": []
     },
     {
       "id": "plugin_security_smoke",
@@ -104,59 +94,1785 @@
     }
   ],
   "results": {
+    "plugin_browser_smoke": {
+      "block": "plugin_browser_smoke",
+      "title": "Reading Notes and Studio in Chromium",
+      "executed": true,
+      "status": "pass",
+      "cases": [
+        {
+          "id": "install",
+          "status": "pass",
+          "evidence": {
+            "plugin": "reading_notes",
+            "version": "1.1.0",
+            "httpStatus": 200,
+            "installMs": 76668
+          }
+        },
+        {
+          "id": "configure",
+          "status": "pass",
+          "evidence": {
+            "catalog": "http://127.0.0.1:57882",
+            "workspace": "temporary"
+          }
+        },
+        {
+          "id": "search",
+          "status": "pass",
+          "evidence": {
+            "book": "O desenho do livro",
+            "path": "/search.json?q=Design%20editorial&fields=key,title,author_name,first_publish_year&limit=5"
+          }
+        },
+        {
+          "id": "document",
+          "status": "pass",
+          "evidence": {
+            "document": "867f4e62-b84e-403d-a4ff-6859c35083e8",
+            "revision": 3,
+            "slides": 3
+          }
+        },
+        {
+          "id": "conflict",
+          "status": "pass",
+          "evidence": {
+            "status": 409,
+            "winningRevision": 4
+          }
+        },
+        {
+          "id": "exports",
+          "status": "pass",
+          "evidence": {
+            "formats": [
+              "pdf",
+              "pptx",
+              "html"
+            ]
+          }
+        },
+        {
+          "id": "revoke",
+          "status": "pass",
+          "evidence": {
+            "deniedStatus": 400
+          }
+        },
+        {
+          "id": "disable_enable",
+          "status": "pass",
+          "evidence": {
+            "repeatSearch": "O desenho do livro"
+          }
+        },
+        {
+          "id": "remove",
+          "status": "pass",
+          "evidence": {
+            "preservedDocument": "867f4e62-b84e-403d-a4ff-6859c35083e8"
+          }
+        }
+      ],
+      "blockers": [],
+      "artifacts": {
+        "report": "release-gate/evidence/2026-11-22/gate/plugin-browser-yq6Wdt/report.json",
+        "exports": {
+          "pdf": {
+            "path": "release-gate/evidence/2026-11-22/gate/plugin-browser-yq6Wdt/caderno.pdf",
+            "bytes": 448830,
+            "slides": 3
+          },
+          "pptx": {
+            "path": "release-gate/evidence/2026-11-22/gate/plugin-browser-yq6Wdt/caderno.pptx",
+            "bytes": 91120,
+            "slides": 3
+          },
+          "html": {
+            "path": "release-gate/evidence/2026-11-22/gate/plugin-browser-yq6Wdt/caderno.html",
+            "bytes": 23719,
+            "slides": 3
+          }
+        },
+        "video": "release-gate/evidence/2026-11-22/videos/plugins.mp4",
+        "daemonLog": "release-gate/evidence/2026-11-22/gate/plugin-browser-yq6Wdt/daemon.log"
+      }
+    },
     "channels_real_validation": {
       "block": "channels_real_validation",
-      "title": "channels_real_validation",
-      "status": "not_run",
-      "executed": false,
-      "blockers": [
-        "channels_real_validation: not selected by --only plugin_security_smoke"
-      ]
+      "title": "Bloco 1 - Canais e controle de contas",
+      "status": "pass",
+      "summary": {
+        "pending_channels_detected": 14,
+        "expected_channels": 20,
+        "skipped_external": "Contas de produção e pareamento físico do WhatsApp",
+        "missing_channels": [],
+        "tested_channels": 20,
+        "passed": 20,
+        "failed": 0
+      },
+      "blockers": [],
+      "commands": [
+        "node scripts/release-gate/channels-real-validation.mjs"
+      ],
+      "results": [
+        {
+          "channel": "bluebubbles",
+          "family": "bridge_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "bluebubbles",
+            "protocol_family": "bridge_http_v1",
+            "activation_mode": "real_transport_loopback_peer",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "account_id": "release-gate",
+                "enabled": true
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "result": "connected"
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "result": "healthy"
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "result": "resolved",
+                "resolved_target": "canonical:target-bluebubbles"
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "result": "sent",
+                "message_id": "bridge-2079370285"
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "result": "logged_out"
+              },
+              "delivery": {
+                "ok": true,
+                "observed_at": "loopback_peer"
+              }
+            },
+            "recommendation": "A ativação em conta de produção requer credenciais do provedor ou pareamento de um aparelho."
+          }
+        },
+        {
+          "channel": "discord",
+          "family": "token_bot_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "discord",
+            "protocol_family": "token_bot_v1",
+            "activation_mode": "real_transport_loopback_peer",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "account_id": "release-gate",
+                "enabled": true
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "result": "connected"
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "result": "healthy"
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "result": "resolved",
+                "resolved_target": "212345678901234567"
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "result": "sent",
+                "message_id": "1"
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "result": "logged_out"
+              },
+              "delivery": {
+                "ok": true,
+                "observed_at": "loopback_peer"
+              }
+            },
+            "recommendation": "A ativação em conta de produção requer credenciais do provedor ou pareamento de um aparelho."
+          }
+        },
+        {
+          "channel": "feishu",
+          "family": "webhook_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "feishu",
+            "protocol_family": "webhook_http_v1",
+            "activation_mode": "real_transport_loopback_peer",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "account_id": "release-gate",
+                "enabled": true
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "result": "connected"
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "result": "healthy"
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "result": "resolved",
+                "resolved_target": "room-feishu"
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "result": "sent",
+                "message_id": "feishu-fdde99d04ebf1ee4"
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "result": "logged_out"
+              },
+              "delivery": {
+                "ok": true,
+                "observed_at": "loopback_peer"
+              }
+            },
+            "recommendation": "A ativação em conta de produção requer credenciais do provedor ou pareamento de um aparelho."
+          }
+        },
+        {
+          "channel": "googlechat",
+          "family": "webhook_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "googlechat",
+            "protocol_family": "webhook_http_v1",
+            "activation_mode": "real_transport_loopback_peer",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "account_id": "release-gate",
+                "enabled": true
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "result": "connected"
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "result": "healthy"
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "result": "resolved",
+                "resolved_target": "room-googlechat"
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "result": "sent",
+                "message_id": "googlechat-cb82b62df71ea353"
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "result": "logged_out"
+              },
+              "delivery": {
+                "ok": true,
+                "observed_at": "loopback_peer"
+              }
+            },
+            "recommendation": "A ativação em conta de produção requer credenciais do provedor ou pareamento de um aparelho."
+          }
+        },
+        {
+          "channel": "imessage",
+          "family": "bridge_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "imessage",
+            "protocol_family": "bridge_http_v1",
+            "activation_mode": "real_transport_loopback_peer",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "account_id": "release-gate",
+                "enabled": true
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "result": "connected"
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "result": "healthy"
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "result": "resolved",
+                "resolved_target": "canonical:target-imessage"
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "result": "sent",
+                "message_id": "bridge-596873542"
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "result": "logged_out"
+              },
+              "delivery": {
+                "ok": true,
+                "observed_at": "loopback_peer"
+              }
+            },
+            "recommendation": "A ativação em conta de produção requer credenciais do provedor ou pareamento de um aparelho."
+          }
+        },
+        {
+          "channel": "irc",
+          "family": "irc_tcp_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "irc",
+            "protocol_family": "irc_tcp_v1",
+            "activation_mode": "real_transport_loopback_peer",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "account_id": "release-gate",
+                "enabled": true
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "result": "connected"
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "result": "healthy"
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "result": "resolved",
+                "resolved_target": "#room"
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "result": "sent",
+                "message_id": "irc-275c3c63a"
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "result": "logged_out"
+              },
+              "delivery": {
+                "ok": true,
+                "observed_at": "loopback_peer"
+              }
+            },
+            "recommendation": "A ativação em conta de produção requer credenciais do provedor ou pareamento de um aparelho."
+          }
+        },
+        {
+          "channel": "line",
+          "family": "bridge_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "line",
+            "protocol_family": "bridge_http_v1",
+            "activation_mode": "real_transport_loopback_peer",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "account_id": "release-gate",
+                "enabled": true
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "result": "connected"
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "result": "healthy"
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "result": "resolved",
+                "resolved_target": "canonical:target-line"
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "result": "sent",
+                "message_id": "bridge-1999596272"
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "result": "logged_out"
+              },
+              "delivery": {
+                "ok": true,
+                "observed_at": "loopback_peer"
+              }
+            },
+            "recommendation": "A ativação em conta de produção requer credenciais do provedor ou pareamento de um aparelho."
+          }
+        },
+        {
+          "channel": "matrix",
+          "family": "matrix_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "matrix",
+            "protocol_family": "matrix_http_v1",
+            "activation_mode": "real_transport_loopback_peer",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "account_id": "release-gate",
+                "enabled": true
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "result": "connected"
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "result": "healthy"
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "result": "resolved",
+                "resolved_target": "!room:example.org"
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "result": "sent",
+                "message_id": "ff919b58-8284-407e-a6cb-2ac7f54023ca"
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "result": "logged_out"
+              },
+              "delivery": {
+                "ok": true,
+                "observed_at": "loopback_peer"
+              }
+            },
+            "recommendation": "A ativação em conta de produção requer credenciais do provedor ou pareamento de um aparelho."
+          }
+        },
+        {
+          "channel": "mattermost",
+          "family": "webhook_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "mattermost",
+            "protocol_family": "webhook_http_v1",
+            "activation_mode": "real_transport_loopback_peer",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "account_id": "release-gate",
+                "enabled": true
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "result": "connected"
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "result": "healthy"
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "result": "resolved",
+                "resolved_target": "room-mattermost"
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "result": "sent",
+                "message_id": "mattermost-6cc1325716305f8e"
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "result": "logged_out"
+              },
+              "delivery": {
+                "ok": true,
+                "observed_at": "loopback_peer"
+              }
+            },
+            "recommendation": "A ativação em conta de produção requer credenciais do provedor ou pareamento de um aparelho."
+          }
+        },
+        {
+          "channel": "msteams",
+          "family": "webhook_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "msteams",
+            "protocol_family": "webhook_http_v1",
+            "activation_mode": "real_transport_loopback_peer",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "account_id": "release-gate",
+                "enabled": true
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "result": "connected"
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "result": "healthy"
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "result": "resolved",
+                "resolved_target": "room-msteams"
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "result": "sent",
+                "message_id": "msteams-e8e8d643bd1ff002"
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "result": "logged_out"
+              },
+              "delivery": {
+                "ok": true,
+                "observed_at": "loopback_peer"
+              }
+            },
+            "recommendation": "A ativação em conta de produção requer credenciais do provedor ou pareamento de um aparelho."
+          }
+        },
+        {
+          "channel": "nextcloud-talk",
+          "family": "bridge_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "nextcloud-talk",
+            "protocol_family": "bridge_http_v1",
+            "activation_mode": "real_transport_loopback_peer",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "account_id": "release-gate",
+                "enabled": true
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "result": "connected"
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "result": "healthy"
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "result": "resolved",
+                "resolved_target": "canonical:target-nextcloud-talk"
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "result": "sent",
+                "message_id": "bridge-362899115"
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "result": "logged_out"
+              },
+              "delivery": {
+                "ok": true,
+                "observed_at": "loopback_peer"
+              }
+            },
+            "recommendation": "A ativação em conta de produção requer credenciais do provedor ou pareamento de um aparelho."
+          }
+        },
+        {
+          "channel": "nostr",
+          "family": "bridge_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "nostr",
+            "protocol_family": "bridge_http_v1",
+            "activation_mode": "real_transport_loopback_peer",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "account_id": "release-gate",
+                "enabled": true
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "result": "connected"
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "result": "healthy"
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "result": "resolved",
+                "resolved_target": "canonical:target-nostr"
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "result": "sent",
+                "message_id": "bridge-556682848"
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "result": "logged_out"
+              },
+              "delivery": {
+                "ok": true,
+                "observed_at": "loopback_peer"
+              }
+            },
+            "recommendation": "A ativação em conta de produção requer credenciais do provedor ou pareamento de um aparelho."
+          }
+        },
+        {
+          "channel": "signal",
+          "family": "bridge_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "signal",
+            "protocol_family": "bridge_http_v1",
+            "activation_mode": "real_transport_loopback_peer",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "account_id": "release-gate",
+                "enabled": true
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "result": "connected"
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "result": "healthy"
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "result": "resolved",
+                "resolved_target": "canonical:target-signal"
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "result": "sent",
+                "message_id": "bridge-2035814584"
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "result": "logged_out"
+              },
+              "delivery": {
+                "ok": true,
+                "observed_at": "loopback_peer"
+              }
+            },
+            "recommendation": "A ativação em conta de produção requer credenciais do provedor ou pareamento de um aparelho."
+          }
+        },
+        {
+          "channel": "slack",
+          "family": "token_bot_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "slack",
+            "protocol_family": "token_bot_v1",
+            "activation_mode": "real_transport_loopback_peer",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "account_id": "release-gate",
+                "enabled": true
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "result": "connected"
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "result": "healthy"
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "result": "resolved",
+                "resolved_target": "C123"
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "result": "sent",
+                "message_id": "1234.2"
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "result": "logged_out"
+              },
+              "delivery": {
+                "ok": true,
+                "observed_at": "loopback_peer"
+              }
+            },
+            "recommendation": "A ativação em conta de produção requer credenciais do provedor ou pareamento de um aparelho."
+          }
+        },
+        {
+          "channel": "synology-chat",
+          "family": "webhook_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "synology-chat",
+            "protocol_family": "webhook_http_v1",
+            "activation_mode": "real_transport_loopback_peer",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "account_id": "release-gate",
+                "enabled": true
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "result": "connected"
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "result": "healthy"
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "result": "resolved",
+                "resolved_target": "room-synology-chat"
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "result": "sent",
+                "message_id": "synology-chat-53c0921398b73e3f"
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "result": "logged_out"
+              },
+              "delivery": {
+                "ok": true,
+                "observed_at": "loopback_peer"
+              }
+            },
+            "recommendation": "A ativação em conta de produção requer credenciais do provedor ou pareamento de um aparelho."
+          }
+        },
+        {
+          "channel": "telegram",
+          "family": "token_bot_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "telegram",
+            "protocol_family": "token_bot_v1",
+            "activation_mode": "real_transport_loopback_peer",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "account_id": "release-gate",
+                "enabled": true
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "result": "connected"
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "result": "healthy"
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "result": "resolved",
+                "resolved_target": "12345"
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "result": "sent",
+                "message_id": "3"
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "result": "logged_out"
+              },
+              "delivery": {
+                "ok": true,
+                "observed_at": "loopback_peer"
+              }
+            },
+            "recommendation": "A ativação em conta de produção requer credenciais do provedor ou pareamento de um aparelho."
+          }
+        },
+        {
+          "channel": "tlon",
+          "family": "bridge_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "tlon",
+            "protocol_family": "bridge_http_v1",
+            "activation_mode": "real_transport_loopback_peer",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "account_id": "release-gate",
+                "enabled": true
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "result": "connected"
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "result": "healthy"
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "result": "resolved",
+                "resolved_target": "canonical:target-tlon"
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "result": "sent",
+                "message_id": "bridge-2017632623"
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "result": "logged_out"
+              },
+              "delivery": {
+                "ok": true,
+                "observed_at": "loopback_peer"
+              }
+            },
+            "recommendation": "A ativação em conta de produção requer credenciais do provedor ou pareamento de um aparelho."
+          }
+        },
+        {
+          "channel": "whatsapp",
+          "family": "native_runtime_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "whatsapp",
+            "protocol_family": "native_runtime_v1",
+            "activation_mode": "isolated_whatsapp_session_fixture",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "account_id": "release-gate",
+                "enabled": true
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "result": "connected"
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "result": "healthy"
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "result": "resolved",
+                "resolved_target": "+15550100000"
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "result": "sent",
+                "message_id": "wa-84f56b2775526780"
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "result": "logged_out"
+              }
+            },
+            "recommendation": "A ativação em conta de produção requer credenciais do provedor ou pareamento de um aparelho."
+          }
+        },
+        {
+          "channel": "zalo",
+          "family": "bridge_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "zalo",
+            "protocol_family": "bridge_http_v1",
+            "activation_mode": "real_transport_loopback_peer",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "account_id": "release-gate",
+                "enabled": true
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "result": "connected"
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "result": "healthy"
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "result": "resolved",
+                "resolved_target": "canonical:target-zalo"
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "result": "sent",
+                "message_id": "bridge-2030932006"
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "result": "logged_out"
+              },
+              "delivery": {
+                "ok": true,
+                "observed_at": "loopback_peer"
+              }
+            },
+            "recommendation": "A ativação em conta de produção requer credenciais do provedor ou pareamento de um aparelho."
+          }
+        },
+        {
+          "channel": "zalouser",
+          "family": "bridge_http_v1",
+          "status": "pass",
+          "failed_operation": null,
+          "canonical_error": null,
+          "reason": null,
+          "evidence": {
+            "channel": "zalouser",
+            "protocol_family": "bridge_http_v1",
+            "activation_mode": "real_transport_loopback_peer",
+            "operations": {
+              "upsert_account": {
+                "ok": true,
+                "status": 200,
+                "account_id": "release-gate",
+                "enabled": true
+              },
+              "login": {
+                "ok": true,
+                "status": 200,
+                "result": "connected"
+              },
+              "probe": {
+                "ok": true,
+                "status": 200,
+                "result": "healthy"
+              },
+              "resolve": {
+                "ok": true,
+                "status": 200,
+                "result": "resolved",
+                "resolved_target": "canonical:target-zalouser"
+              },
+              "send": {
+                "ok": true,
+                "status": 200,
+                "result": "sent",
+                "message_id": "bridge-327194359"
+              },
+              "logout": {
+                "ok": true,
+                "status": 200,
+                "result": "logged_out"
+              },
+              "delivery": {
+                "ok": true,
+                "observed_at": "loopback_peer"
+              }
+            },
+            "recommendation": "A ativação em conta de produção requer credenciais do provedor ou pareamento de um aparelho."
+          }
+        }
+      ],
+      "artifacts": {
+        "daemon_log": "<temporary>/mlx-pilot-release-gate-channels-9eQaNw/release-gate-channels.log",
+        "bridge_requests": 45,
+        "webhook_requests": 10
+      },
+      "executed": true
     },
     "load_smoke": {
       "block": "load_smoke",
-      "title": "load_smoke",
-      "status": "not_run",
-      "executed": false,
-      "blockers": [
-        "load_smoke: not selected by --only plugin_security_smoke"
-      ]
+      "title": "Bloco 2 - Carga curta e concorrencia",
+      "status": "pass",
+      "summary": {
+        "endpoint_batches": 9,
+        "crash_detected": false,
+        "critical_log_hit": null,
+        "functional_health_after_load": "healthy"
+      },
+      "blockers": [],
+      "observations": {
+        "batches_with_errors": 0,
+        "batches": [
+          {
+            "endpoint": "/agent/run",
+            "metrics": {
+              "concurrency": 10,
+              "total_requests": 20,
+              "duration_ms": 280,
+              "error_rate": 0,
+              "timeouts": 0,
+              "status_codes": {
+                "200": 20
+              },
+              "count": 20,
+              "min_ms": 89,
+              "max_ms": 185,
+              "p50_ms": 128,
+              "p95_ms": 179,
+              "p99_ms": 185
+            }
+          },
+          {
+            "endpoint": "/agent/message/send",
+            "metrics": {
+              "concurrency": 10,
+              "total_requests": 20,
+              "duration_ms": 76,
+              "error_rate": 0,
+              "timeouts": 0,
+              "status_codes": {
+                "200": 20
+              },
+              "count": 20,
+              "min_ms": 12,
+              "max_ms": 42,
+              "p50_ms": 30,
+              "p95_ms": 37,
+              "p99_ms": 42
+            }
+          },
+          {
+            "endpoint": "/agent/channels/probe",
+            "metrics": {
+              "concurrency": 10,
+              "total_requests": 20,
+              "duration_ms": 127,
+              "error_rate": 0,
+              "timeouts": 0,
+              "status_codes": {
+                "200": 20
+              },
+              "count": 20,
+              "min_ms": 17,
+              "max_ms": 73,
+              "p50_ms": 58,
+              "p95_ms": 66,
+              "p99_ms": 73
+            }
+          },
+          {
+            "endpoint": "/agent/run",
+            "metrics": {
+              "concurrency": 25,
+              "total_requests": 50,
+              "duration_ms": 536,
+              "error_rate": 0,
+              "timeouts": 0,
+              "status_codes": {
+                "200": 50
+              },
+              "count": 50,
+              "min_ms": 104,
+              "max_ms": 433,
+              "p50_ms": 216,
+              "p95_ms": 417,
+              "p99_ms": 433
+            }
+          },
+          {
+            "endpoint": "/agent/message/send",
+            "metrics": {
+              "concurrency": 25,
+              "total_requests": 50,
+              "duration_ms": 201,
+              "error_rate": 0,
+              "timeouts": 0,
+              "status_codes": {
+                "200": 50
+              },
+              "count": 50,
+              "min_ms": 33,
+              "max_ms": 119,
+              "p50_ms": 80,
+              "p95_ms": 111,
+              "p99_ms": 119
+            }
+          },
+          {
+            "endpoint": "/agent/channels/probe",
+            "metrics": {
+              "concurrency": 25,
+              "total_requests": 50,
+              "duration_ms": 140,
+              "error_rate": 0,
+              "timeouts": 0,
+              "status_codes": {
+                "200": 50
+              },
+              "count": 50,
+              "min_ms": 14,
+              "max_ms": 75,
+              "p50_ms": 59,
+              "p95_ms": 67,
+              "p99_ms": 75
+            }
+          },
+          {
+            "endpoint": "/agent/run",
+            "metrics": {
+              "concurrency": 50,
+              "total_requests": 100,
+              "duration_ms": 1147,
+              "error_rate": 0,
+              "timeouts": 0,
+              "status_codes": {
+                "200": 100
+              },
+              "count": 100,
+              "min_ms": 184,
+              "max_ms": 731,
+              "p50_ms": 472,
+              "p95_ms": 637,
+              "p99_ms": 728
+            }
+          },
+          {
+            "endpoint": "/agent/message/send",
+            "metrics": {
+              "concurrency": 50,
+              "total_requests": 100,
+              "duration_ms": 370,
+              "error_rate": 0,
+              "timeouts": 0,
+              "status_codes": {
+                "200": 100
+              },
+              "count": 100,
+              "min_ms": 49,
+              "max_ms": 219,
+              "p50_ms": 149,
+              "p95_ms": 208,
+              "p99_ms": 217
+            }
+          },
+          {
+            "endpoint": "/agent/channels/probe",
+            "metrics": {
+              "concurrency": 50,
+              "total_requests": 100,
+              "duration_ms": 365,
+              "error_rate": 0,
+              "timeouts": 0,
+              "status_codes": {
+                "200": 100
+              },
+              "count": 100,
+              "min_ms": 40,
+              "max_ms": 217,
+              "p50_ms": 141,
+              "p95_ms": 202,
+              "p99_ms": 208
+            }
+          }
+        ]
+      },
+      "commands": [
+        "node scripts/release-gate/load-smoke.mjs"
+      ],
+      "artifacts": {
+        "daemon_log": "<temporary>/mlx-pilot-release-gate-load-DLCaux/release-gate-load.log",
+        "provider_requests": 170
+      },
+      "executed": true
     },
     "migration_upgrade_rollback": {
       "block": "migration_upgrade_rollback",
-      "title": "migration_upgrade_rollback",
-      "status": "not_run",
-      "executed": false,
-      "blockers": [
-        "migration_upgrade_rollback: not selected by --only plugin_security_smoke"
-      ]
+      "title": "Bloco 3 - Upgrade e rollback de migracao",
+      "status": "pass",
+      "summary": {
+        "backup_created": true,
+        "upgraded_schema_version": 3,
+        "current_schema_version": 3,
+        "rollback_restored_exact_backup": true,
+        "rollback_restored_exact_session": true,
+        "migrated_enabled_skills": [
+          "mock-install",
+          "summarize"
+        ],
+        "migrated_tool_profile": "coding"
+      },
+      "validation": {
+        "upgrade": {
+          "effective_policy_profile": "coding",
+          "default_agent_allow_count": 20,
+          "channels": [
+            {
+              "id": "telegram",
+              "default_account_id": "ops",
+              "accounts": [
+                "ops"
+              ]
+            },
+            {
+              "id": "whatsapp",
+              "default_account_id": "personal",
+              "accounts": [
+                "personal"
+              ]
+            }
+          ],
+          "plugins_before": [
+            {
+              "id": "memory",
+              "enabled": true
+            }
+          ],
+          "plugin_toggle": {
+            "disabled": false,
+            "reenabled": true
+          },
+          "legacy_endpoint_upsert": {
+            "id": "whatsapp",
+            "default_account_id": "legacy-whatsapp"
+          }
+        },
+        "rollback": {
+          "config_provider": "custom",
+          "config_enabled_skills": [
+            "mock-install",
+            "summarize"
+          ],
+          "effective_policy_profile": "coding",
+          "legacy_endpoint_remove": null,
+          "channels_remaining": [
+            "bluebubbles",
+            "discord",
+            "feishu",
+            "googlechat",
+            "imessage",
+            "irc",
+            "line",
+            "matrix",
+            "mattermost",
+            "msteams",
+            "nextcloud-talk",
+            "nostr",
+            "signal",
+            "slack",
+            "synology-chat",
+            "telegram",
+            "tlon",
+            "whatsapp",
+            "zalo",
+            "zalouser"
+          ]
+        }
+      },
+      "blockers": [],
+      "commands": [
+        "node scripts/release-gate/migration-upgrade-rollback.mjs"
+      ],
+      "artifacts": {
+        "settings_path": "<temporary>/mlx-pilot-release-gate-migration-f6LEAY/settings.json",
+        "backup_dir": "<temporary>/mlx-pilot-release-gate-migration-f6LEAY/backup",
+        "session_state_path": "<temporary>/mlx-pilot-release-gate-migration-f6LEAY/channel-sessions/telegram/ops/session.json"
+      },
+      "executed": true
     },
     "security_audit_smoke": {
       "block": "security_audit_smoke",
-      "title": "security_audit_smoke",
-      "status": "not_run",
-      "executed": false,
-      "blockers": [
-        "security_audit_smoke: not selected by --only plugin_security_smoke"
-      ]
+      "title": "Bloco 4 - Auditoria pratica de seguranca",
+      "status": "pass",
+      "summary": {
+        "leaked_secret_files": 0,
+        "vault_key_mode": "600",
+        "vault_data_mode": "644",
+        "findings_total": 0
+      },
+      "checklist": {
+        "chat_input_backend": "llama.cpp-compatible loopback HTTP fixture; agent uses OpenAI-compatible loopback HTTP",
+        "chat_inputs": [
+          {
+            "route": "/chat",
+            "input": "valid multiline",
+            "status": 200,
+            "model_calls": 1,
+            "passed": true
+          },
+          {
+            "route": "/chat",
+            "input": "no messages",
+            "status": 400,
+            "model_calls": 0,
+            "passed": true
+          },
+          {
+            "route": "/chat",
+            "input": "blank message",
+            "status": 400,
+            "model_calls": 0,
+            "passed": true
+          },
+          {
+            "route": "/chat",
+            "input": "NUL in message",
+            "status": 400,
+            "model_calls": 0,
+            "passed": true
+          },
+          {
+            "route": "/chat",
+            "input": "blank model",
+            "status": 400,
+            "model_calls": 0,
+            "passed": true
+          },
+          {
+            "route": "/chat",
+            "input": "provider without model",
+            "status": 400,
+            "model_calls": 0,
+            "passed": true
+          },
+          {
+            "route": "/chat",
+            "input": "NUL in model",
+            "status": 400,
+            "model_calls": 0,
+            "passed": true
+          },
+          {
+            "route": "/chat/stream",
+            "input": "valid multiline",
+            "status": 200,
+            "model_calls": 1,
+            "passed": true
+          },
+          {
+            "route": "/chat/stream",
+            "input": "no messages",
+            "status": 400,
+            "model_calls": 0,
+            "passed": true
+          },
+          {
+            "route": "/chat/stream",
+            "input": "blank message",
+            "status": 400,
+            "model_calls": 0,
+            "passed": true
+          },
+          {
+            "route": "/chat/stream",
+            "input": "NUL in message",
+            "status": 400,
+            "model_calls": 0,
+            "passed": true
+          },
+          {
+            "route": "/chat/stream",
+            "input": "blank model",
+            "status": 400,
+            "model_calls": 0,
+            "passed": true
+          },
+          {
+            "route": "/chat/stream",
+            "input": "provider without model",
+            "status": 400,
+            "model_calls": 0,
+            "passed": true
+          },
+          {
+            "route": "/chat/stream",
+            "input": "NUL in model",
+            "status": 400,
+            "model_calls": 0,
+            "passed": true
+          },
+          {
+            "route": "/agent/run",
+            "input": "blank message",
+            "status": 400,
+            "model_calls": 0,
+            "passed": true
+          },
+          {
+            "route": "/agent/run",
+            "input": "NUL in message",
+            "status": 400,
+            "model_calls": 0,
+            "passed": true
+          },
+          {
+            "route": "/agent/stream",
+            "input": "blank message",
+            "status": 400,
+            "model_calls": 0,
+            "passed": true
+          },
+          {
+            "route": "/agent/stream",
+            "input": "NUL in message",
+            "status": 400,
+            "model_calls": 0,
+            "passed": true
+          },
+          {
+            "route": "/agent/gateway/events",
+            "input": "blank message",
+            "status": 400,
+            "model_calls": 0,
+            "passed": true
+          },
+          {
+            "route": "/agent/gateway/events",
+            "input": "NUL in message",
+            "status": 400,
+            "model_calls": 0,
+            "passed": true
+          }
+        ],
+        "secrets_not_in_settings_or_logs": true,
+        "vault_used_for_agent_api_key": true,
+        "vault_used_for_skill_env": true,
+        "vault_used_for_channel_credentials": true,
+        "profile_policy_effective": {
+          "minimal": {
+            "exec_allowed": false,
+            "message_allowed": false
+          },
+          "coding": {
+            "exec_allowed": true,
+            "message_allowed": false
+          },
+          "messaging": {
+            "exec_allowed": false,
+            "message_allowed": true
+          },
+          "full": {
+            "exec_allowed": true,
+            "message_allowed": true
+          }
+        },
+        "allow_deny_runtime": {
+          "minimal_exec_denied": true,
+          "agent_allow_exec_passed": true,
+          "global_deny_exec_denied": true,
+          "execution_mode_and_skill_denials": {
+            "read-only": true,
+            "locked": true,
+            "summarize": true
+          }
+        }
+      },
+      "findings": [],
+      "commands": [
+        "node scripts/release-gate/security-audit-smoke.mjs"
+      ],
+      "artifacts": {
+        "settings_path": "<temporary>/mlx-pilot-release-gate-security-Q0Q6xp/settings.json",
+        "daemon_log": "<temporary>/mlx-pilot-release-gate-security-Q0Q6xp/release-gate-security.log",
+        "vault_key_path": "<temporary>/mlx-pilot-release-gate-security-Q0Q6xp/agent_secrets.key",
+        "vault_data_path": "<temporary>/mlx-pilot-release-gate-security-Q0Q6xp/agent_secrets.v1.json",
+        "skills_checked": 2
+      },
+      "executed": true
     },
     "crash_recovery_smoke": {
       "block": "crash_recovery_smoke",
-      "title": "crash_recovery_smoke",
-      "status": "not_run",
-      "executed": false,
-      "blockers": [
-        "crash_recovery_smoke: not selected by --only plugin_security_smoke"
-      ]
+      "title": "Bloco 5 - Recuperacao de falha",
+      "status": "pass",
+      "summary": {
+        "in_flight_request_status": 0,
+        "config_rehydrated": true,
+        "channels_rehydrated": 20,
+        "saved_schema_version": 3
+      },
+      "validation": {
+        "config_after_restart": {
+          "provider": "custom",
+          "model_id": "mock-small",
+          "tool_profile": "full",
+          "enabled_skills": [
+            "mock-install",
+            "summarize"
+          ]
+        },
+        "channels_after_restart": [
+          {
+            "id": "telegram",
+            "default_account_id": "bot",
+            "accounts": [
+              {
+                "account_id": "bot",
+                "session_status": "connected"
+              }
+            ]
+          },
+          {
+            "id": "whatsapp",
+            "default_account_id": "ops",
+            "accounts": [
+              {
+                "account_id": "ops",
+                "session_status": "connected"
+              }
+            ]
+          }
+        ],
+        "idempotence": {
+          "first_message_id": "1",
+          "second_message_id": "2",
+          "first_status": "sent",
+          "second_status": "sent"
+        }
+      },
+      "blockers": [],
+      "commands": [
+        "node scripts/release-gate/crash-recovery-smoke.mjs"
+      ],
+      "artifacts": {
+        "settings_path": "<temporary>/mlx-pilot-release-gate-crash-uyXYs0/settings.json"
+      },
+      "executed": true
     },
     "release_dry_run": {
       "block": "release_dry_run",
-      "title": "release_dry_run",
-      "status": "not_run",
-      "executed": false,
-      "blockers": [
-        "release_dry_run: not selected by --only plugin_security_smoke"
-      ]
+      "title": "Bloco 6 - Release dry-run",
+      "status": "pass",
+      "summary": {
+        "mode": "simulated_clean_env_with_guided_checklist",
+        "clean_settings_path": "<temporary>/mlx-pilot-release-gate-dry-run-XBEVds/settings.json",
+        "compat_coverage_percent": 100,
+        "send_status": "sent"
+      },
+      "checklist": [
+        {
+          "item": "Instalar artefato/binario em ambiente limpo ou VM isolada",
+          "status": "manual_required"
+        },
+        {
+          "item": "Abrir app desktop e confirmar health visual/daemon online",
+          "status": "manual_required"
+        },
+        {
+          "item": "Configurar uma skill minima pelo onboarding",
+          "status": "validated_in_simulation"
+        },
+        {
+          "item": "Conectar WhatsApp ou Telegram; neste ambiente foi usado Telegram mock/token local",
+          "status": "validated_in_simulation"
+        },
+        {
+          "item": "Enviar mensagem teste e conferir compat/report atualizado",
+          "status": "validated_in_simulation"
+        }
+      ],
+      "notes": [
+        "Nao houve acesso a uma maquina limpa dedicada neste workspace; o dry-run foi executado em diretorio temporario isolado.",
+        "O fluxo minimo foi validado com provider local OpenAI-compatible mock e Telegram token-bot declarado como mock equivalente."
+      ],
+      "commands": [
+        "node scripts/release-gate/release-dry-run-checklist.mjs"
+      ],
+      "artifacts": {
+        "settings_path": "<temporary>/mlx-pilot-release-gate-dry-run-XBEVds/settings.json"
+      },
+      "executed": true
     },
     "plugin_security_smoke": {
       "block": "plugin_security_smoke",
@@ -174,8 +1890,8 @@
               "release_beta"
             ],
             "documents": [
-              "a07c1e84-1290-41b1-88dc-22a64be81514",
-              "b0fbc41c-57c3-47f1-a852-819072359b61"
+              "cd1c8a82-2287-4061-8fea-442e2ed425fa",
+              "f0c07058-11aa-40be-8357-e37a2243f7ae"
             ],
             "positive_controls": 2,
             "denied_cross_plugin_and_document_access": true,
@@ -190,7 +1906,7 @@
                     "assets": [],
                     "brief": "",
                     "css": "",
-                    "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+                    "id": "cd1c8a82-2287-4061-8fea-442e2ed425fa",
                     "revision": 1,
                     "schema_version": 1,
                     "script": "",
@@ -242,7 +1958,7 @@
                     "assets": [],
                     "brief": "",
                     "css": "",
-                    "id": "b0fbc41c-57c3-47f1-a852-819072359b61",
+                    "id": "f0c07058-11aa-40be-8357-e37a2243f7ae",
                     "revision": 1,
                     "schema_version": 1,
                     "script": "",
@@ -309,7 +2025,7 @@
                 "operation": "documents.list",
                 "response": [
                   {
-                    "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+                    "id": "cd1c8a82-2287-4061-8fea-442e2ed425fa",
                     "revision": 1,
                     "slides": 1,
                     "title": "Alpha authorized"
@@ -362,7 +2078,7 @@
                   "assets": [],
                   "brief": "",
                   "css": "",
-                  "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+                  "id": "cd1c8a82-2287-4061-8fea-442e2ed425fa",
                   "revision": 1,
                   "schema_version": 1,
                   "script": "",
@@ -410,22 +2126,22 @@
                 "response": {
                   "available_documents": [
                     {
-                      "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
-                      "revision": 1,
-                      "slides": 1,
-                      "title": "Alpha authorized"
-                    },
-                    {
-                      "id": "b0fbc41c-57c3-47f1-a852-819072359b61",
+                      "id": "f0c07058-11aa-40be-8357-e37a2243f7ae",
                       "revision": 1,
                       "slides": 1,
                       "title": "Beta authorized"
+                    },
+                    {
+                      "id": "cd1c8a82-2287-4061-8fea-442e2ed425fa",
+                      "revision": 1,
+                      "slides": 1,
+                      "title": "Alpha authorized"
                     }
                   ],
                   "documents": {
                     "allow_create": false,
                     "ids": [
-                      "a07c1e84-1290-41b1-88dc-22a64be81514"
+                      "cd1c8a82-2287-4061-8fea-442e2ed425fa"
                     ]
                   },
                   "grants": [
@@ -434,7 +2150,7 @@
                   "services": {
                     "api": {
                       "allow_private_network": false,
-                      "base_url": "http://127.0.0.1:56208",
+                      "base_url": "http://127.0.0.1:61808",
                       "credential_set": false,
                       "enabled": false
                     }
@@ -466,22 +2182,22 @@
                 "response": {
                   "available_documents": [
                     {
-                      "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
-                      "revision": 1,
-                      "slides": 1,
-                      "title": "Alpha authorized"
-                    },
-                    {
-                      "id": "b0fbc41c-57c3-47f1-a852-819072359b61",
+                      "id": "f0c07058-11aa-40be-8357-e37a2243f7ae",
                       "revision": 1,
                       "slides": 1,
                       "title": "Beta authorized"
+                    },
+                    {
+                      "id": "cd1c8a82-2287-4061-8fea-442e2ed425fa",
+                      "revision": 1,
+                      "slides": 1,
+                      "title": "Alpha authorized"
                     }
                   ],
                   "documents": {
                     "allow_create": false,
                     "ids": [
-                      "a07c1e84-1290-41b1-88dc-22a64be81514"
+                      "cd1c8a82-2287-4061-8fea-442e2ed425fa"
                     ]
                   },
                   "grants": [
@@ -494,7 +2210,7 @@
                   "services": {
                     "api": {
                       "allow_private_network": false,
-                      "base_url": "http://127.0.0.1:56208",
+                      "base_url": "http://127.0.0.1:61808",
                       "credential_set": false,
                       "enabled": false
                     }
@@ -952,7 +2668,7 @@
                     "assets": [],
                     "brief": "",
                     "css": "",
-                    "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+                    "id": "cd1c8a82-2287-4061-8fea-442e2ed425fa",
                     "revision": 1,
                     "schema_version": 1,
                     "script": "",
@@ -1015,7 +2731,7 @@
                   "assets": [],
                   "brief": "",
                   "css": "",
-                  "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+                  "id": "cd1c8a82-2287-4061-8fea-442e2ed425fa",
                   "revision": 1,
                   "schema_version": 1,
                   "script": "",
@@ -1064,7 +2780,7 @@
                 "response": {
                   "result": {
                     "diagnostics": [],
-                    "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+                    "id": "cd1c8a82-2287-4061-8fea-442e2ed425fa",
                     "revision": 2,
                     "slides": 1
                   }
@@ -1088,7 +2804,7 @@
                   "assets": [],
                   "brief": "",
                   "css": "",
-                  "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+                  "id": "cd1c8a82-2287-4061-8fea-442e2ed425fa",
                   "revision": 2,
                   "schema_version": 1,
                   "script": "",
@@ -1165,22 +2881,22 @@
                 "response": {
                   "available_documents": [
                     {
-                      "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
-                      "revision": 2,
-                      "slides": 1,
-                      "title": "Alpha authorized"
-                    },
-                    {
-                      "id": "b0fbc41c-57c3-47f1-a852-819072359b61",
+                      "id": "f0c07058-11aa-40be-8357-e37a2243f7ae",
                       "revision": 1,
                       "slides": 1,
                       "title": "Beta authorized"
+                    },
+                    {
+                      "id": "cd1c8a82-2287-4061-8fea-442e2ed425fa",
+                      "revision": 2,
+                      "slides": 1,
+                      "title": "Alpha authorized"
                     }
                   ],
                   "documents": {
                     "allow_create": false,
                     "ids": [
-                      "a07c1e84-1290-41b1-88dc-22a64be81514"
+                      "cd1c8a82-2287-4061-8fea-442e2ed425fa"
                     ]
                   },
                   "grants": [
@@ -1216,22 +2932,22 @@
                 "response": {
                   "available_documents": [
                     {
-                      "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
-                      "revision": 2,
-                      "slides": 1,
-                      "title": "Alpha authorized"
-                    },
-                    {
-                      "id": "b0fbc41c-57c3-47f1-a852-819072359b61",
+                      "id": "f0c07058-11aa-40be-8357-e37a2243f7ae",
                       "revision": 1,
                       "slides": 1,
                       "title": "Beta authorized"
+                    },
+                    {
+                      "id": "cd1c8a82-2287-4061-8fea-442e2ed425fa",
+                      "revision": 2,
+                      "slides": 1,
+                      "title": "Alpha authorized"
                     }
                   ],
                   "documents": {
                     "allow_create": false,
                     "ids": [
-                      "a07c1e84-1290-41b1-88dc-22a64be81514"
+                      "cd1c8a82-2287-4061-8fea-442e2ed425fa"
                     ]
                   },
                   "grants": [
@@ -1244,7 +2960,7 @@
                   "services": {
                     "api": {
                       "allow_private_network": false,
-                      "base_url": "http://127.0.0.1:56208",
+                      "base_url": "http://127.0.0.1:61808",
                       "credential_set": false,
                       "enabled": false
                     }
@@ -1258,22 +2974,22 @@
                 "response": {
                   "available_documents": [
                     {
-                      "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
-                      "revision": 2,
-                      "slides": 1,
-                      "title": "Alpha authorized"
-                    },
-                    {
-                      "id": "b0fbc41c-57c3-47f1-a852-819072359b61",
+                      "id": "f0c07058-11aa-40be-8357-e37a2243f7ae",
                       "revision": 1,
                       "slides": 1,
                       "title": "Beta authorized"
+                    },
+                    {
+                      "id": "cd1c8a82-2287-4061-8fea-442e2ed425fa",
+                      "revision": 2,
+                      "slides": 1,
+                      "title": "Alpha authorized"
                     }
                   ],
                   "documents": {
                     "allow_create": false,
                     "ids": [
-                      "a07c1e84-1290-41b1-88dc-22a64be81514"
+                      "cd1c8a82-2287-4061-8fea-442e2ed425fa"
                     ]
                   },
                   "grants": [
@@ -1286,7 +3002,7 @@
                   "services": {
                     "api": {
                       "allow_private_network": true,
-                      "base_url": "http://127.0.0.1:56208",
+                      "base_url": "http://127.0.0.1:61808",
                       "credential_set": true,
                       "enabled": true
                     }
@@ -1392,22 +3108,22 @@
                 "response": {
                   "available_documents": [
                     {
-                      "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
-                      "revision": 2,
-                      "slides": 1,
-                      "title": "Alpha authorized"
-                    },
-                    {
-                      "id": "b0fbc41c-57c3-47f1-a852-819072359b61",
+                      "id": "f0c07058-11aa-40be-8357-e37a2243f7ae",
                       "revision": 1,
                       "slides": 1,
                       "title": "Beta authorized"
+                    },
+                    {
+                      "id": "cd1c8a82-2287-4061-8fea-442e2ed425fa",
+                      "revision": 2,
+                      "slides": 1,
+                      "title": "Alpha authorized"
                     }
                   ],
                   "documents": {
                     "allow_create": false,
                     "ids": [
-                      "a07c1e84-1290-41b1-88dc-22a64be81514"
+                      "cd1c8a82-2287-4061-8fea-442e2ed425fa"
                     ]
                   },
                   "grants": [
@@ -1420,7 +3136,7 @@
                   "services": {
                     "api": {
                       "allow_private_network": true,
-                      "base_url": "http://127.0.0.1:56208",
+                      "base_url": "http://127.0.0.1:61808",
                       "credential_set": true,
                       "enabled": true
                     }
@@ -1593,7 +3309,7 @@
                     "assets": [],
                     "brief": "",
                     "css": "",
-                    "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+                    "id": "cd1c8a82-2287-4061-8fea-442e2ed425fa",
                     "revision": 2,
                     "schema_version": 1,
                     "script": "",
@@ -1691,7 +3407,7 @@
           "id": "plugin_wasm_limit",
           "status": "pass",
           "evidence": {
-            "elapsed_ms": 64,
+            "elapsed_ms": 74,
             "infinite_guest_rejected": true,
             "daemon_and_next_guest_healthy": true,
             "requests": [
@@ -1724,7 +3440,7 @@
                     "assets": [],
                     "brief": "",
                     "css": "",
-                    "id": "a07c1e84-1290-41b1-88dc-22a64be81514",
+                    "id": "cd1c8a82-2287-4061-8fea-442e2ed425fa",
                     "revision": 2,
                     "schema_version": 1,
                     "script": "",
@@ -1776,13 +3492,13 @@
             "execution": "DOM/jsdom UI and Node SDK contract suites; not real-browser E2E",
             "suite": "apps/desktop-ui/e2e/plugin-manager.test.js",
             "command": [
-              "node",
+              "/opt/homebrew/Cellar/node@22/22.22.0/bin/node",
               "--test",
               "--test-reporter=tap",
               "apps/desktop-ui/e2e/plugin-manager.test.js"
             ],
-            "startedAt": "2026-10-30T21:21:26.909Z",
-            "finishedAt": "2026-10-30T21:21:28.527Z",
+            "startedAt": "2026-11-22T09:54:52.539Z",
+            "finishedAt": "2026-11-22T09:54:53.494Z",
             "exitCode": 0,
             "signal": null,
             "requiredTests": [
@@ -1809,8 +3525,8 @@
               "navigation disconnects the bridge and reopening issues a new document token"
             ],
             "problems": [],
-            "stdoutPath": "docs/release-gate/evidence/2026-10-30/bridge_ui_contract.tap",
-            "stderrPath": "docs/release-gate/evidence/2026-10-30/bridge_ui_contract.stderr.log"
+            "stdoutPath": "release-gate/evidence/2026-11-22/gate/bridge_ui_contract.tap",
+            "stderrPath": "release-gate/evidence/2026-11-22/gate/bridge_ui_contract.stderr.log"
           }
         },
         {
@@ -1820,13 +3536,13 @@
             "execution": "DOM/jsdom UI and Node SDK contract suites; not real-browser E2E",
             "suite": "packages/plugin-sdk/test/sdk.test.mjs",
             "command": [
-              "node",
+              "/opt/homebrew/Cellar/node@22/22.22.0/bin/node",
               "--test",
               "--test-reporter=tap",
               "packages/plugin-sdk/test/sdk.test.mjs"
             ],
-            "startedAt": "2026-10-30T21:21:28.528Z",
-            "finishedAt": "2026-10-30T21:21:28.848Z",
+            "startedAt": "2026-11-22T09:54:53.495Z",
+            "finishedAt": "2026-11-22T09:54:53.921Z",
             "exitCode": 0,
             "signal": null,
             "requiredTests": [
@@ -1856,24 +3572,24 @@
               "closing a frontend rejects pending calls and releases its listener"
             ],
             "problems": [],
-            "stdoutPath": "docs/release-gate/evidence/2026-10-30/sdk_bridge_contract.tap",
-            "stderrPath": "docs/release-gate/evidence/2026-10-30/sdk_bridge_contract.stderr.log"
+            "stdoutPath": "release-gate/evidence/2026-11-22/gate/sdk_bridge_contract.tap",
+            "stderrPath": "release-gate/evidence/2026-11-22/gate/sdk_bridge_contract.stderr.log"
           }
         }
       ],
       "observations": {
         "execution": "Real daemon HTTP and Extism WASM; deterministic loopback service",
-        "output_dir": "docs/release-gate/evidence/2026-10-30",
+        "output_dir": "release-gate/evidence/2026-11-22/gate",
         "runtime": {
-          "git_revision": "47d941d398f44d4a99d89c3c3dc87de5313c6e62",
-          "git_dirty": true,
-          "started_at": "2026-10-30T21:21:21.349Z",
-          "platform": "win32",
-          "architecture": "x64",
-          "node": "v22.19.0",
-          "daemon_command": "target/debug/mlx-ollama-daemon.exe",
+          "git_revision": "24b9525e26bf0194228703d9f2c23ccd008f5a71",
+          "git_dirty": false,
+          "started_at": "2026-11-22T09:53:07.199Z",
+          "platform": "darwin",
+          "architecture": "arm64",
+          "node": "v22.22.0",
+          "daemon_command": "target/debug/mlx-ollama-daemon",
           "daemon_arguments": [],
-          "daemon_sha256": "3e803c4044a138b4ea7af7c19e9d9f1c9cb9e7f339ddc0f5bbcf37905a20aac0"
+          "daemon_sha256": "738ebbfc10ba0c411f7982a4513b4033e0cab4414a14160ab60eccb695e2cb81"
         },
         "fixture": {
           "sha256": "4a71f8c31b9d2cdfb420c70407b6e5c25ecc069cc379cf5758c642f75a6bb3a8",
@@ -1887,9 +3603,9 @@
             "--example",
             "plugin_security_fixture",
             "--",
-            "docs/release-gate/evidence/2026-10-30/plugin-security-fixture.json"
+            "release-gate/evidence/2026-11-22/gate/plugin-security-fixture.json"
           ],
-          "path": "docs/release-gate/evidence/2026-10-30/plugin-security-fixture.json"
+          "path": "release-gate/evidence/2026-11-22/gate/plugin-security-fixture.json"
         },
         "final_credential_scan": {
           "scanned_file_count": 17,
@@ -1900,9 +3616,9 @@
           "execution": "DOM/jsdom UI and Node SDK contract suites; not real-browser E2E"
         },
         "daemon_logs": [
-          "docs/release-gate/evidence/2026-10-30/daemon-1.log",
-          "docs/release-gate/evidence/2026-10-30/daemon-2.log",
-          "docs/release-gate/evidence/2026-10-30/daemon-3.log"
+          "release-gate/evidence/2026-11-22/gate/daemon-1.log",
+          "release-gate/evidence/2026-11-22/gate/daemon-2.log",
+          "release-gate/evidence/2026-11-22/gate/daemon-3.log"
         ],
         "service_requests": [
           {
@@ -1952,21 +3668,27 @@
         "node scripts/release-gate/plugin-security-smoke.mjs"
       ],
       "artifacts": {
-        "report": "docs/release-gate/evidence/2026-10-30/plugin-security-report.json",
+        "report": "release-gate/evidence/2026-11-22/gate/plugin-security-report.json",
         "daemon_logs": [
-          "docs/release-gate/evidence/2026-10-30/daemon-1.log",
-          "docs/release-gate/evidence/2026-10-30/daemon-2.log",
-          "docs/release-gate/evidence/2026-10-30/daemon-3.log"
+          "release-gate/evidence/2026-11-22/gate/daemon-1.log",
+          "release-gate/evidence/2026-11-22/gate/daemon-2.log",
+          "release-gate/evidence/2026-11-22/gate/daemon-3.log"
         ]
       },
       "executed": true
     }
   },
   "reproduction_commands": [
-    "node scripts/release-gate/run-all.mjs --only plugin_security_smoke"
-  ],
-  "archive": {
-    "evidence_directory": "docs/release-gate/evidence/2026-10-30",
-    "normalization": "Local absolute artifact, executable and temporary state paths normalized for repository portability; results, timestamps, revisions and hashes unchanged."
-  }
+    "cargo build --locked -p mlx-ollama-daemon",
+    "cargo test -p mlx-ollama-daemon",
+    "npm ci --prefix apps/desktop-ui",
+    "npm ci --prefix packages/plugin-sdk",
+    "npm ci --prefix plugins/reading-notes",
+    "npm run build --prefix plugins/reading-notes",
+    "npm run pack --prefix plugins/reading-notes",
+    "npm exec --prefix apps/desktop-ui -- playwright install chromium",
+    "npm run test:e2e:channels-smoke --prefix apps/desktop-ui",
+    "npm run test:e2e:skills-smoke --prefix apps/desktop-ui",
+    "node scripts/release-gate/run-all.mjs"
+  ]
 }

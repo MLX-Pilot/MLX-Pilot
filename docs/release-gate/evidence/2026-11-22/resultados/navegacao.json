@@ -1,0 +1,62 @@
+[
+  {
+    "name": "960x600",
+    "topbar": {
+      "x": 172.796875,
+      "y": 0,
+      "width": 787.203125,
+      "height": 56
+    },
+    "menu": {
+      "x": 446.53125,
+      "y": 51.5,
+      "width": 192,
+      "height": 342
+    },
+    "primary": 4,
+    "secondary": [
+      "ai-interaction",
+      "console",
+      "historico",
+      "memoria",
+      "comparar",
+      "research",
+      "hardware",
+      "plugins",
+      "presentations",
+      "settings"
+    ],
+    "modelAccessible": true,
+    "keyboardFocus": true
+  },
+  {
+    "name": "1280x800",
+    "topbar": {
+      "x": 260,
+      "y": 0,
+      "width": 1020,
+      "height": 56
+    },
+    "menu": {
+      "x": 636.328125,
+      "y": 51.5,
+      "width": 192,
+      "height": 342
+    },
+    "primary": 4,
+    "secondary": [
+      "ai-interaction",
+      "console",
+      "historico",
+      "memoria",
+      "comparar",
+      "research",
+      "hardware",
+      "plugins",
+      "presentations",
+      "settings"
+    ],
+    "modelAccessible": true,
+    "keyboardFocus": true
+  }
+]

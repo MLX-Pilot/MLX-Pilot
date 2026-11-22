@@ -1,0 +1,2 @@
+2026-11-22T09:48:31.254837Z  WARN wasmtime_internal_cache: Failed to write file with rename, target path: <cache>/BytecodeAlliance.wasmtime/modules/wasmtime--1795340905725/glYXOkoMvC946c1PorkFpXtK11GwLdFWFhnXpavORN0, err: File exists (os error 17)
+2026-11-22T09:48:35.113409Z  WARN mlx_ollama_daemon::startup: managed Ollama startup failed error=provider unavailable: falha comunicando com a API Ollama: error sending request for url (http://127.0.0.1:1/api/version)

@@ -1,0 +1,41 @@
+{
+  "profile": {
+    "mode": "public-avatar",
+    "offline": false,
+    "profile": "https://github.com/MLX-Pilot",
+    "avatar": "https://avatars.githubusercontent.com/u/262846702?s=200&v=4",
+    "media": {
+      "width": 200,
+      "height": 200,
+      "renderWidth": 100,
+      "renderHeight": 100
+    },
+    "status": "pass"
+  },
+  "comparacao": {
+    "source": "https://github.com/MLX-Pilot/.github/blob/main/profile/mlxpilot-avatar.png",
+    "canonicalSHA256": "c30a792c20e7dbe98c45927261125d06632994ade4b7619d6bceda220946c1df",
+    "servedSHA256": "0d56b85900e510e9da6fedc95c7f41fd4e4eca02ddd7d86bbc229ea5b8b597ea",
+    "sourceSize": [
+      1024,
+      1024
+    ],
+    "servedSize": [
+      200,
+      200
+    ],
+    "comparison": "Absolute mean RGB channel difference on 0..255, resampling canonical to served size with Lanczos",
+    "meanAbsoluteDifference": {
+      "black": [
+        0.42525,
+        0.88985,
+        1.1859
+      ],
+      "white": [
+        0.777225,
+        1.186275,
+        1.394275
+      ]
+    }
+  }
+}

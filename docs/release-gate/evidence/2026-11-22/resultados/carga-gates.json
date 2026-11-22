@@ -1,0 +1,366 @@
+{
+  "macos": {
+    "revision": {
+      "commit": "24b9525e26bf0194228703d9f2c23ccd008f5a71",
+      "dirty": false
+    },
+    "resultado": "GO",
+    "requisicoes_http_200": 510,
+    "lotes": [
+      {
+        "endpoint": "/agent/run",
+        "metrics": {
+          "concurrency": 10,
+          "total_requests": 20,
+          "duration_ms": 280,
+          "error_rate": 0,
+          "timeouts": 0,
+          "status_codes": {
+            "200": 20
+          },
+          "count": 20,
+          "min_ms": 89,
+          "max_ms": 185,
+          "p50_ms": 128,
+          "p95_ms": 179,
+          "p99_ms": 185
+        }
+      },
+      {
+        "endpoint": "/agent/message/send",
+        "metrics": {
+          "concurrency": 10,
+          "total_requests": 20,
+          "duration_ms": 76,
+          "error_rate": 0,
+          "timeouts": 0,
+          "status_codes": {
+            "200": 20
+          },
+          "count": 20,
+          "min_ms": 12,
+          "max_ms": 42,
+          "p50_ms": 30,
+          "p95_ms": 37,
+          "p99_ms": 42
+        }
+      },
+      {
+        "endpoint": "/agent/channels/probe",
+        "metrics": {
+          "concurrency": 10,
+          "total_requests": 20,
+          "duration_ms": 127,
+          "error_rate": 0,
+          "timeouts": 0,
+          "status_codes": {
+            "200": 20
+          },
+          "count": 20,
+          "min_ms": 17,
+          "max_ms": 73,
+          "p50_ms": 58,
+          "p95_ms": 66,
+          "p99_ms": 73
+        }
+      },
+      {
+        "endpoint": "/agent/run",
+        "metrics": {
+          "concurrency": 25,
+          "total_requests": 50,
+          "duration_ms": 536,
+          "error_rate": 0,
+          "timeouts": 0,
+          "status_codes": {
+            "200": 50
+          },
+          "count": 50,
+          "min_ms": 104,
+          "max_ms": 433,
+          "p50_ms": 216,
+          "p95_ms": 417,
+          "p99_ms": 433
+        }
+      },
+      {
+        "endpoint": "/agent/message/send",
+        "metrics": {
+          "concurrency": 25,
+          "total_requests": 50,
+          "duration_ms": 201,
+          "error_rate": 0,
+          "timeouts": 0,
+          "status_codes": {
+            "200": 50
+          },
+          "count": 50,
+          "min_ms": 33,
+          "max_ms": 119,
+          "p50_ms": 80,
+          "p95_ms": 111,
+          "p99_ms": 119
+        }
+      },
+      {
+        "endpoint": "/agent/channels/probe",
+        "metrics": {
+          "concurrency": 25,
+          "total_requests": 50,
+          "duration_ms": 140,
+          "error_rate": 0,
+          "timeouts": 0,
+          "status_codes": {
+            "200": 50
+          },
+          "count": 50,
+          "min_ms": 14,
+          "max_ms": 75,
+          "p50_ms": 59,
+          "p95_ms": 67,
+          "p99_ms": 75
+        }
+      },
+      {
+        "endpoint": "/agent/run",
+        "metrics": {
+          "concurrency": 50,
+          "total_requests": 100,
+          "duration_ms": 1147,
+          "error_rate": 0,
+          "timeouts": 0,
+          "status_codes": {
+            "200": 100
+          },
+          "count": 100,
+          "min_ms": 184,
+          "max_ms": 731,
+          "p50_ms": 472,
+          "p95_ms": 637,
+          "p99_ms": 728
+        }
+      },
+      {
+        "endpoint": "/agent/message/send",
+        "metrics": {
+          "concurrency": 50,
+          "total_requests": 100,
+          "duration_ms": 370,
+          "error_rate": 0,
+          "timeouts": 0,
+          "status_codes": {
+            "200": 100
+          },
+          "count": 100,
+          "min_ms": 49,
+          "max_ms": 219,
+          "p50_ms": 149,
+          "p95_ms": 208,
+          "p99_ms": 217
+        }
+      },
+      {
+        "endpoint": "/agent/channels/probe",
+        "metrics": {
+          "concurrency": 50,
+          "total_requests": 100,
+          "duration_ms": 365,
+          "error_rate": 0,
+          "timeouts": 0,
+          "status_codes": {
+            "200": 100
+          },
+          "count": 100,
+          "min_ms": 40,
+          "max_ms": 217,
+          "p50_ms": 141,
+          "p95_ms": 202,
+          "p99_ms": 208
+        }
+      }
+    ],
+    "blocos": 8
+  },
+  "ci_ubuntu": {
+    "revision": {
+      "commit": "3aef76d7cab1d97d534f493e1c8a1a75375eeafe",
+      "dirty": false
+    },
+    "resultado": "GO",
+    "requisicoes_http_200": 510,
+    "lotes": [
+      {
+        "endpoint": "/agent/run",
+        "metrics": {
+          "concurrency": 10,
+          "total_requests": 20,
+          "duration_ms": 241,
+          "error_rate": 0,
+          "timeouts": 0,
+          "status_codes": {
+            "200": 20
+          },
+          "count": 20,
+          "min_ms": 41,
+          "max_ms": 240,
+          "p50_ms": 81,
+          "p95_ms": 198,
+          "p99_ms": 240
+        }
+      },
+      {
+        "endpoint": "/agent/message/send",
+        "metrics": {
+          "concurrency": 10,
+          "total_requests": 20,
+          "duration_ms": 41,
+          "error_rate": 0,
+          "timeouts": 0,
+          "status_codes": {
+            "200": 20
+          },
+          "count": 20,
+          "min_ms": 9,
+          "max_ms": 25,
+          "p50_ms": 16,
+          "p95_ms": 23,
+          "p99_ms": 25
+        }
+      },
+      {
+        "endpoint": "/agent/channels/probe",
+        "metrics": {
+          "concurrency": 10,
+          "total_requests": 20,
+          "duration_ms": 40,
+          "error_rate": 0,
+          "timeouts": 0,
+          "status_codes": {
+            "200": 20
+          },
+          "count": 20,
+          "min_ms": 9,
+          "max_ms": 25,
+          "p50_ms": 17,
+          "p95_ms": 23,
+          "p99_ms": 25
+        }
+      },
+      {
+        "endpoint": "/agent/run",
+        "metrics": {
+          "concurrency": 25,
+          "total_requests": 50,
+          "duration_ms": 662,
+          "error_rate": 0,
+          "timeouts": 0,
+          "status_codes": {
+            "200": 50
+          },
+          "count": 50,
+          "min_ms": 52,
+          "max_ms": 662,
+          "p50_ms": 171,
+          "p95_ms": 477,
+          "p99_ms": 662
+        }
+      },
+      {
+        "endpoint": "/agent/message/send",
+        "metrics": {
+          "concurrency": 25,
+          "total_requests": 50,
+          "duration_ms": 105,
+          "error_rate": 0,
+          "timeouts": 0,
+          "status_codes": {
+            "200": 50
+          },
+          "count": 50,
+          "min_ms": 16,
+          "max_ms": 61,
+          "p50_ms": 45,
+          "p95_ms": 59,
+          "p99_ms": 61
+        }
+      },
+      {
+        "endpoint": "/agent/channels/probe",
+        "metrics": {
+          "concurrency": 25,
+          "total_requests": 50,
+          "duration_ms": 97,
+          "error_rate": 0,
+          "timeouts": 0,
+          "status_codes": {
+            "200": 50
+          },
+          "count": 50,
+          "min_ms": 17,
+          "max_ms": 60,
+          "p50_ms": 41,
+          "p95_ms": 57,
+          "p99_ms": 60
+        }
+      },
+      {
+        "endpoint": "/agent/run",
+        "metrics": {
+          "concurrency": 50,
+          "total_requests": 100,
+          "duration_ms": 1099,
+          "error_rate": 0,
+          "timeouts": 0,
+          "status_codes": {
+            "200": 100
+          },
+          "count": 100,
+          "min_ms": 54,
+          "max_ms": 1098,
+          "p50_ms": 292,
+          "p95_ms": 894,
+          "p99_ms": 988
+        }
+      },
+      {
+        "endpoint": "/agent/message/send",
+        "metrics": {
+          "concurrency": 50,
+          "total_requests": 100,
+          "duration_ms": 209,
+          "error_rate": 0,
+          "timeouts": 0,
+          "status_codes": {
+            "200": 100
+          },
+          "count": 100,
+          "min_ms": 23,
+          "max_ms": 136,
+          "p50_ms": 87,
+          "p95_ms": 124,
+          "p99_ms": 133
+        }
+      },
+      {
+        "endpoint": "/agent/channels/probe",
+        "metrics": {
+          "concurrency": 50,
+          "total_requests": 100,
+          "duration_ms": 209,
+          "error_rate": 0,
+          "timeouts": 0,
+          "status_codes": {
+            "200": 100
+          },
+          "count": 100,
+          "min_ms": 22,
+          "max_ms": 127,
+          "p50_ms": 86,
+          "p95_ms": 118,
+          "p99_ms": 125
+        }
+      }
+    ],
+    "blocos": 8
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "status": "pass",
+  "casos": [
+    {
+      "id": "install",
+      "status": "pass"
+    },
+    {
+      "id": "configure",
+      "status": "pass"
+    },
+    {
+      "id": "search",
+      "status": "pass"
+    },
+    {
+      "id": "document",
+      "status": "pass"
+    },
+    {
+      "id": "conflict",
+      "status": "pass"
+    },
+    {
+      "id": "exports",
+      "status": "pass"
+    },
+    {
+      "id": "revoke",
+      "status": "pass"
+    },
+    {
+      "id": "disable_enable",
+      "status": "pass"
+    },
+    {
+      "id": "remove",
+      "status": "pass"
+    }
+  ],
+  "exportacoes": {
+    "pdf": {
+      "bytes": 448830,
+      "slides": 3
+    },
+    "pptx": {
+      "bytes": 91120,
+      "slides": 3
+    },
+    "html": {
+      "bytes": 23719,
+      "slides": 3
+    }
+  }
+}
