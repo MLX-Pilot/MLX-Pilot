@@ -15,7 +15,7 @@ function parseOptionalJsonInput(rawValue, fallback = {}) {
   return JSON.parse(text);
 }
 
-function parseCredentialsInput(rawValue) {
+function parseCredentialsInput(rawValue, family) {
   const text = String(rawValue || "").trim();
   if (!text) {
     return null;
@@ -23,7 +23,7 @@ function parseCredentialsInput(rawValue) {
   if (text.startsWith("{")) {
     return JSON.parse(text);
   }
-  return { token: text };
+  return family === "webhook_http_v1" ? { webhook_url: text } : { token: text };
 }
 
 export function createAgentChannelsController({
@@ -179,24 +179,35 @@ export function createAgentChannelsController({
       return {
         title: `${channel.name} • Bridge externa`,
         summary: `${docsSummary} Este conector depende de bridge/webhook real para ativacao completa.`,
-        credentialLabel: "Credencial do bridge (opcional)",
-        credentialPlaceholder: '{"token":"..."}',
-        credentialHint: "Se o conector exigir endpoint, token, room ou base_url, prefira preencher em Adapter config.",
+        credentialLabel: protocolFamily.includes("webhook") ? "URL do webhook" : "Credencial da ponte (JSON)",
+        credentialPlaceholder: protocolFamily.includes("webhook") ? "https://…" : '{"base_url":"https://…","token":"…"}',
+        credentialHint: protocolFamily.includes("webhook") ? "Cole a URL de entrada fornecida pelo serviço." : "Informe base_url e, se necessário, token da ponte.",
         metadataLabel: "Metadata operacional (JSON)",
         metadataPlaceholder: '{"workspace":"ops","owner":"team-messaging"}',
         routingLabel: "Routing defaults (JSON)",
         routingPlaceholder: '{"target":"#alerts"}',
         adapterLabel: "Adapter config do bridge (JSON)",
-        adapterPlaceholder: '{"endpoint":"https://bridge.exemplo/api","token":"...","room":"#ops"}',
+        adapterPlaceholder: "{}",
         steps: [
           "Provisione o bridge/webhook externo do canal.",
-          "Preencha endpoint, token e dados de room em Adapter config.",
+          "Informe os dados de acesso no campo de credencial.",
           "Salve a conta e execute Login ou Probe.",
           "Envie uma mensagem teste para validar o fluxo real.",
         ],
       };
     }
 
+    if (protocolFamily === "matrix_http_v1" || protocolFamily === "irc_tcp_v1") {
+      const matrix = protocolFamily === "matrix_http_v1";
+      return {
+        title: channel.name, summary: docsSummary, steps: [],
+        credentialLabel: "Credenciais (JSON)",
+        credentialPlaceholder: matrix ? '{"homeserver":"https://…","token":"…"}' : '{"server":"irc.exemplo","port":6667,"nick":"equipe"}',
+        credentialHint: matrix ? "Informe homeserver e token da conta Matrix." : "Informe servidor, porta e nick da conta IRC.",
+        metadataLabel: "Metadados", routingLabel: "Roteamento", adapterLabel: "Adaptador",
+        metadataPlaceholder: "{}", routingPlaceholder: "{}", adapterPlaceholder: "{}",
+      };
+    }
     if (qrMode) {
       return {
         title: `${channel.name} • Sessao local com QR`,
@@ -505,12 +516,12 @@ export function createAgentChannelsController({
       elements.agentChannelSessionMeta.textContent = parts.join(" • ");
     }
     if (elements.agentChannelCredentialsInput && account.credentials_ref) {
-      elements.agentChannelCredentialsInput.placeholder = `Credencial mantida em ${account.credentials_ref}`;
+      elements.agentChannelCredentialsInput.placeholder = "Credencial salva · deixe em branco para manter";
     }
 
     setSessionActionButton(elements.agentChannelLoginBtn, {
       hidden: false,
-      disabled: false,
+      disabled: !account.enabled,
       label: loginActionLabel(channel, account),
     });
     setSessionActionButton(elements.agentChannelLogoutBtn, {
@@ -650,7 +661,7 @@ export function createAgentChannelsController({
     if (elements.agentChannelCredentialsInput) {
       elements.agentChannelCredentialsInput.value = "";
       elements.agentChannelCredentialsInput.placeholder = account.credentials_ref
-        ? `Credencial mantida em ${account.credentials_ref}`
+        ? "Credencial salva · deixe em branco para manter"
         : '{"token":"..."}';
     }
     updateSelectedAccountUi();
@@ -715,7 +726,7 @@ export function createAgentChannelsController({
                 <strong>${escapeHtml(account.account_id)}</strong>${account.is_default ? ' <span class="meta-note">(default)</span>' : ""}
                 <div class="meta-note">${account.enabled ? "Ativa" : "Desativada"} · ${escapeHtml(health)} · ${escapeHtml(session)}</div>
                 <div class="meta-note">${account.credentials_ref ? "Credencial salva" : "Sem credencial"}</div>
-                <div class="meta-note">adapter_config: ${adapterConfigured ? "configurado" : "vazio"}</div>
+                ${adapterConfigured ? '<div class="meta-note">Adaptador configurado</div>' : ""}
                 ${protocol}
                 ${qrStatusTag}
                 ${accountCapabilities}
@@ -739,9 +750,9 @@ export function createAgentChannelsController({
           <div class="agent-channel-card-head">
             <div class="agent-channel-card-meta">
               <h4>${escapeHtml(channel.name)}</h4>
-              <p class="meta-note">aliases: ${escapeHtml((channel.aliases || []).join(", ") || "-")}</p>
-              <p class="meta-note">family: ${escapeHtml(channel.protocol_family)} • version: ${escapeHtml(channel.protocol_version)}</p>
-              <div class="agent-skill-badges">${(channel.capabilities || [])
+              ${configuredOnly ? "" : `<p class="meta-note">aliases: ${escapeHtml((channel.aliases || []).join(", ") || "-")}</p>`}
+              ${configuredOnly ? "" : `<p class="meta-note">family: ${escapeHtml(channel.protocol_family)} • version: ${escapeHtml(channel.protocol_version)}</p>`}
+              <div class="agent-skill-badges" ${configuredOnly ? "hidden" : ""}>${(channel.capabilities || [])
                 .map((capability) => `<span class="agent-skill-tag">${escapeHtml(capability)}</span>`)
                 .join("")}</div>
             </div>
@@ -823,7 +834,7 @@ export function createAgentChannelsController({
       channel,
       account_id: accountId,
       enabled: Boolean(elements.agentChannelEnabledToggle?.checked),
-      credentials: parseCredentialsInput(elements.agentChannelCredentialsInput?.value),
+      credentials: parseCredentialsInput(elements.agentChannelCredentialsInput?.value, findChannelView(channel)?.protocol_family),
       metadata: parseOptionalJsonInput(elements.agentChannelMetadataInput?.value, {}),
       routing_defaults: parseOptionalJsonInput(elements.agentChannelRoutingDefaultsInput?.value, {}),
       adapter_config: effectiveAdapterConfig,
@@ -849,8 +860,8 @@ export function createAgentChannelsController({
       throw new Error("Conta nao encontrada.");
     }
     const nextAccountId = await promptText({
-      title: "Novo account_id",
-      message: `Atualize o identificador de ${channelId}:${accountId}`,
+      title: "Renomear conta",
+      message: `Novo identificador para ${channelId}:${accountId}`,
       defaultValue: accountId,
       confirmLabel: "Renomear",
     });
@@ -864,6 +875,7 @@ export function createAgentChannelsController({
       new_account_id: nextAccountId,
     });
     populateChannelForm(channelId, nextAccountId);
+    if (elements.agentChannelFormFeedback) elements.agentChannelFormFeedback.textContent = `Conta renomeada para ${nextAccountId}.`;
   }
 
   async function handleAgentChannelListAction(action, channelId, accountId) {
@@ -883,6 +895,8 @@ export function createAgentChannelsController({
       return;
     }
     if (action === "show-qr") {
+      populateChannelForm(channelId, accountId);
+      elements.agentChannelQrPanel?.scrollIntoView?.({ block: "nearest" });
       const channel = findChannelView(channelId);
       const account = channel?.accounts?.find((entry) => entry.account_id === accountId);
       const { qrCode, qrDataUrl } = extractAccountQrPayload(account);
@@ -1037,6 +1051,8 @@ export function createAgentChannelsController({
 
     if (elements.agentChannelSelect) {
       elements.agentChannelSelect.addEventListener("change", () => {
+        clearChannelForm();
+        if (elements.agentSendChannelSelect) elements.agentSendChannelSelect.value = elements.agentChannelSelect.value;
         syncAgentAccountOptions(elements.agentChannelSelect.value);
         syncSelectedChannelAccount(elements.agentChannelSelect.value);
       });
@@ -1217,10 +1233,29 @@ export function mountChannelPanel(fetchJson) {
     agentChannelLogsRefreshBtn: byId("agent-channel-logs-refresh-btn"),
     agentChannelLogsList: byId("agent-channel-logs-list"),
   };
+  const dialog = byId("agent-channel-dialog");
+  function ask(options, withInput) {
+    const input = byId("agent-channel-dialog-value");
+    byId("agent-channel-dialog-title").textContent = options.title;
+    byId("agent-channel-dialog-message").textContent = options.message;
+    byId("agent-channel-dialog-confirm").textContent = options.confirmLabel;
+    input.hidden = !withInput;
+    input.required = withInput;
+    input.value = options.defaultValue || "";
+    dialog.returnValue = "";
+    return new Promise(resolve => {
+      dialog.addEventListener("close", () => {
+        const confirmed = dialog.returnValue === "confirm";
+        resolve(withInput ? (confirmed ? input.value.trim() : null) : confirmed);
+      }, { once: true });
+      dialog.showModal();
+      if (withInput) input.select();
+    });
+  }
   return createAgentChannelsController({
     elements, fetchJson,
-    promptText: ({ message, defaultValue }) => window.prompt(message, defaultValue),
-    confirmAction: ({ message }) => window.confirm(message),
+    promptText: options => ask(options, true),
+    confirmAction: options => ask(options, false),
     renderQrCode: (canvas, text) => window.QRCode.toCanvas(canvas, text, { width: 220 }),
   });
 }
