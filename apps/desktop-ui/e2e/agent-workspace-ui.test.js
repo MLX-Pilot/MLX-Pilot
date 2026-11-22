@@ -64,6 +64,7 @@ function createFixture({
   mcpServersResponse,
   initialDownloads,
   startupResponse,
+  unavailableHealthChecks = 0,
   useRealTimers = false,
 } = {}) {
   let sessions = [
@@ -174,6 +175,7 @@ function createFixture({
     fetchCalls.push({ method, path, body, url: requestUrl.toString() });
 
     if (path === "/health") {
+      if (unavailableHealthChecks-- > 0) throw new Error("The embedded daemon is starting");
       return jsonResponse({ status: "ok", provider: "auto", provider_ready: true, degraded: false });
     }
 
@@ -298,6 +300,14 @@ function createFixture({
 
     if (path === "/agent/sessions" && method === "GET") {
       return jsonResponse(sessions);
+    }
+
+    if (path.startsWith("/agent/sessions/") && method === "GET") {
+      if (path.endsWith("/sess-2")) return jsonResponse([
+        { role: "user", content: "Qual é o próximo passo?" },
+        { role: "assistant", content: "Revise **a conversa**." },
+      ]);
+      return jsonResponse([]);
     }
 
     if (path === "/agent/sessions" && method === "POST") {
@@ -679,6 +689,21 @@ function createFixture({
   };
 }
 
+test("desktop startup retries its own daemon before falling back to another port", async () => {
+  const fixture = createFixture({ unavailableHealthChecks: 2 });
+  try {
+    await flush(10);
+    const startup = fixture.fetchCalls.findIndex(entry => entry.path === "/runtime/startup");
+    assert.ok(startup >= 0);
+    const probes = fixture.fetchCalls.slice(0, startup).filter(entry => entry.path === "/health");
+    assert.equal(probes.length, 3);
+    assert.ok(probes.every(entry => entry.url === "http://127.0.0.1:11436/health"));
+    assert.equal(fixture.document.getElementById("agent-session-count")?.textContent, "2");
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test("agent workspace boots with live summary and toggles config tab", async () => {
   const fixture = createFixture();
 
@@ -699,6 +724,36 @@ test("agent workspace boots with live summary and toggles config tab", async () 
 
     assert.ok(fixture.document.getElementById("agent-view-config")?.classList.contains("active"));
     assert.equal(fixture.document.getElementById("agent-view-config")?.style.display, "block");
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("histórico do agente reabre a conversa e mantém o foco ao navegar pelo teclado", async () => {
+  const fixture = createFixture();
+  try {
+    await flush(8);
+    const { document } = fixture;
+    document.querySelector('.tab[data-panel="agent"]').click();
+    await flush(3);
+    const row = document.querySelector('#agent-session-list button[data-session-id="sess-2"]');
+    row.focus();
+    row.click();
+    await flush(4);
+    const transcript = document.getElementById("agent-chat-messages");
+    assert.match(transcript.textContent, /Qual é o próximo passo/);
+    assert.equal(transcript.querySelector(".assistant-message strong").textContent, "a conversa");
+    assert.equal(document.getElementById("agent-current-session").textContent, "Channels");
+    assert.equal(document.activeElement.dataset.sessionId, "sess-2");
+    const toggle = document.getElementById("agent-history-toggle");
+    toggle.click();
+    assert.equal(toggle.getAttribute("aria-expanded"), "false");
+    assert.ok(document.getElementById("agent-history-rail").hidden);
+    document.getElementById("agent-policy-control").click();
+    const config = document.getElementById("agent-tab-config");
+    assert.equal(config.getAttribute("aria-selected"), "true");
+    config.dispatchEvent(new fixture.window.KeyboardEvent("keydown", {key:"ArrowLeft", bubbles:true}));
+    assert.equal(document.activeElement.id, "agent-tab-workspace");
   } finally {
     fixture.cleanup();
   }
@@ -1710,6 +1765,52 @@ test("degraded Ollama blocks only models routed to Ollama", async () => {
     assert.ok(!fixture.fetchCalls.some((entry) => entry.path === "/chat/stream"));
     assert.match(fixture.document.getElementById("chat-messages")?.textContent || "", /Ollama nao esta pronto/);
     assert.equal(fixture.document.getElementById("agent-daemon-status")?.textContent, "Degradado");
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("global navigation exposes every section and restores keyboard focus after a secondary choice", async () => {
+  const fixture = createFixture();
+  try {
+    await flush();
+    const { document, window } = fixture;
+    const menu = document.getElementById("more-sections");
+    const toggle = document.getElementById("sections-toggle");
+    const key = (target, value) => target.dispatchEvent(new window.KeyboardEvent("keydown", { key: value, bubbles: true }));
+    assert.equal(document.querySelectorAll(".tab-bar > [data-panel]").length, 4);
+    assert.equal(menu.querySelectorAll("[data-panel]").length, 10);
+    assert.equal(menu.hidden, true);
+
+    toggle.focus();
+    key(toggle, "ArrowUp");
+    assert.equal(toggle.getAttribute("aria-expanded"), "true");
+    assert.equal(document.activeElement.dataset.panel, "settings");
+    key(document.activeElement, "ArrowDown");
+    assert.equal(document.activeElement.dataset.panel, "ai-interaction");
+    key(document.activeElement, "Escape");
+    assert.equal(menu.hidden, true);
+    assert.equal(document.activeElement, toggle);
+
+    toggle.click();
+    const secondary = menu.querySelector('[data-panel="plugins"]');
+    secondary.focus();
+    secondary.click();
+    assert.ok(document.getElementById("panel-plugins").classList.contains("active"));
+    assert.equal(secondary.getAttribute("aria-current"), "page");
+    assert.equal(toggle.textContent.trim(), "Plugins");
+    assert.equal(document.activeElement, toggle);
+    assert.equal(menu.hidden, true);
+
+    toggle.click();
+    document.getElementById("model-trigger").focus();
+    assert.equal(menu.hidden, true);
+    toggle.click();
+    document.getElementById("model-trigger").click();
+    assert.equal(menu.hidden, true);
+    document.querySelector('[data-panel="chat"]').click();
+    assert.equal(document.querySelectorAll('.tab-bar [aria-current="page"]').length, 1);
+    assert.equal(toggle.textContent.trim(), "Mais");
   } finally {
     fixture.cleanup();
   }
