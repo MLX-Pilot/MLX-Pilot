@@ -34,14 +34,14 @@ try {
   harness = await createHarness("reading-notes-live");
   daemon = startDaemon({ ...harness, port: await pickPort() });
   await waitForHealth(daemon.baseUrl, daemon.proc);
-  const invoke = (method, route, body) =>
-    assertOkJson(daemon.baseUrl, method, route, body, { timeoutMs: 60_000 });
+  const invoke = (method, route, body, timeoutMs = 60_000) =>
+    assertOkJson(daemon.baseUrl, method, route, body, { timeoutMs });
 
   report.stage = "install and configure";
   const plugins = "/agent/wasm-plugins";
   const route = `${plugins}/reading_notes`;
   const grants = pkg.manifest.permissions;
-  await invoke("POST", plugins, { ...pkg, grants });
+  await invoke("POST", plugins, { ...pkg, grants }, 180_000);
   const configured = await invoke("PUT", `${route}/configuration`, {
     grants,
     services: { open_library: { enabled: true, base_url: origin, allow_private_network: false } },

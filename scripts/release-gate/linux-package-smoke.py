@@ -48,23 +48,27 @@ def exercise(binary, evidence, state, report, model):
     gi.require_version("Gdk", "3.0")
     gi.require_version("Gtk", "3.0")
     from gi.repository import Gdk, GLib, Gtk
-    # WebKit's accessibility tree and the pointer operate on this isolated X display.
+    # WebKit can report object bounds relative to its window even when AT-SPI requests screen coordinates.
     def find(test):
         return pyatspi.findDescendant(pyatspi.Registry.getDesktop(0), test)
 
     def visible(obj):
         return obj.getState().contains(pyatspi.STATE_SHOWING)
 
-    def click(control):
-        def bounds():
+    def focus(control):
+        subprocess.run(["xdotool", "windowactivate", "--sync", window], check=True, timeout=10)
+        def focused():
             try:
-                rect = control.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
-                return rect if rect.width > 0 and rect.height > 0 else None
+                if not control.getState().contains(pyatspi.STATE_FOCUSED):
+                    control.queryComponent().grabFocus()
+                return control.getState().contains(pyatspi.STATE_FOCUSED)
             except GLib.GError:
                 return None
-        rect = until("visible control bounds", bounds)
-        subprocess.run(["xdotool", "mousemove", str(rect.x + rect.width // 2),
-                        str(rect.y + rect.height // 2), "click", "1"], check=True)
+        until("keyboard focus on the accessible control", focused)
+
+    def activate(control):
+        focus(control)
+        subprocess.run(["xdotool", "key", "--clearmodifiers", "space"], check=True)
 
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -124,6 +128,12 @@ def exercise(binary, evidence, state, report, model):
             assert report["listener_owned_by_app"], "The listener does not belong to the installed app"
             report["executable"] = str(Path(f"/proc/{app.pid}/exe").resolve())
             assert Path(report["executable"]) == Path(binary).resolve()
+            def app_windows():
+                result = subprocess.run(["xdotool", "search", "--all", "--onlyvisible", "--pid",
+                    str(app.pid), "--name", "MLX Pilot"], capture_output=True, text=True, check=False)
+                return result.stdout.splitlines()
+            window = until("installed desktop window", app_windows)[0]
+            report["window_title"] = output("xdotool", "getwindowname", window)
             if model:
                 check_policy("startup_policy")
                 (evidence / "runtime-startup.json").write_text(json.dumps(get_json(f"{base}/runtime/startup"), indent=2) + "\n")
@@ -131,12 +141,12 @@ def exercise(binary, evidence, state, report, model):
                 (pyatspi.ROLE_PAGE_TAB, pyatspi.ROLE_PUSH_BUTTON) and visible(o)
                 and (o.name or "").strip().casefold() in {"agent", "agente"}))
             time.sleep(1)
-            click(tab)
+            activate(tab)
             before = session_ids()
             new_session = until("New conversation button", lambda: find(lambda obj:
-                obj.getRole() == pyatspi.ROLE_PUSH_BUTTON and (obj.name or "").casefold()
-                in {"nova sessão", "nova sessao", "nova conversa"} and visible(obj)))
-            click(new_session)
+                obj.getRole() == pyatspi.ROLE_PUSH_BUTTON and visible(obj)
+                and "id:btn-new-session" in obj.getAttributes()))
+            activate(new_session)
             created = until("session created from the installed UI", lambda: session_ids() - before)
             session_id, = created
             report["session_created_via_ui"] = session_id
@@ -148,7 +158,7 @@ def exercise(binary, evidence, state, report, model):
                 attributes = " ".join(obj.getAttributes())
                 return "id:agent-command-input" in attributes or "agente" in ((obj.name or "") + attributes).casefold()
             composer = until("Agent composer", lambda: find(is_composer))
-            click(composer)
+            focus(composer)
             draft = "Say hello. /no_think" if model else "Teste Linux."
             subprocess.run(["xdotool", "type", "--clearmodifiers", "--delay", "80", draft], check=True)
             clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
