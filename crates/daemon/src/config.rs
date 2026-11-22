@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
+use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -668,14 +669,25 @@ impl AppConfig {
     }
 
     pub fn save_settings_to(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
+        // Replace the destination in one step so concurrent readers see a complete config.
+        // Follow an existing symlink so users can keep their settings elsewhere.
+        let destination = match fs::canonicalize(path) {
+            Ok(existing) => existing,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => path.to_path_buf(),
+            Err(error) => return Err(error),
+        };
+        let parent = destination
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| std::path::Path::new("."));
+        fs::create_dir_all(parent)?;
         let mut normalized = self.clone();
         normalize_loaded_config(&mut normalized);
         normalized.schema_version = default_app_config_schema_version();
-        let content = serde_json::to_string_pretty(&normalized)?;
-        fs::write(path, content)?;
+        let content = serde_json::to_vec_pretty(&normalized)?;
+        let mut pending = tempfile::NamedTempFile::new_in(parent)?;
+        pending.write_all(&content)?;
+        pending.persist(&destination)?;
         Ok(())
     }
 
@@ -1439,6 +1451,35 @@ fn normalize_mlx_airllm_python_command(cfg: &mut AppConfig) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn readers_observe_complete_settings_during_concurrent_replacements() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let config = AppConfig {
+            ollama_base_url: "http://127.0.0.1:49192".into(),
+            ..AppConfig::default()
+        };
+        config.save_settings_to(&path).unwrap();
+        let start = std::sync::Barrier::new(3);
+        std::thread::scope(|scope| {
+            for _ in 0..2 {
+                scope.spawn(|| {
+                    start.wait();
+                    for _ in 0..100 {
+                        config.save_settings_to(&path).unwrap();
+                    }
+                });
+            }
+            start.wait();
+            for _ in 0..200 {
+                assert_eq!(
+                    AppConfig::load_settings_from(&path).ollama_base_url,
+                    config.ollama_base_url
+                );
+            }
+        });
+    }
 
     #[test]
     fn compatibility_state_roundtrips_via_custom_settings_path() {
