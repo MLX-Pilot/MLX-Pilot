@@ -137,12 +137,20 @@ export async function runPluginBrowserSmoke({ outputDir = process.env.RELEASE_GA
     const requested = page.locator('#pm-review input[type="checkbox"]');
     assert.equal(await requested.count(), 3);
     for (const control of await requested.all()) await control.check();
-    await page.locator('#pm-install').click();
+    // The daemon compiles the WASM module before acknowledging a cold installation.
+    const installStarted = performance.now();
+    const [installResponse] = await Promise.all([
+      page.waitForResponse(r => r.url() === daemon.baseUrl + '/agent/wasm-plugins' && r.request().method() === 'POST',
+        { timeout: 180_000 }),
+      page.locator('#pm-install').click(),
+    ]);
+    const installMs = Math.round(performance.now() - installStarted);
+    if (!installResponse.ok()) throw new Error(`Reading Notes installation returned HTTP ${installResponse.status()}: ${await installResponse.text()}`);
     await card.waitFor();
     const installed = (await pluginList()).find(p => p.manifest.id === 'reading_notes');
     assert.equal(installed?.manifest.version, '1.1.0');
     assert.ok(installed.enabled && installed.has_frontend);
-    pass({ plugin: installed.manifest.id, version: installed.manifest.version });
+    pass({ plugin: installed.manifest.id, version: installed.manifest.version, httpStatus: installResponse.status(), installMs });
 
     current = 'configure';
     await card.locator('[data-configure]').click();
