@@ -760,7 +760,6 @@
     const model = state.models.find(entry => entry.id === resolvedId);
     const provider = inferModelProvider(resolvedId, model?.provider || state.agentConfig?.provider || 'llamacpp');
     const payload = {
-      ...(state.agentConfig || {}),
       provider,
       model_id: agentConfigModelId(resolvedId, provider),
     };
@@ -774,8 +773,7 @@
     }
 
     try {
-      const saved = await api('/agent/config', { method: 'POST', body: JSON.stringify(payload) });
-      state.agentConfig = saved || payload;
+      await updateAgentConfig(payload);
       return true;
     } catch (error) {
       console.error('Agent model save failed:', error);
@@ -787,7 +785,7 @@
     }
   }
 
-  async function ensureAgentCompatibleModel({ persist = false } = {}) {
+  function ensureAgentCompatibleModel() {
     const providerOption = selectedAgentProviderOption();
     if (providerOption?.kind === 'cloud') {
       if (providerOption.modelId) {
@@ -803,7 +801,6 @@
     if (!fallbackId) return false;
 
     selectModel(fallbackId);
-    if (persist) await persistAgentModelSelection(fallbackId);
     return true;
   }
 
@@ -1365,8 +1362,8 @@
 
   function updateAgentWorkspaceSummary() {
     const currentSession = state.agentSessions.find(session => session.id === state.currentSessionId) || null;
-    const execMode = state.agentConfig?.execution_mode || 'full';
-    const approvalMode = state.agentConfig?.approval_mode || 'ask';
+    const execMode = state.agentConfig?.execution_mode;
+    const approvalMode = state.agentConfig?.approval_mode;
     const modelLabel = currentAgentModelLabel();
     const providerLabel = currentProviderLabel();
 
@@ -1376,10 +1373,10 @@
     setText('agent-current-session', currentSession?.name?.trim() || 'Nova conversa');
     setText('agent-current-model', modelLabel);
     setText('agent-current-provider', `Provider ${providerLabel}`);
-    setText('agent-current-execution', `Exec ${execMode}`);
-    setText('agent-current-approval', `Approval ${approvalMode}`);
-    const executionLabel = { full: 'Acesso completo', 'read-only': 'Somente leitura', 'dry-run': 'Simulação' }[execMode] || execMode;
-    const approvalLabel = { auto: 'automática', ask: 'solicitar', deny: 'negar' }[approvalMode] || approvalMode;
+    setText('agent-current-execution', execMode ? `Exec ${execMode}` : '');
+    setText('agent-current-approval', approvalMode ? `Approval ${approvalMode}` : '');
+    const executionLabel = policyLabel('exec', execMode) || 'Permissões';
+    const approvalLabel = policyLabel('approval', approvalMode) || 'indisponível';
     setText('agent-composer-policy', executionLabel);
     const policyControl = document.getElementById('agent-policy-control');
     if (policyControl) {
@@ -1465,9 +1462,32 @@
   }
 
   // -- Agent Config (/agent/config) ---------------------------
+  let agentConfigWrite = Promise.resolve();
+  let agentConfigVersion = 0;
+
+  function updateAgentConfig(fields) {
+    const version = ++agentConfigVersion;
+    agentConfigWrite = agentConfigWrite.catch(() => {}).then(async () => {
+      const current = await api('/agent/config');
+      const payload = { ...current, ...fields };
+      const saved = await api('/agent/config', { method: 'POST', body: JSON.stringify(payload) });
+      state.agentConfig = saved || payload;
+    }).finally(() => {
+      if (version === agentConfigVersion) {
+        agentConfigWrite = Promise.resolve();
+        populateAgentPolicy(state.agentConfig);
+        updateAgentWorkspaceSummary();
+      }
+    });
+    return agentConfigWrite;
+  }
+
   async function loadAgentConfig() {
     try {
+      const version = agentConfigVersion;
+      await agentConfigWrite.catch(() => {});
       const config = await api('/agent/config');
+      if (version !== agentConfigVersion) return;
       state.agentConfig = config;
       const configuredModel = resolveModelId(config?.model_id, config?.provider);
       if (configuredModel) {
@@ -1481,7 +1501,7 @@
       if (configuredModel) {
         const configuredEntry = state.models.find(model => model.id === configuredModel);
         if (configuredEntry && isLocalProvider(config?.provider) && !isToolReadyModel(configuredEntry)) {
-          void ensureAgentCompatibleModel({ persist: true });
+          ensureAgentCompatibleModel();
         }
       }
       updateAgentWorkspaceSummary();
@@ -1490,37 +1510,35 @@
     }
   }
 
-  function populateAgentPolicy(config) {
-    if (!config) return;
-    // Set execution mode radio
-    const execVal = config.execution_mode || 'full';
-    const execRadio = document.querySelector(`input[name="exec"][value="${execVal}"]`);
-    if (execRadio) { execRadio.checked = true; execRadio.dispatchEvent(new Event('change')); }
-
-    // Set approval mode radio
-    const appVal = config.approval_mode || 'ask';
-    const appRadio = document.querySelector(`input[name="approval"][value="${appVal}"]`);
-    if (appRadio) { appRadio.checked = true; appRadio.dispatchEvent(new Event('change')); }
+  function policyRadioValue(group, raw) {
+    const value = String(raw ?? '').trim().toLowerCase();
+    if (group === 'exec') {
+      if (['read_only', 'readonly', 'read-only'].includes(value)) return 'read-only';
+      if (['dry_run', 'dryrun', 'dry-run'].includes(value)) return 'dry-run';
+    }
+    return group === 'approval' && value === 'risk-based' ? 'risk_based' : value;
   }
 
-  async function saveAgentPolicy() {
-    try {
-      const exec = document.querySelector('input[name="exec"]:checked');
-      const app = document.querySelector('input[name="approval"]:checked');
-      const payload = {
-        ...(state.agentConfig || {}),
-        execution_mode: exec?.value || 'full',
-        approval_mode: app?.value || 'ask',
-      };
-      const res = await api('/agent/config', { method: 'POST', body: JSON.stringify(payload) });
-      state.agentConfig = res || payload;
-      renderAgentProviderSelector();
-      renderAgentProviderProfiles();
-      updateAgentWorkspaceSummary();
-      return true;
-    } catch (e) {
-      console.error('Save agent policy failed:', e);
-      return false;
+  function policyLabel(group, raw) {
+    const value = policyRadioValue(group, raw);
+    const radio = Array.from(document.getElementsByName(group)).find(input => input.value === value);
+    return radio?.closest('label')?.textContent.trim() || raw;
+  }
+
+  function populateAgentPolicy(config) {
+    for (const [group, key] of [['exec', 'execution_mode'], ['approval', 'approval_mode']]) {
+      const raw = config?.[key];
+      const value = policyRadioValue(group, raw);
+      let found = false;
+      for (const radio of document.getElementsByName(group)) {
+        radio.checked = radio.value === value;
+        radio.disabled = !config;
+        radio.closest('.radio-card')?.classList.toggle('selected', radio.checked);
+        if (radio.checked) found = true;
+      }
+      const unknown = document.getElementById(`agent-${group}-unknown`);
+      unknown.hidden = !raw || found;
+      unknown.textContent = unknown.hidden ? '' : `Valor configurado: ${raw}`;
     }
   }
 
@@ -1529,11 +1547,11 @@
     if (!option || !state.agentConfig) return false;
 
     try {
-      const payload = { ...(state.agentConfig || {}) };
+      const payload = {};
       if (option.kind === 'local') {
         let localModelId = resolveModelId(
-          state.currentModel || payload.model_id || option.modelId || recommendedAgentModelId(),
-          payload.provider,
+          state.currentModel || state.agentConfig.model_id || option.modelId || recommendedAgentModelId(),
+          state.agentConfig.provider,
         );
         let localModel = state.models.find((model) => model.id === localModelId);
         if (
@@ -1568,8 +1586,7 @@
         ensureVisibleModel(payload.model_id, payload.provider);
       }
 
-      const saved = await api('/agent/config', { method: 'POST', body: JSON.stringify(payload) });
-      state.agentConfig = saved || payload;
+      await updateAgentConfig(payload);
       renderAgentProviderSelector();
       renderAgentProviderProfiles();
       hydrateModelShell();
@@ -1591,7 +1608,6 @@
 
     try {
       const payload = {
-        ...(state.agentConfig || {}),
         provider: profile.provider,
         provider_profile_id: profile.id,
         model_id: agentConfigModelId(profile.model_id, profile.provider),
@@ -1610,8 +1626,7 @@
         ensureVisibleModel(profile.model_id, profile.provider);
       }
 
-      const saved = await api('/agent/config', { method: 'POST', body: JSON.stringify(payload) });
-      state.agentConfig = saved || payload;
+      await updateAgentConfig(payload);
       renderAgentProviderSelector();
       renderAgentProviderProfiles();
       hydrateModelShell();
@@ -1628,17 +1643,13 @@
 
     try {
       const profiles = readAgentProviderProfilesFromDom();
-      const payload = {
-        ...(state.agentConfig || {}),
-        provider_profiles: profiles,
-      };
-      const activeProfileStillExists = profiles.some((profile) => profile.id === payload.provider_profile_id);
+      const payload = { provider_profiles: profiles };
+      const activeProfileStillExists = profiles.some((profile) => profile.id === state.agentConfig.provider_profile_id);
       if (!activeProfileStillExists) {
         payload.provider_profile_id = '';
       }
 
-      const saved = await api('/agent/config', { method: 'POST', body: JSON.stringify(payload) });
-      state.agentConfig = saved || payload;
+      await updateAgentConfig(payload);
       renderAgentProviderSelector();
       renderAgentProviderProfiles();
       hydrateModelShell();
@@ -1660,7 +1671,15 @@
 
   // Save agent policy when radio buttons change
   document.querySelectorAll('input[name="exec"], input[name="approval"]').forEach(r => {
-    r.addEventListener('change', () => saveAgentPolicy());
+    r.addEventListener('change', async () => {
+      if (!r.checked || !state.agentConfig) return;
+      const key = r.name === 'exec' ? 'execution_mode' : 'approval_mode';
+      try {
+        await updateAgentConfig({ [key]: r.value });
+      } catch (error) {
+        alert('Não foi possível salvar a política: ' + error.message);
+      }
+    });
   });
 
   document.getElementById('agent-provider-select')?.addEventListener('change', async (event) => {
@@ -1726,7 +1745,7 @@
         if (state.currentModel) state.currentModel = resolveModelId(state.currentModel, state.agentConfig?.provider);
         if (state.currentModel) ensureVisibleModel(state.currentModel, state.agentConfig?.provider);
         if (state.agentConfig && (!state.agentConfig.model_id || isAgentPanelActive())) {
-          void ensureAgentCompatibleModel({ persist: isAgentPanelActive() });
+          ensureAgentCompatibleModel();
         }
         state.modelsLoaded = true;
         state.modelsStale = false;
@@ -1797,7 +1816,7 @@
       menu.appendChild(item);
     });
     if (!state.currentModel && visibleModels.length > 0) {
-      selectModel(visibleModels[0].id, { persistAgentConfig: isAgentPanelActive() });
+      selectModel(visibleModels[0].id);
     }
   }
 
@@ -4724,7 +4743,7 @@
     }
     if (target === 'agent') {
       if (state.currentSessionId && renderedAgentSession !== state.currentSessionId) void loadAgentConversation(state.currentSessionId);
-      void ensureAgentCompatibleModel({ persist: true });
+      ensureAgentCompatibleModel();
       updateAgentWorkspaceSummary();
     }
     if (target === 'workflows') void initFlowsPanel();
@@ -4765,7 +4784,7 @@
   document.getElementById('agent-policy-control')?.addEventListener('click', () => {
     document.getElementById('agent-tab-config')?.click();
     document.querySelector('.agent-config-tab[data-config-section="runtime"]')?.click();
-    document.querySelector('input[name="exec"]:checked')?.focus();
+    (document.querySelector('input[name="exec"]:checked') || document.querySelector('input[name="exec"]:enabled'))?.focus();
   });
   document.querySelector('.agent-desk-tabs')?.addEventListener('keydown', event => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
@@ -4992,7 +5011,6 @@
     const answer = buildAgentShortcutResponse(kind, snapshot);
     renderAssistantOutput(assistantEl, { rawAnswer: answer, finalize: true });
     pushConsoleEntry('info', 'agent-shortcut', `Atalho concluido: ${kind}`);
-    state.agentConfig = snapshot.config || state.agentConfig;
     state.tools = snapshot.tools;
     state.channels = snapshot.channels;
     state.auditEntries = snapshot.auditEntries;
@@ -5044,6 +5062,7 @@
         await runAgentShortcut(shortcut, agDiv);
         return;
       }
+      await agentConfigWrite;
       const modelId = activeAgentModelId();
       if (!modelId) throw new Error('Selecione um modelo valido antes de executar o agent.');
       ensureRuntimeReadyForModel(modelId, state.agentConfig?.provider || 'ollama');
@@ -5052,8 +5071,6 @@
         message: msg,
         provider: state.agentConfig?.provider || inferModelProvider(modelId, 'ollama') || 'ollama',
         model_id: modelId,
-        execution_mode: state.agentConfig?.execution_mode || 'full',
-        approval_mode: state.agentConfig?.approval_mode || 'ask',
         max_iterations: 25,
       };
       pushConsoleEntry('info', 'agent', `Enviando mensagem: provider=${payload.provider} model=${payload.model_id} session=${payload.session_id || 'nova'}`);

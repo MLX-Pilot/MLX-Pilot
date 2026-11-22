@@ -68,6 +68,17 @@ pub enum ExecutionMode {
     Locked,
 }
 
+impl ExecutionMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::ReadOnly => "read_only",
+            Self::DryRun => "dry_run",
+            Self::Locked => "locked",
+        }
+    }
+}
+
 /// Errors that can occur during tool execution.
 #[derive(Debug, thiserror::Error)]
 pub enum ToolError {
