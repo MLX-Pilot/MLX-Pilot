@@ -385,11 +385,7 @@ impl MlxProvider {
             || text.contains("command buffer")
             || text.contains("iokit")
             || text.contains("iogpu");
-        if signal_terminated && gpu_crash {
-            return true;
-        }
-
-        false
+        signal_terminated && gpu_crash
     }
 
     fn failure_details(stdout: &str, stderr: &str, status: &ExitStatus) -> String {
