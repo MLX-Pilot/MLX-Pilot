@@ -2201,7 +2201,7 @@ dependencies = [
 
 [[package]]
 name = "http-llm-provider"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "mlx-ollama-core",
@@ -2766,7 +2766,7 @@ checksum = "6373607a59f0be73a39b6fe456b8192fcc3585f602af20751600e974dd455e77"
 
 [[package]]
 name = "llamacpp-provider"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "mlx-ollama-core",
@@ -2979,7 +2979,7 @@ dependencies = [
 
 [[package]]
 name = "mlx-agent-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3002,7 +3002,7 @@ dependencies = [
 
 [[package]]
 name = "mlx-agent-skills"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "serde",
@@ -3016,7 +3016,7 @@ dependencies = [
 
 [[package]]
 name = "mlx-agent-tools"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3035,7 +3035,7 @@ dependencies = [
 
 [[package]]
 name = "mlx-flow"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3052,7 +3052,7 @@ dependencies = [
 
 [[package]]
 name = "mlx-hardware-fit"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3066,7 +3066,7 @@ dependencies = [
 
 [[package]]
 name = "mlx-model-fit"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3080,7 +3080,7 @@ dependencies = [
 
 [[package]]
 name = "mlx-ollama-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "serde",
@@ -3090,7 +3090,7 @@ dependencies = [
 
 [[package]]
 name = "mlx-ollama-daemon"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3137,7 +3137,7 @@ dependencies = [
 
 [[package]]
 name = "mlx-ollama-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mlx-ollama-daemon",
  "serde",
@@ -3148,7 +3148,7 @@ dependencies = [
 
 [[package]]
 name = "mlx-plugin-runtime"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "extism",
@@ -3161,7 +3161,7 @@ dependencies = [
 
 [[package]]
 name = "mlx-presentation"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -3169,7 +3169,7 @@ dependencies = [
 
 [[package]]
 name = "mlx-provider"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "mlx-ollama-core",
@@ -3179,7 +3179,7 @@ dependencies = [
 
 [[package]]
 name = "mlx-research"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ammonia",
  "anyhow",
@@ -3621,7 +3621,7 @@ dependencies = [
 
 [[package]]
 name = "ollama-provider"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "flate2",
