@@ -924,7 +924,10 @@ impl AppConfig {
 
         if let Ok(value) = env::var("APP_AGENT_APPROVAL_MODE") {
             let mode = value.trim().to_ascii_lowercase();
-            if matches!(mode.as_str(), "auto" | "ask" | "deny") {
+            if matches!(
+                mode.as_str(),
+                "auto" | "ask" | "deny" | "risk_based" | "risk-based"
+            ) {
                 self.agent.approval_mode = mode;
             }
         }
