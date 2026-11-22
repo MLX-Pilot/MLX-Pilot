@@ -1,0 +1,9 @@
+{
+  "status": "fail",
+  "stage": "search Open Library",
+  "service": "https://openlibrary.org/",
+  "query": "Dom Casmurro",
+  "started_at": "2026-11-22T09:50:50.981Z",
+  "package_sha256": "17ec06c8234d4a736a622e754f55bd27fc09828240dbb592366938c05a96214a",
+  "motivo": "Sem resposta do serviço bibliográfico dentro do prazo da chamada."
+}

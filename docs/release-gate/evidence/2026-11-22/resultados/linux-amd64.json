@@ -1,0 +1,19 @@
+{
+  "package": "MLX Pilot_0.1.0_amd64.deb",
+  "sha256": "0b9b5d6be31f999743dacaef32949f14aa4fa4e9ac67598d49c586b06a226bf6",
+  "architecture": "amd64",
+  "installed_version": "0.1.0",
+  "status": "pass",
+  "health": {
+    "status": "failed",
+    "provider": "auto",
+    "provider_ready": false,
+    "degraded": false
+  },
+  "listener_owned_by_app": true,
+  "draft": "Teste Linux.",
+  "sessao_criada": true,
+  "revisao_head": "24b9525e26bf0194228703d9f2c23ccd008f5a71",
+  "revisao_merge_ci": "3aef76d7cab1d97d534f493e1c8a1a75375eeafe",
+  "actions": "https://github.com/MLX-Pilot/MLX-Pilot/actions/runs/45009094679/job/137168870490"
+}

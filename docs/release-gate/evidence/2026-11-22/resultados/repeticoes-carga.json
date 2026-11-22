@@ -1,0 +1,36 @@
+{
+  "origem": "24b9525e26bf0194228703d9f2c23ccd008f5a71",
+  "total_http_200": 1530,
+  "medicoes": [
+    {
+      "http_200": 510,
+      "errors": 0,
+      "timeouts": 0,
+      "concurrency": [
+        10,
+        25,
+        50
+      ]
+    },
+    {
+      "http_200": 510,
+      "errors": 0,
+      "timeouts": 0,
+      "concurrency": [
+        10,
+        25,
+        50
+      ]
+    },
+    {
+      "http_200": 510,
+      "errors": 0,
+      "timeouts": 0,
+      "concurrency": [
+        10,
+        25,
+        50
+      ]
+    }
+  ]
+}

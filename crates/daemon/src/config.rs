@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
+use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -399,6 +400,9 @@ impl Default for ChannelPersistedState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelAccountPersistedState {
+    /// Stable owner of the vault entry and session directory across account renames.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage_id: Option<String>,
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
@@ -416,6 +420,10 @@ pub struct ChannelAccountPersistedState {
 }
 
 impl ChannelAccountPersistedState {
+    pub fn storage_id<'a>(&'a self, account_id: &'a str) -> &'a str {
+        self.storage_id.as_deref().unwrap_or(account_id)
+    }
+
     pub fn is_configured(&self) -> bool {
         self.credentials_ref
             .as_deref()
@@ -431,6 +439,7 @@ impl ChannelAccountPersistedState {
 impl Default for ChannelAccountPersistedState {
     fn default() -> Self {
         Self {
+            storage_id: None,
             enabled: true,
             credentials_ref: None,
             metadata: BTreeMap::new(),
@@ -660,14 +669,25 @@ impl AppConfig {
     }
 
     pub fn save_settings_to(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
+        // Replace the destination in one step so concurrent readers see a complete config.
+        // Follow an existing symlink so users can keep their settings elsewhere.
+        let destination = match fs::canonicalize(path) {
+            Ok(existing) => existing,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => path.to_path_buf(),
+            Err(error) => return Err(error),
+        };
+        let parent = destination
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| std::path::Path::new("."));
+        fs::create_dir_all(parent)?;
         let mut normalized = self.clone();
         normalize_loaded_config(&mut normalized);
         normalized.schema_version = default_app_config_schema_version();
-        let content = serde_json::to_string_pretty(&normalized)?;
-        fs::write(path, content)?;
+        let content = serde_json::to_vec_pretty(&normalized)?;
+        let mut pending = tempfile::NamedTempFile::new_in(parent)?;
+        pending.write_all(&content)?;
+        pending.persist(&destination)?;
         Ok(())
     }
 
@@ -916,7 +936,10 @@ impl AppConfig {
 
         if let Ok(value) = env::var("APP_AGENT_APPROVAL_MODE") {
             let mode = value.trim().to_ascii_lowercase();
-            if matches!(mode.as_str(), "auto" | "ask" | "deny") {
+            if matches!(
+                mode.as_str(),
+                "auto" | "ask" | "deny" | "risk_based" | "risk-based"
+            ) {
                 self.agent.approval_mode = mode;
             }
         }
@@ -1430,6 +1453,35 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn readers_observe_complete_settings_during_concurrent_replacements() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let config = AppConfig {
+            ollama_base_url: "http://127.0.0.1:49192".into(),
+            ..AppConfig::default()
+        };
+        config.save_settings_to(&path).unwrap();
+        let start = std::sync::Barrier::new(3);
+        std::thread::scope(|scope| {
+            for _ in 0..2 {
+                scope.spawn(|| {
+                    start.wait();
+                    for _ in 0..100 {
+                        config.save_settings_to(&path).unwrap();
+                    }
+                });
+            }
+            start.wait();
+            for _ in 0..200 {
+                assert_eq!(
+                    AppConfig::load_settings_from(&path).ollama_base_url,
+                    config.ollama_base_url
+                );
+            }
+        });
+    }
+
+    #[test]
     fn compatibility_state_roundtrips_via_custom_settings_path() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("settings.json");
@@ -1448,6 +1500,7 @@ mod tests {
                 accounts: BTreeMap::from([(
                     "tg".to_string(),
                     ChannelAccountPersistedState {
+                        storage_id: None,
                         enabled: true,
                         credentials_ref: Some("channels.telegram.tg.credentials".to_string()),
                         metadata: BTreeMap::from([("owner".to_string(), "local".to_string())]),

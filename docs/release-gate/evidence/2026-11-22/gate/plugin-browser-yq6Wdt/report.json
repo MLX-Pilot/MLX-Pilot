@@ -1,0 +1,106 @@
+{
+  "block": "plugin_browser_smoke",
+  "title": "Reading Notes and Studio in Chromium",
+  "executed": true,
+  "status": "pass",
+  "cases": [
+    {
+      "id": "install",
+      "status": "pass",
+      "evidence": {
+        "plugin": "reading_notes",
+        "version": "1.1.0",
+        "httpStatus": 200,
+        "installMs": 76668
+      }
+    },
+    {
+      "id": "configure",
+      "status": "pass",
+      "evidence": {
+        "catalog": "http://127.0.0.1:57882",
+        "workspace": "temporary"
+      }
+    },
+    {
+      "id": "search",
+      "status": "pass",
+      "evidence": {
+        "book": "O desenho do livro",
+        "path": "/search.json?q=Design%20editorial&fields=key,title,author_name,first_publish_year&limit=5"
+      }
+    },
+    {
+      "id": "document",
+      "status": "pass",
+      "evidence": {
+        "document": "867f4e62-b84e-403d-a4ff-6859c35083e8",
+        "revision": 3,
+        "slides": 3
+      }
+    },
+    {
+      "id": "conflict",
+      "status": "pass",
+      "evidence": {
+        "status": 409,
+        "winningRevision": 4
+      }
+    },
+    {
+      "id": "exports",
+      "status": "pass",
+      "evidence": {
+        "formats": [
+          "pdf",
+          "pptx",
+          "html"
+        ]
+      }
+    },
+    {
+      "id": "revoke",
+      "status": "pass",
+      "evidence": {
+        "deniedStatus": 400
+      }
+    },
+    {
+      "id": "disable_enable",
+      "status": "pass",
+      "evidence": {
+        "repeatSearch": "O desenho do livro"
+      }
+    },
+    {
+      "id": "remove",
+      "status": "pass",
+      "evidence": {
+        "preservedDocument": "867f4e62-b84e-403d-a4ff-6859c35083e8"
+      }
+    }
+  ],
+  "blockers": [],
+  "artifacts": {
+    "report": "release-gate/evidence/2026-11-22/gate/plugin-browser-yq6Wdt/report.json",
+    "exports": {
+      "pdf": {
+        "path": "release-gate/evidence/2026-11-22/gate/plugin-browser-yq6Wdt/caderno.pdf",
+        "bytes": 448830,
+        "slides": 3
+      },
+      "pptx": {
+        "path": "release-gate/evidence/2026-11-22/gate/plugin-browser-yq6Wdt/caderno.pptx",
+        "bytes": 91120,
+        "slides": 3
+      },
+      "html": {
+        "path": "release-gate/evidence/2026-11-22/gate/plugin-browser-yq6Wdt/caderno.html",
+        "bytes": 23719,
+        "slides": 3
+      }
+    },
+    "video": "release-gate/evidence/2026-11-22/videos/plugins.mp4",
+    "daemonLog": "release-gate/evidence/2026-11-22/gate/plugin-browser-yq6Wdt/daemon.log"
+  }
+}

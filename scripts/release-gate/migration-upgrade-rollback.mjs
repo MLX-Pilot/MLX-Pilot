@@ -112,6 +112,7 @@ export async function runMigrationUpgradeRollback() {
       session_dir: path.dirname(sessionStatePath),
       connected_at_epoch_ms: Date.now(),
     });
+    const originalSession = await fs.readFile(sessionStatePath, "utf8");
 
     await fs.mkdir(path.join(backupDir, "channel-sessions", "telegram"), { recursive: true });
     await fs.cp(harness.settingsPath, path.join(backupDir, "settings.json"), { recursive: false });
@@ -132,6 +133,7 @@ export async function runMigrationUpgradeRollback() {
 
     const savedMigrated = await assertOkJson(daemon.baseUrl, "POST", "/agent/config", migratedConfig);
     const settingsAfterUpgrade = JSON.parse(await fs.readFile(harness.settingsPath, "utf8"));
+    const { migration } = await assertOkJson(daemon.baseUrl, "GET", "/agent/compat/report");
     const effectivePolicy = await assertOkJson(
       daemon.baseUrl,
       "GET",
@@ -167,6 +169,7 @@ export async function runMigrationUpgradeRollback() {
     });
 
     const rawRestored = await fs.readFile(harness.settingsPath, "utf8");
+    const sessionRestored = await fs.readFile(sessionStatePath, "utf8");
     const rawOriginal = JSON.stringify(originalLegacy, null, 2) + "\n";
 
     daemon = startDaemon({
@@ -185,18 +188,29 @@ export async function runMigrationUpgradeRollback() {
     );
     const legacyRemove = await assertOkJson(daemon.baseUrl, "POST", "/agent/channels/remove", {
       channel_id: "telegram",
-    }).catch((error) => ({ error: error.message }));
+    });
     const channelsAfterRollback = await assertOkJson(daemon.baseUrl, "GET", "/agent/channels/status");
 
     const blockers = [];
-    if (settingsAfterUpgrade.schema_version !== 2) {
-      blockers.push("Upgrade nao persistiu schema_version=2.");
+    if (!Number.isInteger(migration.current_schema_version) || migration.current_schema_version < 3 ||
+        settingsAfterUpgrade.schema_version !== migration.current_schema_version || !migration.migrated) {
+      blockers.push("A versão gravada no disco diverge do esquema de migração atual.");
     }
     if (rawRestored !== rawOriginal) {
       blockers.push("Rollback nao restaurou exatamente o backup do settings.json.");
     }
-    if (sessionAfterUpgrade.status !== "connected") {
-      blockers.push("Sessao de canal nao permaneceu integra no upgrade.");
+    if (sessionAfterUpgrade.status !== "connected" || sessionRestored !== originalSession) {
+      blockers.push("A sessão do canal mudou durante a migração ou a restauração.");
+    }
+    assert.deepEqual(configAfterRollback.enabled_skills, originalLegacy.agent.enabled_skills);
+    assert.equal(configAfterRollback.provider, originalLegacy.agent.provider);
+    assert.equal(effectiveAfterRollback.profile, effectivePolicy.profile);
+    assert.equal(pluginDisabled.enabled, false);
+    assert.equal(pluginEnabled.enabled, true);
+    for (const [id, channel] of Object.entries(originalLegacy.compatibility.channels)) {
+      const upgraded = channelsStatus.find(entry => entry.id === id);
+      assert.equal(upgraded?.default_account_id, channel.default_account_id);
+      assert.ok(upgraded.accounts.some(account => account.account_id === channel.default_account_id));
     }
 
     return {
@@ -206,7 +220,9 @@ export async function runMigrationUpgradeRollback() {
       summary: {
         backup_created: true,
         upgraded_schema_version: settingsAfterUpgrade.schema_version,
+        current_schema_version: migration.current_schema_version,
         rollback_restored_exact_backup: rawRestored === rawOriginal,
+        rollback_restored_exact_session: sessionRestored === originalSession,
         migrated_enabled_skills: savedMigrated.enabled_skills,
         migrated_tool_profile: settingsAfterUpgrade.agent.tool_policy.profile,
       },

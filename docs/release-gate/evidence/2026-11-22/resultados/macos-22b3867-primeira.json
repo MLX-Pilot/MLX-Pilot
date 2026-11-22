@@ -1,0 +1,38 @@
+{
+  "aplicativo": "MLX Pilot 0.1.0",
+  "origem": "22b38675d9ceb1c9129d0429af7e9140c6bf9423",
+  "macos": "26.3.1",
+  "arquitetura": "arm64",
+  "provedores": {
+    "ollama": "ready",
+    "llamacpp": "ready",
+    "mlx": "ready"
+  },
+  "saude": {
+    "status": "ok",
+    "provider": "ollama",
+    "provider_ready": true,
+    "degraded": false
+  },
+  "interacoes": [
+    "AXButton Agente",
+    "AXButton Nova conversa [id=btn-new-session]",
+    "AXRadioButton Configurações [id=agent-tab-config]",
+    "AXRadioButton Conversa [id=agent-tab-workspace]"
+  ],
+  "sessoes_antes": 0,
+  "sessoes_depois": 1,
+  "inferencia": {
+    "model": "qwen3:0.6b",
+    "sent_via": "AXButton Enviar mensagem [id=agent-send-btn]",
+    "question": "Quanto é 2 + 2? Responda somente com o número, sem usar ferramentas.",
+    "persisted_answer": "4",
+    "rendered": true
+  },
+  "video": {
+    "codec_name": "h264",
+    "width": 1280,
+    "height": 900,
+    "nb_frames": "190"
+  }
+}

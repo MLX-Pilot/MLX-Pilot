@@ -1,0 +1,40 @@
+{
+  "started_at": "2026-11-22T09:53:56.542Z",
+  "status": "pass",
+  "service": "https://openlibrary.org/",
+  "tool": "search_books",
+  "query": "Dom Casmurro",
+  "package_sha256": "17ec06c8234d4a736a622e754f55bd27fc09828240dbb592366938c05a96214a",
+  "books": [
+    {
+      "author": "Machado de Assis",
+      "source": "https://openlibrary.org/works/OL1003040W",
+      "title": "Dom Casmurro",
+      "year": 1899
+    },
+    {
+      "author": "Joaquim Maria Machado de Assis",
+      "source": "https://openlibrary.org/works/OL35798215W",
+      "title": "Dom Casmurro : a Novel",
+      "year": 2020
+    },
+    {
+      "author": "machado de assis",
+      "source": "https://openlibrary.org/works/OL43184593W",
+      "title": "dom casmurro ",
+      "year": 1953
+    },
+    {
+      "author": "Geanneti Tavares Salomon",
+      "source": "https://openlibrary.org/works/OL25765826W",
+      "title": "Fashion and Irony in «Dom Casmurro»",
+      "year": 2021
+    },
+    {
+      "author": "Fernando Tavares Sabino",
+      "source": "https://openlibrary.org/works/OL1006145W",
+      "title": "Amor de Capitu",
+      "year": 1999
+    }
+  ]
+}

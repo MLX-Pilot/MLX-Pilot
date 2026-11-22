@@ -2,7 +2,7 @@
 
 // These are DOM/jsdom and Node SDK contracts, not real-browser E2E coverage.
 import { spawn } from "node:child_process";
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, realpath, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -177,7 +177,8 @@ export async function runPluginBridgeSecurity({ outputDir } = {}) {
   return { status: cases.every(({ status }) => status === "pass") ? "pass" : "fail", execution, cases };
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+const entryPath = process.argv[1] && await realpath(process.argv[1]).catch(() => null);
+if (entryPath === fileURLToPath(import.meta.url)) {
   const result = await runPluginBridgeSecurity({ outputDir: process.argv[2] });
   console.log(JSON.stringify(result, null, 2));
   process.exitCode = result.status === "pass" ? 0 : 1;

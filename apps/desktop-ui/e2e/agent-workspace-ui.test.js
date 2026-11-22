@@ -58,12 +58,14 @@ function createFixture({
   cachedModels,
   cachedCurrentModel,
   agentConfigResponse,
+  beforeAgentConfigSave,
   environmentResponseHidden,
   environmentResponseRevealed,
   catalogModelsResponse,
   mcpServersResponse,
   initialDownloads,
   startupResponse,
+  unavailableHealthChecks = 0,
   useRealTimers = false,
 } = {}) {
   let sessions = [
@@ -174,6 +176,7 @@ function createFixture({
     fetchCalls.push({ method, path, body, url: requestUrl.toString() });
 
     if (path === "/health") {
+      if (unavailableHealthChecks-- > 0) throw new Error("The embedded daemon is starting");
       return jsonResponse({ status: "ok", provider: "auto", provider_ready: true, degraded: false });
     }
 
@@ -293,11 +296,21 @@ function createFixture({
     }
 
     if (path === "/agent/config" && method === "POST") {
+      await beforeAgentConfigSave?.(body);
+      agentConfigResponse = body;
       return jsonResponse(body);
     }
 
     if (path === "/agent/sessions" && method === "GET") {
       return jsonResponse(sessions);
+    }
+
+    if (path.startsWith("/agent/sessions/") && method === "GET") {
+      if (path.endsWith("/sess-2")) return jsonResponse([
+        { role: "user", content: "Qual é o próximo passo?" },
+        { role: "assistant", content: "Revise **a conversa**." },
+      ]);
+      return jsonResponse([]);
     }
 
     if (path === "/agent/sessions" && method === "POST") {
@@ -624,7 +637,7 @@ function createFixture({
       return streamingResponse([
         JSON.stringify({ event: "status", status: "thinking" }),
         JSON.stringify({ event: "thinking_delta", delta: "Mapeando estado inicial..." }),
-        JSON.stringify({ event: "answer_delta", delta: "<think>Consolidando contexto interno.</think>\n## Diagnostico\n- Runtime conectado\n- Cache aquecido\n\n```js\nconsole.log('ok');\n```" }),
+        JSON.stringify({ event: "answer_delta", delta: "<think>Consolidando contexto interno.</think>\n## Diagnostico\n- Runtime conectado\n- Cache aquecido\n\n```js\nconsole.log('ok');\n```\n\n[Leitura](https://example.org/busca?q=\"livros\"&edicao=2) · [Anexo](file:///material) · <nota>" }),
         JSON.stringify({ event: "done", status: "completed", total_tokens: 64, latency_ms: 320 }),
       ]);
     }
@@ -679,6 +692,21 @@ function createFixture({
   };
 }
 
+test("desktop startup retries its own daemon before falling back to another port", async () => {
+  const fixture = createFixture({ unavailableHealthChecks: 2 });
+  try {
+    await flush(10);
+    const startup = fixture.fetchCalls.findIndex(entry => entry.path === "/runtime/startup");
+    assert.ok(startup >= 0);
+    const probes = fixture.fetchCalls.slice(0, startup).filter(entry => entry.path === "/health");
+    assert.equal(probes.length, 3);
+    assert.ok(probes.every(entry => entry.url === "http://127.0.0.1:11436/health"));
+    assert.equal(fixture.document.getElementById("agent-session-count")?.textContent, "2");
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test("agent workspace boots with live summary and toggles config tab", async () => {
   const fixture = createFixture();
 
@@ -699,6 +727,126 @@ test("agent workspace boots with live summary and toggles config tab", async () 
 
     assert.ok(fixture.document.getElementById("agent-view-config")?.classList.contains("active"));
     assert.equal(fixture.document.getElementById("agent-view-config")?.style.display, "block");
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("carregar ou abrir políticas reflete os modos salvos sem gravar configuração", async () => {
+  for (const [execution, choice, approval, approvalChoice] of [
+    ["locked", "locked", "risk_based", "risk_based"],
+    ["read_only", "read-only", "risk-based", "risk_based"],
+    ["read-only", "read-only", "ask", "ask"],
+    ["readonly", "read-only", "auto", "auto"],
+    ["dry_run", "dry-run", "deny", "deny"],
+    ["dry-run", "dry-run", "ask", "ask"],
+    ["dryrun", "dry-run", "deny", "deny"],
+    ["full", "full", "auto", "auto"],
+    ["compat-mode", null, "compat-approver", null],
+  ]) {
+    const fixture = createFixture({ agentConfigResponse: {
+      provider: "ollama", model_id: "qwen3.5:9b", execution_mode: execution, approval_mode: approval,
+    } });
+    try {
+      await flush(8);
+      const { document } = fixture;
+      document.querySelector('.tab[data-panel="agent"]').click();
+      document.getElementById("agent-policy-control").click();
+      await flush();
+      assert.equal(fixture.fetchCalls.filter(x => x.path === "/agent/config" && x.method === "POST").length, 0);
+      for (const [name, expected, raw] of [["exec", choice, execution], ["approval", approvalChoice, approval]]) {
+        const active = document.querySelector(`input[name="${name}"]:checked`);
+        assert.equal(active?.value ?? null, expected);
+        assert.equal(document.querySelector(`.radio-card.selected input[name="${name}"]`), active);
+        if (!active) assert.ok(document.getElementById(`agent-${name}-unknown`).textContent.includes(raw));
+      }
+    } finally {
+      fixture.cleanup();
+    }
+  }
+});
+
+test("mudanças explícitas de política preservam os demais campos e a ordem dos cliques", async () => {
+  let allowFirst;
+  const held = new Promise(resolve => { allowFirst = resolve; });
+  let saves = 0;
+  const fixture = createFixture({
+    agentConfigResponse: {
+      provider: "ollama", model_id: "qwen3.5:9b", execution_mode: "read_only", approval_mode: "compat-approver",
+      temperature: 0.3,
+    },
+    beforeAgentConfigSave: () => ++saves === 1 ? held : undefined,
+  });
+  try {
+    await flush(8);
+    const { document } = fixture;
+    const writes = () => fixture.fetchCalls.filter(x => x.path === "/agent/config" && x.method === "POST").map(x => x.body);
+    document.querySelector('input[name="approval"][value="risk_based"]').click();
+    document.querySelector('input[name="exec"][value="locked"]').click();
+    await flush();
+    assert.deepEqual(writes().map(x => [x.execution_mode, x.approval_mode]), [["read_only", "risk_based"]]);
+    allowFirst();
+    await flush(8);
+    assert.deepEqual(writes().map(x => [x.execution_mode, x.approval_mode]), [
+      ["read_only", "risk_based"], ["locked", "risk_based"],
+    ]);
+    assert.ok(writes().every(x => x.temperature === 0.3));
+    assert.equal(document.getElementById("agent-composer-policy").textContent, "Bloqueado");
+    assert.match(document.getElementById("agent-policy-control").getAttribute("aria-label"), /Por risco/);
+  } finally {
+    allowFirst();
+    fixture.cleanup();
+  }
+});
+
+test("salvar um modo preserva uma política desconhecida no outro grupo", async () => {
+  const fixture = createFixture({ agentConfigResponse: {
+    provider: "ollama", model_id: "qwen3.5:9b", execution_mode: "future-mode", approval_mode: "future-approval",
+  } });
+  try {
+    await flush(8);
+    fixture.document.getElementById("agent-save-provider-profiles").click();
+    await flush();
+    fixture.document.querySelector('input[name="exec"][value="dry-run"]').click();
+    await flush();
+    const writes = fixture.fetchCalls.filter(x => x.path === "/agent/config" && x.method === "POST");
+    assert.deepEqual(writes.map(x => [x.body.execution_mode, x.body.approval_mode]), [
+      ["future-mode", "future-approval"], ["dry-run", "future-approval"],
+    ]);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("histórico do agente reabre a conversa e mantém o foco ao navegar pelo teclado", async () => {
+  const fixture = createFixture();
+  try {
+    await flush(8);
+    const { document } = fixture;
+    document.querySelector('.tab[data-panel="agent"]').click();
+    await flush(3);
+    const row = document.querySelector('#agent-session-list button[data-session-id="sess-2"]');
+    row.focus();
+    row.click();
+    await flush(4);
+    const transcript = document.getElementById("agent-chat-messages");
+    assert.match(transcript.textContent, /Qual é o próximo passo/);
+    assert.equal(transcript.querySelector(".assistant-message strong").textContent, "a conversa");
+    assert.equal(document.getElementById("agent-current-session").textContent, "Channels");
+    assert.equal(document.activeElement.dataset.sessionId, "sess-2");
+    const toggle = document.getElementById("agent-history-toggle");
+    toggle.click();
+    assert.equal(toggle.getAttribute("aria-expanded"), "false");
+    assert.ok(document.getElementById("agent-history-rail").hidden);
+    const auditFeed = document.getElementById("audit-feed");
+    auditFeed.replaceChildren();
+    document.getElementById("agent-policy-control").click();
+    const config = document.getElementById("agent-tab-config");
+    assert.equal(config.getAttribute("aria-selected"), "true");
+    config.dispatchEvent(new fixture.window.KeyboardEvent("keydown", {key:"ArrowLeft", bubbles:true}));
+    assert.equal(document.activeElement.id, "agent-tab-workspace");
+    await flush();
+    assert.ok(auditFeed.childElementCount > 0);
   } finally {
     fixture.cleanup();
   }
@@ -743,6 +891,8 @@ test("agent workspace freeform submits runs and creates sessions", async () => {
     const runCall = fixture.fetchCalls.find((entry) => entry.path === "/agent/stream");
     assert.ok(runCall);
     assert.equal(runCall.body.model_id, "ollama::qwen3.5:9b");
+    assert.ok(!Object.hasOwn(runCall.body, "execution_mode"));
+    assert.ok(!Object.hasOwn(runCall.body, "approval_mode"));
     assert.match(fixture.document.getElementById("agent-chat-messages")?.textContent || "", /Resposta do agent/);
     assert.match(fixture.document.getElementById("agent-chat-messages")?.textContent || "", /read_file/);
     assert.match(fixture.document.querySelector("#agent-chat-messages .thinking-content")?.textContent || "", /Validando politica final/);
@@ -787,6 +937,13 @@ test("chat stream shows thinking and renders markdown output", async () => {
     assert.match(answerHtml, /<h2>Diagnostico<\/h2>/);
     assert.match(answerHtml, /<li>Runtime conectado<\/li>/);
     assert.match(answerHtml, /code-block/);
+    const answer = fixture.document.querySelector("#chat-messages .assistant-message .msg-content");
+    const [reading, attachment] = answer.querySelectorAll("a");
+    assert.equal(new URL(reading.href).searchParams.get("q"), '"livros"');
+    assert.equal(new URL(reading.href).searchParams.get("edicao"), "2");
+    assert.equal(attachment.getAttribute("href"), "#");
+    assert.equal(answer.querySelector("nota"), null);
+    assert.ok(answer.textContent.includes("<nota>"));
   } finally {
     fixture.cleanup();
   }
@@ -1703,6 +1860,52 @@ test("degraded Ollama blocks only models routed to Ollama", async () => {
     assert.ok(!fixture.fetchCalls.some((entry) => entry.path === "/chat/stream"));
     assert.match(fixture.document.getElementById("chat-messages")?.textContent || "", /Ollama nao esta pronto/);
     assert.equal(fixture.document.getElementById("agent-daemon-status")?.textContent, "Degradado");
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("global navigation exposes every section and restores keyboard focus after a secondary choice", async () => {
+  const fixture = createFixture();
+  try {
+    await flush();
+    const { document, window } = fixture;
+    const menu = document.getElementById("more-sections");
+    const toggle = document.getElementById("sections-toggle");
+    const key = (target, value) => target.dispatchEvent(new window.KeyboardEvent("keydown", { key: value, bubbles: true }));
+    assert.equal(document.querySelectorAll(".tab-bar > [data-panel]").length, 4);
+    assert.equal(menu.querySelectorAll("[data-panel]").length, 10);
+    assert.equal(menu.hidden, true);
+
+    toggle.focus();
+    key(toggle, "ArrowUp");
+    assert.equal(toggle.getAttribute("aria-expanded"), "true");
+    assert.equal(document.activeElement.dataset.panel, "settings");
+    key(document.activeElement, "ArrowDown");
+    assert.equal(document.activeElement.dataset.panel, "ai-interaction");
+    key(document.activeElement, "Escape");
+    assert.equal(menu.hidden, true);
+    assert.equal(document.activeElement, toggle);
+
+    toggle.click();
+    const secondary = menu.querySelector('[data-panel="plugins"]');
+    secondary.focus();
+    secondary.click();
+    assert.ok(document.getElementById("panel-plugins").classList.contains("active"));
+    assert.equal(secondary.getAttribute("aria-current"), "page");
+    assert.equal(toggle.textContent.trim(), "Plugins");
+    assert.equal(document.activeElement, toggle);
+    assert.equal(menu.hidden, true);
+
+    toggle.click();
+    document.getElementById("model-trigger").focus();
+    assert.equal(menu.hidden, true);
+    toggle.click();
+    document.getElementById("model-trigger").click();
+    assert.equal(menu.hidden, true);
+    document.querySelector('[data-panel="chat"]').click();
+    assert.equal(document.querySelectorAll('.tab-bar [aria-current="page"]').length, 1);
+    assert.equal(toggle.textContent.trim(), "Mais");
   } finally {
     fixture.cleanup();
   }

@@ -8,6 +8,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { computeDecision, REQUIRED_BLOCK_IDS, runAllReleaseGate } from "../release-gate/run-all.mjs";
+import { REQUIRED_PLUGIN_BROWSER_CASES } from "../release-gate/plugin-browser-smoke.mjs";
 import { REQUIRED_PLUGIN_SECURITY_CASES } from "../release-gate/plugin-security-smoke.mjs";
 import { createHarness, daemonCommand, repoRoot, requestJson, startDaemon, stopDaemon, waitForHealth } from "../release-gate/_lib.mjs";
 
@@ -23,6 +24,9 @@ async function temporary(t) {
 function passingBlocks() {
   return REQUIRED_BLOCK_IDS.map((block) => ({
     block, title: block, status: "pass", executed: true, findings: [], blockers: [],
+    ...(block === "plugin_browser_smoke" ? {
+      cases: REQUIRED_PLUGIN_BROWSER_CASES.map((id) => ({ id, status: "pass" })),
+    } : {}),
     ...(block === "plugin_security_smoke" ? {
       cases: REQUIRED_PLUGIN_SECURITY_CASES.map((id) => ({ id, status: "pass" })),
     } : {}),
@@ -43,6 +47,8 @@ for (const [name, mutate] of [
   ["failed audit without findings", (blocks) => { blocks.find((b) => b.block === "security_audit_smoke").status = "fail"; }],
   ["duplicate block", (blocks) => blocks.push({ ...blocks[0] })],
   ["unexpected block", (blocks) => blocks.push({ block: "unknown", status: "pass" })],
+  ["unexecuted browser case", (blocks) => { blocks.find((b) => b.block === "plugin_browser_smoke").cases[0].executed = false; }],
+  ["missing browser case", (blocks) => blocks.find((b) => b.block === "plugin_browser_smoke").cases.pop()],
   ["zero plugin cases", (blocks) => { pluginBlock(blocks).cases = []; }],
   ["missing required plugin case", (blocks) => pluginBlock(blocks).cases.pop()],
   ["skipped plugin case", (blocks) => { pluginBlock(blocks).cases[0].status = "skip"; }],

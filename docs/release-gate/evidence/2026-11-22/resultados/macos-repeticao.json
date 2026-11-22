@@ -1,0 +1,13 @@
+{
+  "model": "qwen3:0.6b",
+  "health": {
+    "status": "ok",
+    "provider": "ollama",
+    "provider_ready": true,
+    "degraded": false
+  },
+  "question": "Quanto é 2 + 2? Responda somente com o número, sem usar ferramentas.",
+  "persisted_answer": "2",
+  "expected_answer": "4",
+  "answer_check": false
+}

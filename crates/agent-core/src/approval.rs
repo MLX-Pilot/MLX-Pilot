@@ -2,6 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// A request sent to the user for approval.
@@ -106,6 +107,11 @@ pub trait ApprovalService: Send + Sync {
 /// A concrete implementation of `ApprovalService`.
 pub struct DefaultApprovalService {
     mode: std::sync::RwLock<ApprovalMode>,
+    state: Arc<ApprovalState>,
+}
+
+#[derive(Default)]
+struct ApprovalState {
     // Pending requests waiting for user decision.
     pending: tokio::sync::Mutex<
         std::collections::HashMap<String, tokio::sync::oneshot::Sender<ApprovalDecision>>,
@@ -122,8 +128,15 @@ impl DefaultApprovalService {
     pub fn with_mode(mode: ApprovalMode) -> Self {
         Self {
             mode: std::sync::RwLock::new(mode),
-            pending: tokio::sync::Mutex::new(std::collections::HashMap::new()),
-            allowlist: std::sync::RwLock::new(std::collections::HashMap::new()),
+            state: Arc::default(),
+        }
+    }
+
+    /// Give a run its own policy while keeping pending decisions reachable by the UI.
+    pub fn for_run(&self, mode: ApprovalMode) -> Self {
+        Self {
+            mode: std::sync::RwLock::new(mode),
+            state: Arc::clone(&self.state),
         }
     }
 
@@ -162,7 +175,7 @@ impl ApprovalService for DefaultApprovalService {
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         {
-            let mut pending = self.pending.lock().await;
+            let mut pending = self.state.pending.lock().await;
             pending.insert(request.id.clone(), tx);
         }
 
@@ -170,7 +183,7 @@ impl ApprovalService for DefaultApprovalService {
             Ok(Ok(decision)) => Ok(decision),
             Ok(Err(_)) => Err(ApprovalError::Unavailable),
             Err(_) => {
-                let mut pending = self.pending.lock().await;
+                let mut pending = self.state.pending.lock().await;
                 pending.remove(&request.id);
                 Err(ApprovalError::Timeout(timeout))
             }
@@ -178,7 +191,7 @@ impl ApprovalService for DefaultApprovalService {
     }
 
     async fn resolve(&self, id: &str, decision: ApprovalDecision) -> Result<(), ApprovalError> {
-        let mut pending = self.pending.lock().await;
+        let mut pending = self.state.pending.lock().await;
         if let Some(sender) = pending.remove(id) {
             let _ = sender.send(decision);
             Ok(())
@@ -188,7 +201,7 @@ impl ApprovalService for DefaultApprovalService {
     }
 
     fn is_allowed(&self, tool_name: &str, params_pattern: &str) -> bool {
-        if let Ok(allowlist) = self.allowlist.read() {
+        if let Ok(allowlist) = self.state.allowlist.read() {
             if let Some(patterns) = allowlist.get(tool_name) {
                 return patterns.iter().any(|p| p == params_pattern || p == "*");
             }
@@ -197,7 +210,7 @@ impl ApprovalService for DefaultApprovalService {
     }
 
     fn add_allowlist_entry(&self, tool_name: &str, pattern: String) {
-        if let Ok(mut allowlist) = self.allowlist.write() {
+        if let Ok(mut allowlist) = self.state.allowlist.write() {
             let patterns = allowlist.entry(tool_name.to_string()).or_default();
             if !patterns.contains(&pattern) {
                 patterns.push(pattern);
@@ -270,6 +283,23 @@ mod tests {
             expires_at: Utc::now(),
             risk: risk.map(ToString::to_string),
         }
+    }
+
+    #[tokio::test]
+    async fn run_modes_stay_independent_and_pending_decisions_reach_the_ui() {
+        let service = DefaultApprovalService::new();
+        let asking = service.for_run(ApprovalMode::Ask);
+        let denied = service.for_run(ApprovalMode::Deny);
+        service.set_mode(ApprovalMode::Auto);
+        assert_eq!(asking.mode(), ApprovalMode::Ask);
+        assert_eq!(denied.mode(), ApprovalMode::Deny);
+        let (answer, reply) = tokio::join!(
+            biased;
+            asking.request_approval(request_with_risk(None), Duration::from_secs(1)),
+            service.resolve("id", ApprovalDecision::AllowOnce),
+        );
+        assert!(reply.is_ok());
+        assert!(matches!(answer, Ok(ApprovalDecision::AllowOnce)));
     }
 
     #[tokio::test]
