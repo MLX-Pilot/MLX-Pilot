@@ -125,61 +125,48 @@ impl LlamaCppProvider {
         Ok(expected_model)
     }
 
+    /// Resolve an already installed engine without downloading or starting a model.
+    /// The doctor and startup use the same candidates, including the per-user GPU cache.
+    pub async fn installed_runtime_binary(&self) -> Option<String> {
+        find_installed_runtime_binary(
+            self.cfg.server_binary.trim(),
+            &provision::engine_cache_dir(),
+            provision::detect_variant(),
+        )
+        .await
+    }
+
     async fn ensure_server_binary(&self) -> Result<String, ProviderError> {
-        let configured = self.cfg.server_binary.trim().to_string();
+        if let Some(binary) = self.installed_runtime_binary().await {
+            return Ok(binary);
+        }
+        let configured = self.cfg.server_binary.trim();
+        if !configured.is_empty() && !matches!(configured, "llama-server" | "llama-server.exe") {
+            return Err(ProviderError::Unavailable {
+                details: format!("llama-server configurado nao esta executavel: {configured}"),
+            });
+        }
         let variant = provision::detect_variant();
-
-        // On a GPU-capable host, prefer the accelerated engine: use the cached build or
-        // download it once. Any failure transparently falls back to the CPU path below.
-        if variant != EngineVariant::Cpu {
-            if let Some(path) = provision::cached_binary(variant) {
-                let candidate = path.display().to_string();
-                if command_available(&candidate).await {
-                    info!(
-                        "usando engine acelerado '{}' em {candidate}",
-                        variant.slug()
-                    );
-                    return Ok(candidate);
-                }
-            }
-
-            if self.cfg.auto_install {
-                match provision::provision_variant(variant).await {
-                    Ok(path) => {
-                        let candidate = path.display().to_string();
-                        if command_available(&candidate).await {
-                            info!(
-                                "engine acelerado '{}' provisionado em {candidate}",
-                                variant.slug()
-                            );
-                            return Ok(candidate);
-                        }
-                        warn!(
-                            "engine '{}' provisionado mas nao executavel; caindo para CPU",
+        if variant != EngineVariant::Cpu && self.cfg.auto_install {
+            match provision::provision_variant(variant).await {
+                Ok(path) => {
+                    let candidate = path.display().to_string();
+                    if command_available(&candidate).await {
+                        info!(
+                            "engine acelerado '{}' provisionado em {candidate}",
                             variant.slug()
                         );
+                        return Ok(candidate);
                     }
-                    Err(error) => warn!(
-                        "provisionamento do engine '{}' falhou ({error}); caindo para CPU",
+                    warn!(
+                        "engine '{}' provisionado mas nao executavel; caindo para CPU",
                         variant.slug()
-                    ),
+                    );
                 }
-            }
-        }
-
-        // CPU path: bundled binary next to the app, PATH, cached download, or fresh download.
-        if !configured.is_empty() && command_available(&configured).await {
-            return Ok(configured);
-        }
-
-        if command_available("llama-server").await {
-            return Ok("llama-server".to_string());
-        }
-
-        if let Some(path) = provision::cached_binary(EngineVariant::Cpu) {
-            let candidate = path.display().to_string();
-            if command_available(&candidate).await {
-                return Ok(candidate);
+                Err(error) => warn!(
+                    "provisionamento do engine '{}' falhou ({error}); caindo para CPU",
+                    variant.slug()
+                ),
             }
         }
 
@@ -702,6 +689,47 @@ fn extract_host_port(base_url: &str) -> Result<(String, u16), ProviderError> {
     Ok((host, port))
 }
 
+async fn find_installed_runtime_binary(
+    configured: &str,
+    cache: &Path,
+    variant: EngineVariant,
+) -> Option<String> {
+    for candidate in runtime_binary_candidates(configured, cache, variant) {
+        if command_available(&candidate).await {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn runtime_binary_candidates(
+    configured: &str,
+    cache: &Path,
+    variant: EngineVariant,
+) -> Vec<String> {
+    // A path or custom command is an explicit selection. A missing override must be
+    // diagnosed as configured, rather than silently substituted or auto-installed.
+    if !configured.is_empty() && !matches!(configured, "llama-server" | "llama-server.exe") {
+        return vec![configured.to_string()];
+    }
+    let mut candidates = Vec::new();
+    let name = if cfg!(windows) {
+        "llama-server.exe"
+    } else {
+        "llama-server"
+    };
+    if variant != EngineVariant::Cpu {
+        candidates.push(cache.join(variant.slug()).join(name).display().to_string());
+    }
+    candidates.push(if configured.is_empty() {
+        name.to_string()
+    } else {
+        configured.to_string()
+    });
+    candidates.push(cache.join("cpu").join(name).display().to_string());
+    candidates
+}
+
 fn default_llama_server_binary() -> String {
     let mut candidates = Vec::new();
 
@@ -758,13 +786,11 @@ async fn command_available(command: &str) -> bool {
 
     let mut cmd = Command::new(command);
     cmd.arg("--help")
+        .kill_on_drop(true)
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     silence_console(&mut cmd);
-    cmd.output()
-        .await
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+    matches!(tokio::time::timeout(Duration::from_secs(4), cmd.output()).await, Ok(Ok(output)) if output.status.success())
 }
 
 async fn run_command(program: &str, args: &[&str], timeout: Duration) -> Result<(), ProviderError> {
@@ -794,4 +820,91 @@ async fn run_command(program: &str, args: &[&str], timeout: Duration) -> Result<
             stderr
         },
     })
+}
+
+#[cfg(test)]
+mod runtime_discovery_tests {
+    use super::*;
+
+    #[test]
+    fn custom_engine_path_has_priority_over_cached_acceleration() {
+        let explicit = "custom-engine/llama-server.exe";
+        assert_eq!(
+            runtime_binary_candidates(explicit, Path::new("cache"), EngineVariant::Vulkan),
+            [explicit]
+        );
+    }
+
+    #[test]
+    fn installed_gpu_engine_is_a_default_runtime_candidate() {
+        let candidates =
+            runtime_binary_candidates("llama-server", Path::new("cache"), EngineVariant::Vulkan);
+        let filename = if cfg!(windows) {
+            "llama-server.exe"
+        } else {
+            "llama-server"
+        };
+        assert_eq!(
+            candidates[0],
+            Path::new("cache")
+                .join("vulkan")
+                .join(filename)
+                .display()
+                .to_string()
+        );
+        assert_eq!(candidates[1], "llama-server");
+        assert!(candidates[2].contains("cpu"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn installed_runtime_is_reused_and_invalid_override_never_installs() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!(
+            "mlx-engine-discovery-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let gpu_cache = root.join("vulkan");
+        std::fs::create_dir_all(&gpu_cache).unwrap();
+        let binary = gpu_cache.join("llama-server");
+        std::fs::write(&binary, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let config = LlamaCppProviderConfig {
+            server_binary: binary.display().to_string(),
+            auto_install: true,
+            ..Default::default()
+        };
+        for _ in 0..2 {
+            assert_eq!(
+                find_installed_runtime_binary("llama-server", &root, EngineVariant::Vulkan)
+                    .await
+                    .as_deref(),
+                Some(config.server_binary.as_str())
+            );
+            let provider = LlamaCppProvider::new(config.clone());
+            assert_eq!(
+                provider.installed_runtime_binary().await.as_deref(),
+                Some(config.server_binary.as_str())
+            );
+            assert_eq!(
+                provider.prepare_runtime().await.unwrap(),
+                config.server_binary
+            );
+        }
+        std::fs::remove_file(&binary).unwrap();
+        let provider = LlamaCppProvider::new(config);
+        assert!(provider.installed_runtime_binary().await.is_none());
+        assert!(provider
+            .prepare_runtime()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("configurado"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

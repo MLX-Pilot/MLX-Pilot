@@ -2125,8 +2125,12 @@ async fn list_chat_models(state: &AppState) -> Result<Vec<ModelDescriptor>, Prov
         LocalProviderMode::Llamacpp => state.llamacpp_provider.list_models().await,
         LocalProviderMode::Ollama => state.ollama_provider.list_models().await,
         LocalProviderMode::Auto => {
-            let mlx_future =
-                tokio::time::timeout(Duration::from_secs(3), state.mlx_provider.list_models());
+            let mlx_future = async {
+                if cfg!(target_os = "windows") {
+                    return Ok(Ok(Vec::new()));
+                }
+                tokio::time::timeout(Duration::from_secs(3), state.mlx_provider.list_models()).await
+            };
             let llamacpp_future = tokio::time::timeout(
                 Duration::from_secs(3),
                 state.llamacpp_provider.list_models(),
@@ -2585,11 +2589,11 @@ fn auto_provider_priority() -> Vec<RoutedProvider> {
             RoutedProvider::Ollama,
         ]
     } else {
-        vec![
-            RoutedProvider::Llamacpp,
-            RoutedProvider::Ollama,
-            RoutedProvider::Mlx,
-        ]
+        let mut providers = vec![RoutedProvider::Llamacpp, RoutedProvider::Ollama];
+        if !cfg!(target_os = "windows") {
+            providers.push(RoutedProvider::Mlx);
+        }
+        providers
     }
 }
 

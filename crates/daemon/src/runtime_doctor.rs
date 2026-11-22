@@ -3,7 +3,7 @@ use std::process::Stdio;
 use std::time::Instant;
 
 use chrono::Utc;
-use mlx_ollama_core::{ChatMessage, ChatRequest, GenerationOptions, MessageRole, ModelProvider};
+use mlx_ollama_core::ModelProvider;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -168,7 +168,7 @@ pub async fn inspect_runtime(
 
     let python_probe = python_component(&mut issues, &mut recommendations).await;
     let (ollama_component, ollama_fix_details, ollama_models) =
-        ollama_component(state, &latest, request.apply_fixes).await;
+        ollama_component(&state.ollama_provider, &latest, request.apply_fixes).await;
     if let Some(fix) = ollama_fix_details {
         fixes_applied.push(fix);
     }
@@ -364,102 +364,124 @@ async fn python_component(
 }
 
 async fn ollama_component(
-    state: &crate::AppState,
+    provider: &ollama_provider::OllamaProvider,
     latest: &LatestVersions,
     apply_fixes: bool,
 ) -> (ComponentStatus, Option<DoctorFix>, Vec<ModelSummary>) {
-    let cfg = state.ollama_provider.config();
+    let cfg = provider.config();
     let mut fix = None;
     let mut details = vec![format!("base_url configurado: {}", cfg.base_url)];
     let cli = run_capture("ollama", &["--version"], 10).await;
-    let mut local_version =
-        first_line(&cli.stdout).map(|line| line.replace("ollama version is ", ""));
-
-    let api_version = fetch_ollama_api_version(&cfg.base_url).await;
-    let healthy_before_fix = api_version.is_some();
-    if let Some(version) = api_version.as_deref() {
-        if local_version.is_none() {
-            local_version = Some(version.to_string());
-        }
-        details.push(format!("API Ollama saudavel em {}", cfg.base_url));
-    }
-
-    let models = if healthy_before_fix {
-        state
-            .ollama_provider
-            .list_models()
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|entry| ModelSummary {
-                id: entry.id,
-                provider: entry.provider,
-            })
-            .collect::<Vec<_>>()
-    } else if apply_fixes {
-        match state.ollama_provider.list_models().await {
-            Ok(models) => {
+    let mut api_version = fetch_ollama_api_version(&cfg.base_url).await;
+    if api_version.is_none() && apply_fixes {
+        match provider.prepare_runtime(None).await {
+            Ok(()) => {
+                api_version = fetch_ollama_api_version(&cfg.base_url).await;
                 fix = Some(DoctorFix {
                     action: "start_ollama".to_string(),
                     status: "applied".to_string(),
-                    details:
-                        "backend Ollama foi inicializado pelo provider e respondeu apos o probe"
-                            .to_string(),
+                    details: "Runtime Ollama preparado por solicitação explícita".to_string(),
                 });
-                details.push("Ollama estava offline e foi iniciado automaticamente".to_string());
-                models
-                    .into_iter()
-                    .map(|entry| ModelSummary {
-                        id: entry.id,
-                        provider: entry.provider,
-                    })
-                    .collect::<Vec<_>>()
             }
-            Err(error) => {
-                details.push(format!("bootstrap automatico do Ollama falhou: {error}"));
-                Vec::new()
-            }
+            Err(error) => details.push(format!("bootstrap automatico do Ollama falhou: {error}")),
         }
+    }
+    let runtime = provider.runtime_status().await;
+    let local_version = api_version
+        .clone()
+        .or(runtime.installed_version)
+        .or_else(|| first_line(&cli.stdout).map(|line| line.replace("ollama version is ", "")));
+    let configured_path = runtime
+        .executable_path
+        .or_else(|| cli.success.then(|| "ollama".to_string()));
+    let healthy = api_version.is_some();
+    let models = fetch_ollama_models(&cfg.base_url).await.unwrap_or_default();
+    if healthy {
+        details.push(format!("API Ollama saudavel em {}", cfg.base_url));
     } else {
         details.push(
-            "Ollama nao respondeu antes do probe e nenhum auto-fix foi solicitado".to_string(),
+            "API Ollama indisponível; inspeção preservou a preparação em andamento".to_string(),
         );
-        Vec::new()
-    };
-
+    }
     let latest_version = latest.ollama.clone();
     let outdated = match (local_version.as_deref(), latest_version.as_deref()) {
         (Some(local), Some(latest)) => version_lt(local, latest),
         _ => false,
     };
-
-    let models_again = state
-        .ollama_provider
-        .list_models()
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|entry| ModelSummary {
-            id: entry.id,
-            provider: entry.provider,
-        })
-        .collect::<Vec<_>>();
-
     (
         ComponentStatus {
             id: "ollama".to_string(),
-            installed: cli.success,
-            healthy: !models.is_empty() || fetch_ollama_api_version(&cfg.base_url).await.is_some(),
-            configured_path: Some("ollama".to_string()),
+            installed: configured_path.is_some() || healthy,
+            healthy,
+            configured_path,
             local_version,
             latest_version,
             outdated,
             details,
-            models,
+            models: models.clone(),
         },
         fix,
-        models_again,
+        models,
     )
+}
+
+/// Observe the running API without calling the provider's preparation or installation path.
+async fn fetch_ollama_models(base_url: &str) -> Option<Vec<ModelSummary>> {
+    let client = build_http_client()?;
+    let payload = client
+        .get(format!("{}/api/tags", base_url.trim_end_matches('/')))
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json::<Value>()
+        .await
+        .ok()?;
+    Some(
+        payload
+            .get("models")?
+            .as_array()?
+            .iter()
+            .filter_map(|model| {
+                Some(ModelSummary {
+                    id: model
+                        .get("name")
+                        .or_else(|| model.get("model"))?
+                        .as_str()?
+                        .to_string(),
+                    provider: "ollama".to_string(),
+                })
+            })
+            .collect(),
+    )
+}
+
+async fn validate_ollama_http(base_url: &str, model_id: &str) -> Result<String, String> {
+    let client = build_http_client().ok_or("Não foi possível criar o cliente de diagnóstico")?;
+    let response = client
+        .post(format!("{}/api/chat", base_url.trim_end_matches('/')))
+        .json(&serde_json::json!({
+            "model": model_id,
+            "messages": [{"role": "user", "content": "Reply with exactly OK."}],
+            "stream": false,
+            "options": {"temperature": 0, "num_predict": 16},
+        }))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?
+        .error_for_status()
+        .map_err(|error| error.to_string())?
+        .json::<Value>()
+        .await
+        .map_err(|error| error.to_string())?;
+    response
+        .get("message")
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .filter(|content| !content.trim().is_empty())
+        .map(ToString::to_string)
+        .ok_or_else(|| "Ollama respondeu sem conteúdo ao diagnóstico".to_string())
 }
 
 async fn mlx_component(
@@ -574,7 +596,12 @@ async fn llamacpp_component(
     issues: &mut Vec<DoctorIssue>,
 ) -> ComponentStatus {
     let cfg = state.llamacpp_provider.config();
-    let version_probe = run_capture(cfg.server_binary.trim(), &["--version"], 8).await;
+    let installed_binary = state.llamacpp_provider.installed_runtime_binary().await;
+    let resolved_binary = installed_binary
+        .as_deref()
+        .unwrap_or(cfg.server_binary.trim());
+    let version_probe = run_capture(resolved_binary, &["--version"], 8).await;
+    let installed = installed_binary.is_some();
     let models = state
         .llamacpp_provider
         .list_models()
@@ -587,11 +614,11 @@ async fn llamacpp_component(
         })
         .collect::<Vec<_>>();
 
-    if !version_probe.success && models.is_empty() {
+    if !installed {
         issues.push(DoctorIssue {
             severity: "info".to_string(),
             component: "llama.cpp".to_string(),
-            message: "nenhum binario `llama-server` e nenhum modelo GGUF foram detectados".to_string(),
+            message: "nenhum binario executavel `llama-server` foi detectado nos caminhos configurados e no cache".to_string(),
             fix_hint: Some(
                 "Se precisar de fallback nativo, instale `llama.cpp` e adicione um modelo `.gguf` ao diretorio configurado."
                     .to_string(),
@@ -601,9 +628,9 @@ async fn llamacpp_component(
 
     ComponentStatus {
         id: "llama.cpp".to_string(),
-        installed: version_probe.success || !models.is_empty(),
-        healthy: version_probe.success || !models.is_empty(),
-        configured_path: Some(cfg.server_binary.clone()),
+        installed,
+        healthy: installed,
+        configured_path: Some(resolved_binary.to_string()),
         local_version: first_line(&version_probe.stdout),
         latest_version: latest.llamacpp.clone(),
         outdated: match (
@@ -615,6 +642,7 @@ async fn llamacpp_component(
         },
         details: vec![
             format!("server configurado: {}", cfg.server_binary),
+            format!("server resolvido: {resolved_binary}"),
             format!("base_url configurado: {}", cfg.base_url),
             format!("modelos GGUF detectados: {}", models.len()),
         ],
@@ -707,31 +735,14 @@ async fn validate_active_backend(
             };
 
             let started = Instant::now();
-            match state
-                .ollama_provider
-                .chat(ChatRequest {
-                    model_id: model_id.clone(),
-                    messages: vec![ChatMessage::text(
-                        MessageRole::User,
-                        "Reply with exactly OK.",
-                    )],
-                    options: GenerationOptions {
-                        temperature: Some(0.0),
-                        max_tokens: Some(16),
-                        top_p: None,
-                        airllm_enabled: None,
-                        ..Default::default()
-                    },
-                })
-                .await
-            {
+            match validate_ollama_http(&state.ollama_provider.config().base_url, &model_id).await {
                 Ok(response) => ValidationReport {
                     attempted: true,
                     success: true,
                     provider: Some("ollama".to_string()),
                     model_id: Some(model_id),
                     latency_ms: Some(started.elapsed().as_millis() as u64),
-                    output_preview: Some(truncate_preview(&response.message.content)),
+                    output_preview: Some(truncate_preview(&response)),
                     error: None,
                 },
                 Err(error) => ValidationReport {
@@ -1028,5 +1039,61 @@ mod tests {
     fn numeric_segment_parser_extracts_digits() {
         assert_eq!(numeric_segments("v0.18.0"), vec![0, 18, 0]);
         assert_eq!(numeric_segments("ollama version is 0.18.0"), vec![0, 18, 0]);
+    }
+}
+
+#[cfg(test)]
+mod observation_tests {
+    use super::*;
+    use axum::{
+        extract::State,
+        http::{Method, Uri},
+        routing::any,
+        Json, Router,
+    };
+    use std::sync::{Arc, Mutex};
+
+    #[tokio::test]
+    async fn observation_and_validation_only_use_the_existing_ollama_http_api() {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let router = Router::new().fallback(any(|State(requests): State<Arc<Mutex<Vec<String>>>>, method: Method, uri: Uri| async move {
+            requests.lock().unwrap().push(format!("{method} {}", uri.path()));
+            Json(match uri.path() {
+                "/api/version" => serde_json::json!({"version":"0.30.7"}),
+                "/api/tags" => serde_json::json!({"models":[{"name":"fixture-model"}]}),
+                "/api/chat" => serde_json::json!({"message":{"content":"OK"}}),
+                _ => panic!("unexpected request {uri}"),
+            })
+        })).with_state(requests.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        let provider =
+            ollama_provider::OllamaProvider::new(ollama_provider::OllamaProviderConfig {
+                base_url: base.clone(),
+                auto_start: false,
+                auto_install: true,
+                ..Default::default()
+            });
+        let before = provider.runtime_status().await;
+        let (component, fix, models) =
+            ollama_component(&provider, &LatestVersions::default(), false).await;
+        assert!(component.healthy && component.installed && fix.is_none());
+        assert_eq!(models[0].id, "fixture-model");
+        assert_eq!(
+            validate_ollama_http(&base, &models[0].id).await.unwrap(),
+            "OK"
+        );
+        let after = provider.runtime_status().await;
+        assert_eq!(before.phase, after.phase);
+        assert_eq!(before.operation_id, after.operation_id);
+        assert_eq!(before.selected_model, after.selected_model);
+        assert_eq!(
+            *requests.lock().unwrap(),
+            ["GET /api/version", "GET /api/tags", "POST /api/chat"]
+        );
+        server.abort();
     }
 }
