@@ -1,0 +1,6 @@
+### Result
+{"badge":"Modo: Detectado","rows":15,"identical":true,"httpStatus":200}
+### Ran Playwright code
+```js
+await (async (page) => { const simulated=await page.locator("#hw-model-table-body").innerText(); const responsePromise=page.waitForResponse(r=>r.url().includes("/api/hwfit/models?") && !r.url().includes("manual_mode")); await page.getByRole("button",{name:"Restaurar hardware real",exact:true}).click(); const response=await responsePromise; if(response.status()!==200) throw new Error("Ranking request failed"); await page.waitForFunction(()=>document.querySelectorAll("#hw-model-table-body tr").length===15); const detected=await page.locator("#hw-model-table-body").innerText(); if(simulated!==detected) throw new Error("Ranking rows differ"); await page.screenshot({path:"output/playwright/apple-m4-restored.png",fullPage:true}); return {badge:await page.locator("#hw-mode-badge").innerText(),rows:15,identical:true,httpStatus:response.status()}; })(page);
+```

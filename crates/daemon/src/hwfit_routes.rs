@@ -665,4 +665,86 @@ mod tests {
         assert_eq!(options.manual_unified_memory_gb, None);
         assert_eq!(options.manual_vram_gb, Some(24.0));
     }
+
+    #[test]
+    fn m4_24gb_bandwidth_impact_on_default_catalog() {
+        let base = mlx_hardware_fit::HardwareProfile {
+            platform: "macos".into(),
+            cpu_name: "Apple M4".into(),
+            cpu_cores: 10,
+            ram_gb: 24.0,
+            available_ram_gb: 12.0,
+            gpus: vec![],
+            gpu_count: 0,
+            total_vram_gb: 0.0,
+            primary_backend: "cpu".into(),
+            is_cpu_only: true,
+            detected_at: "synthetic fixture".into(),
+        };
+        let corrected = mlx_hardware_fit::simulate_hardware(
+            &base,
+            mlx_hardware_fit::HardwareSimulationOptions {
+                manual_gpu_name: Some("Apple M4".into()),
+                manual_unified_memory_gb: Some(24.0),
+                ..Default::default()
+            },
+        );
+        assert_eq!(corrected.gpus[0].bandwidth_gb_s, Some(120.0));
+        let mut legacy = corrected.clone();
+        legacy.gpus[0].bandwidth_gb_s = Some(150.0);
+        let catalog = get_default_model_catalog();
+        let mut any_score_changed = false;
+        let mut any_order_changed = false;
+        for use_case in ["general", "coding", "creative", "analysis"] {
+            let rank = |hw| {
+                mlx_model_fit::rank_models(
+                    hw,
+                    &catalog,
+                    Some(use_case),
+                    Some("score"),
+                    None,
+                    None,
+                    None,
+                    None,
+                    false,
+                )
+            };
+            let before = rank(&legacy);
+            let after = rank(&corrected);
+            println!("use_case={use_case}; models={}", after.len());
+            for (position, result) in after.iter().enumerate() {
+                let old_position = before
+                    .iter()
+                    .position(|a| a.model.id == result.model.id)
+                    .unwrap();
+                let old = &before[old_position];
+                assert!(result.estimated_tps < old.estimated_tps);
+                assert_eq!(result.recommended_quant, old.recommended_quant);
+                assert_eq!(result.estimated_vram_gb, old.estimated_vram_gb);
+                assert_eq!(result.fit_score, old.fit_score);
+                assert!(result.composite_score <= old.composite_score);
+                any_score_changed |= result.composite_score < old.composite_score;
+                any_order_changed |= old_position != position;
+                println!(
+                    "{}: rank {} -> {}; TPS {:.6} -> {:.6}; score {:.6} -> {:.6}; quant {}",
+                    result.model.name,
+                    old_position + 1,
+                    position + 1,
+                    old.estimated_tps,
+                    result.estimated_tps,
+                    old.composite_score,
+                    result.composite_score,
+                    result.recommended_quant
+                );
+            }
+        }
+        assert!(
+            any_order_changed,
+            "bandwidth correction must affect catalog ordering"
+        );
+        assert!(
+            any_score_changed,
+            "bandwidth must affect at least one catalog score"
+        );
+    }
 }

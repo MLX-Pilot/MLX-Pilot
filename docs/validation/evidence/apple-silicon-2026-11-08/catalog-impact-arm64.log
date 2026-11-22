@@ -1,0 +1,82 @@
+   Compiling mlx-hardware-fit v0.1.0 ($REPO/crates/hardware-fit)
+   Compiling mlx-flow v0.1.0 ($REPO/crates/flow)
+   Compiling mlx-model-fit v0.1.0 ($REPO/crates/model-fit)
+   Compiling mlx-ollama-daemon v0.1.0 ($REPO/crates/daemon)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 18.12s
+     Running unittests src/lib.rs (target/debug/deps/mlx_ollama_daemon-d6279b16944dfea4)
+
+running 1 test
+use_case=general; models=15
+Mixtral 8x7B Instruct: rank 1 -> 1; TPS 27.906977 -> 22.325581; score 89.376003 -> 89.259724; quant Q5_K_M
+LLaVA 1.5 7B: rank 4 -> 2; TPS 27.857143 -> 22.285714; score 87.750000 -> 87.607143; quant Q8_0
+Mistral 7B Instruct v0.3: rank 5 -> 3; TPS 26.712329 -> 21.369863; score 87.250000 -> 86.496575; quant Q8_0
+Qwen 2.5 7B Instruct: rank 6 -> 4; TPS 25.657895 -> 20.526316; score 87.250000 -> 85.934211; quant Q8_0
+DeepSeek R1 Distill Qwen 7B: rank 7 -> 5; TPS 25.657895 -> 20.526316; score 87.250000 -> 85.934211; quant Q8_0
+Llama 3 8B Instruct: rank 2 -> 6; TPS 24.375000 -> 19.500000; score 87.750000 -> 85.750000; quant Q8_0
+DeepSeek R1 Distill Llama 8B: rank 3 -> 7; TPS 24.375000 -> 19.500000; score 87.750000 -> 85.750000; quant Q8_0
+Phi-3 Medium 128K Instruct: rank 8 -> 8; TPS 25.714286 -> 20.571429; score 86.729193 -> 85.443479; quant Q5_K_M
+Gemma 2 9B IT: rank 9 -> 9; TPS 21.195652 -> 16.956522; score 86.130435 -> 83.304348; quant Q8_0
+Phi-3 Mini 4K Instruct: rank 10 -> 10; TPS 51.315789 -> 41.052632; score 83.250000 -> 83.250000; quant Q8_0
+Gemma 2 27B IT: rank 11 -> 11; TPS 44.444444 -> 35.555556; score 81.512440 -> 81.512440; quant Q2_K
+Qwen 2.5 32B Instruct: rank 12 -> 12; TPS 36.712834 -> 29.433340; score 79.350165 -> 79.350165; quant Q2_K
+TinyLlama 1.1B Chat: rank 13 -> 13; TPS 177.272727 -> 141.818182; score 74.250000 -> 74.250000; quant Q8_0
+Llama 3 70B Instruct: rank 14 -> 14; TPS 13.508339 -> 11.897027; score 55.508339 -> 53.897027; quant Q2_K
+Qwen 2.5 72B Instruct: rank 15 -> 15; TPS 12.721193 -> 11.312453; score 54.221193 -> 52.812453; quant Q2_K
+use_case=coding; models=15
+Mixtral 8x7B Instruct: rank 1 -> 1; TPS 93.023256 -> 74.418605; score 82.504797 -> 82.504797; quant Q2_K
+Phi-3 Medium 128K Instruct: rank 7 -> 2; TPS 34.285714 -> 27.428571; score 81.818562 -> 80.789991; quant Q4_K_M
+Mistral 7B Instruct v0.3: rank 2 -> 3; TPS 26.712329 -> 21.369863; score 82.434932 -> 80.297945; quant Q8_0
+Llama 3 8B Instruct: rank 3 -> 4; TPS 24.375000 -> 19.500000; score 82.200000 -> 80.150000; quant Q8_0
+DeepSeek R1 Distill Llama 8B: rank 4 -> 5; TPS 24.375000 -> 19.500000; score 82.200000 -> 80.150000; quant Q8_0
+Qwen 2.5 7B Instruct: rank 5 -> 6; TPS 25.657895 -> 20.526316; score 82.013158 -> 79.960526; quant Q8_0
+DeepSeek R1 Distill Qwen 7B: rank 6 -> 7; TPS 25.657895 -> 20.526316; score 82.013158 -> 79.960526; quant Q8_0
+Gemma 2 9B IT: rank 8 -> 8; TPS 21.195652 -> 16.956522; score 78.830386 -> 76.526038; quant Q8_0
+LLaVA 1.5 7B: rank 9 -> 9; TPS 27.857143 -> 22.285714; score 77.592857 -> 75.364286; quant Q8_0
+Gemma 2 27B IT: rank 10 -> 10; TPS 44.444444 -> 35.555556; score 73.618650 -> 73.618650; quant Q2_K
+Phi-3 Mini 4K Instruct: rank 11 -> 11; TPS 51.315789 -> 41.052632; score 72.150000 -> 72.150000; quant Q8_0
+Qwen 2.5 32B Instruct: rank 12 -> 12; TPS 33.476450 -> 27.815148; score 66.889941 -> 66.016000; quant Q2_K
+TinyLlama 1.1B Chat: rank 13 -> 13; TPS 177.272727 -> 141.818182; score 61.950000 -> 61.950000; quant Q8_0
+Llama 3 70B Instruct: rank 14 -> 14; TPS 12.829911 -> 11.557813; score 55.397947 -> 54.634688; quant Q2_K
+Qwen 2.5 72B Instruct: rank 15 -> 15; TPS 12.057028 -> 10.980371; score 54.234217 -> 53.588223; quant Q2_K
+use_case=creative; models=15
+Mixtral 8x7B Instruct: rank 1 -> 1; TPS 27.906977 -> 22.325581; score 87.221670 -> 87.221670; quant Q5_K_M
+Llama 3 8B Instruct: rank 2 -> 2; TPS 24.375000 -> 19.500000; score 82.800000 -> 82.800000; quant Q8_0
+DeepSeek R1 Distill Llama 8B: rank 3 -> 3; TPS 24.375000 -> 19.500000; score 82.800000 -> 82.800000; quant Q8_0
+LLaVA 1.5 7B: rank 4 -> 4; TPS 27.857143 -> 22.285714; score 82.800000 -> 82.800000; quant Q8_0
+Mistral 7B Instruct v0.3: rank 5 -> 5; TPS 26.712329 -> 21.369863; score 82.000000 -> 82.000000; quant Q8_0
+Qwen 2.5 7B Instruct: rank 6 -> 6; TPS 25.657895 -> 20.526316; score 82.000000 -> 82.000000; quant Q8_0
+DeepSeek R1 Distill Qwen 7B: rank 7 -> 7; TPS 25.657895 -> 20.526316; score 82.000000 -> 82.000000; quant Q8_0
+Phi-3 Medium 128K Instruct: rank 8 -> 8; TPS 25.714286 -> 20.571429; score 81.949327 -> 81.949327; quant Q5_K_M
+Gemma 2 9B IT: rank 9 -> 9; TPS 21.195652 -> 16.956522; score 81.600000 -> 81.600000; quant Q8_0
+Phi-3 Mini 4K Instruct: rank 10 -> 10; TPS 51.315789 -> 41.052632; score 75.600000 -> 75.600000; quant Q8_0
+Qwen 2.5 32B Instruct: rank 11 -> 11; TPS 36.712834 -> 29.433340; score 74.458471 -> 74.458471; quant Q2_K
+Gemma 2 27B IT: rank 12 -> 12; TPS 44.444444 -> 35.555556; score 74.152034 -> 74.152034; quant Q2_K
+TinyLlama 1.1B Chat: rank 13 -> 13; TPS 177.272727 -> 141.818182; score 64.800000 -> 64.800000; quant Q8_0
+Llama 3 70B Instruct: rank 14 -> 14; TPS 13.508339 -> 11.897027; score 61.405003 -> 60.438216; quant Q2_K
+Qwen 2.5 72B Instruct: rank 15 -> 15; TPS 12.721193 -> 11.312453; score 60.132716 -> 59.287472; quant Q2_K
+use_case=analysis; models=15
+Mistral 7B Instruct v0.3: rank 1 -> 1; TPS 26.712329 -> 21.369863; score 83.138479 -> 83.138479; quant Q8_0
+DeepSeek R1 Distill Llama 8B: rank 2 -> 2; TPS 24.375000 -> 19.500000; score 83.000539 -> 83.000539; quant Q8_0
+Qwen 2.5 7B Instruct: rank 3 -> 3; TPS 25.657895 -> 20.526316; score 82.821190 -> 82.821190; quant Q8_0
+DeepSeek R1 Distill Qwen 7B: rank 4 -> 4; TPS 25.657895 -> 20.526316; score 82.821190 -> 82.821190; quant Q8_0
+Phi-3 Medium 128K Instruct: rank 5 -> 5; TPS 85.714286 -> 68.571429; score 77.105625 -> 77.105625; quant Q2_K
+Llama 3 8B Instruct: rank 6 -> 6; TPS 24.375000 -> 19.500000; score 75.100000 -> 75.100000; quant Q8_0
+Gemma 2 9B IT: rank 7 -> 7; TPS 21.195652 -> 16.956522; score 73.361700 -> 72.666048; quant Q8_0
+Mixtral 8x7B Instruct: rank 8 -> 8; TPS 85.301574 -> 70.557764; score 72.262764 -> 72.262764; quant Q2_K
+LLaVA 1.5 7B: rank 9 -> 9; TPS 27.857143 -> 22.285714; score 66.100000 -> 66.100000; quant Q8_0
+Gemma 2 27B IT: rank 10 -> 10; TPS 44.444444 -> 35.555556; score 66.074920 -> 66.074920; quant Q2_K
+Qwen 2.5 32B Instruct: rank 11 -> 11; TPS 29.991786 -> 26.072816; score 64.000000 -> 64.000000; quant Q2_K
+Qwen 2.5 72B Instruct: rank 12 -> 12; TPS 11.367099 -> 10.635407; score 62.367099 -> 61.635407; quant Q2_K
+Phi-3 Mini 4K Instruct: rank 13 -> 13; TPS 51.315789 -> 41.052632; score 60.700000 -> 60.700000; quant Q8_0
+Llama 3 70B Instruct: rank 14 -> 14; TPS 12.829911 -> 11.557813; score 55.153274 -> 54.157813; quant Q2_K
+TinyLlama 1.1B Chat: rank 15 -> 15; TPS 177.272727 -> 141.818182; score 52.600000 -> 52.600000; quant Q8_0
+test hwfit_routes::tests::m4_24gb_bandwidth_impact_on_default_catalog ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 72 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/mlx_ollama_daemon-6345e2503706033a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

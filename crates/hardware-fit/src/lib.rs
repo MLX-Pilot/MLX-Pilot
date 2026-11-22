@@ -110,7 +110,7 @@ pub async fn detect_system(fresh: bool) -> Result<HardwareProfile, String> {
     let platform = std::env::consts::OS.to_string();
     debug!("Detecting hardware on platform: {platform}");
 
-    let cpu_name = get_cpu_name();
+    let mut cpu_name = get_cpu_name();
     let cpu_cores = get_cpu_count();
     let ram_gb = get_ram_gb();
     let available_ram_gb = get_available_ram_gb();
@@ -118,9 +118,10 @@ pub async fn detect_system(fresh: bool) -> Result<HardwareProfile, String> {
 
     // Try platform-specific GPU detection
     if platform == "macos" {
-        match detect_apple_silicon().await {
-            Ok(mut mac_gpus) => {
-                gpus.append(&mut mac_gpus);
+        match detect_apple_silicon(&cpu_name, ram_gb).await {
+            Ok((chip, gpu)) => {
+                cpu_name = chip;
+                gpus.push(gpu);
             }
             Err(e) => {
                 debug!("Apple Silicon detection skipped: {e}");
@@ -367,56 +368,98 @@ async fn detect_amd_sysfs() -> Result<Vec<GpuInfo>, String> {
 
 // ── Apple Silicon detection ────────────────────────────────────────────────
 
-async fn detect_apple_silicon() -> Result<Vec<GpuInfo>, String> {
+async fn detect_apple_silicon(cpu_name: &str, ram_gb: f64) -> Result<(String, GpuInfo), String> {
     if std::env::consts::OS != "macos" {
         return Err("Not macOS".to_string());
     }
 
-    // Check if Apple Silicon via sysctl
-    let model = run_cmd("sysctl", &["-n", "hw.model"])
-        .await
-        .unwrap_or_default();
-    let is_apple_silicon = model.contains("Mac") && !model.contains("Intel");
-
-    if !is_apple_silicon {
-        return Err("Not Apple Silicon".to_string());
-    }
-
-    // Get unified memory
-    let mem_bytes = run_cmd("sysctl", &["-n", "hw.memsize"])
-        .await
-        .ok()
-        .and_then(|s| s.trim().parse::<u64>().ok())
-        .unwrap_or(0);
-    let ram_gb = mem_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
-
-    // Get GPU core count for name
-    let gpu_cores = run_cmd("sysctl", &["-n", "hw.perflevel1.gpu_count"])
-        .await
-        .ok()
-        .and_then(|s| s.trim().parse::<u32>().ok());
-
-    let gpu_name = match gpu_cores {
-        Some(cores) => format!("Apple Silicon GPU ({} cores)", cores),
-        None => "Apple Silicon GPU".to_string(),
-    };
-
-    Ok(vec![GpuInfo {
-        name: gpu_name,
-        vram_gb: ram_gb * APPLE_GPU_MEMORY_FRACTION,
-        index: 0,
-        backend: "metal".to_string(),
-        compute_capability: None,
-        bandwidth_gb_s: Some(estimate_apple_bandwidth(&model)),
-    }])
+    detect_apple_silicon_with(
+        cpu_name,
+        ram_gb,
+        cfg!(target_arch = "aarch64"),
+        macos_sysctl,
+    )
+    .await
 }
 
-fn estimate_apple_bandwidth(model: &str) -> f64 {
-    apple_silicon_spec(model, None)
+async fn macos_sysctl(key: &'static str) -> Result<String, String> {
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        run_cmd("/usr/sbin/sysctl", &["-n", key]),
+    )
+    .await
+    .map_err(|_| format!("sysctl {key} timed out"))?
+}
+
+// Inject only the OS queries: tests exercise the same resolution path on Linux.
+async fn detect_apple_silicon_with<F, Fut>(
+    cpu_name: &str,
+    ram_gb: f64,
+    native_arm64: bool,
+    mut sysctl: F,
+) -> Result<(String, GpuInfo), String>
+where
+    F: FnMut(&'static str) -> Fut,
+    Fut: std::future::Future<Output = Result<String, String>>,
+{
+    // hw.model identifies the computer (e.g. Mac16,10), not the SoC. XNU
+    // exposes the product's SoC name through machdep.cpu.brand_string.
+    let brand = sysctl("machdep.cpu.brand_string").await.unwrap_or_default();
+    let chip = [&brand, cpu_name]
+        .into_iter()
+        .map(str::trim)
+        .find(|name| is_apple_chip_name(name));
+
+    // Neither an Intel model identifier nor the process architecture alone
+    // identifies the host: an x86_64 binary may be running under Rosetta.
+    let is_arm64 = if native_arm64 || chip.is_some() {
+        true
+    } else {
+        sysctl("hw.optional.arm64")
+            .await
+            .is_ok_and(|s| s.trim() == "1")
+            || sysctl("sysctl.proc_translated")
+                .await
+                .is_ok_and(|s| s.trim() == "1")
+    };
+    if !is_arm64 {
+        return Err("Not Apple Silicon (no ARM host evidence)".to_string());
+    }
+    if !ram_gb.is_finite() || ram_gb <= 0.0 {
+        return Err("Invalid unified memory size".to_string());
+    }
+
+    let chip = chip.unwrap_or("Apple Silicon");
+    if apple_silicon_spec(chip, Some(ram_gb)).is_none() {
+        debug!("Unknown Apple chip {chip}; using heuristic bandwidth fallback");
+    }
+    Ok((chip.to_string(), apple_gpu_info(chip, ram_gb)))
+}
+
+fn is_apple_chip_name(name: &str) -> bool {
+    name.to_ascii_lowercase().starts_with("apple ") && parse_apple_chip(name).is_some()
+}
+
+fn estimate_apple_bandwidth(chip: &str, memory_gb: Option<f64>) -> f64 {
+    apple_silicon_spec(chip, memory_gb)
         .map(|spec| spec.bandwidth_gb_s)
         .unwrap_or(APPLE_FALLBACK_BANDWIDTH_GB_S)
 }
 
+/// Shared by real detection and simulation, including memory-dependent bins.
+fn apple_gpu_info(chip: &str, memory_gb: f64) -> GpuInfo {
+    GpuInfo {
+        name: format!("{chip} GPU"),
+        vram_gb: memory_gb * APPLE_GPU_MEMORY_FRACTION,
+        index: 0,
+        backend: "metal".to_string(),
+        compute_capability: None,
+        bandwidth_gb_s: Some(estimate_apple_bandwidth(chip, Some(memory_gb))),
+    }
+}
+
+// A compatibility estimate for unknown chips, not a measured bandwidth or
+// a guaranteed lower bound. Keep the previous value without guessing a model.
 const APPLE_FALLBACK_BANDWIDTH_GB_S: f64 = 150.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -806,11 +849,8 @@ pub fn simulate_hardware(
 /// and the GPU, and both draw from the same unified memory.
 fn apply_simulated_mac(profile: &mut HardwareProfile, chip: &str, memory_gb: f64) {
     let spec = apple_silicon_spec(chip, Some(memory_gb));
-    let gpu_name = format!("{chip} GPU");
-    let bandwidth = spec
-        .map(|s| s.bandwidth_gb_s)
-        .unwrap_or_else(|| estimate_gpu_bandwidth(&gpu_name, "metal"));
-    let vram_gb = memory_gb * APPLE_GPU_MEMORY_FRACTION;
+    let gpu = apple_gpu_info(chip, memory_gb);
+    let vram_gb = gpu.vram_gb;
 
     profile.platform = "macos".to_string();
     profile.cpu_name = chip.to_string();
@@ -819,14 +859,7 @@ fn apply_simulated_mac(profile: &mut HardwareProfile, chip: &str, memory_gb: f64
     }
     profile.ram_gb = memory_gb;
     profile.available_ram_gb = memory_gb * 0.9;
-    profile.gpus = vec![GpuInfo {
-        name: gpu_name,
-        vram_gb,
-        index: 0,
-        backend: "metal".to_string(),
-        compute_capability: None,
-        bandwidth_gb_s: Some(bandwidth),
-    }];
+    profile.gpus = vec![gpu];
     profile.gpu_count = 1;
     profile.total_vram_gb = vram_gb;
     profile.primary_backend = "metal".to_string();
@@ -1258,10 +1291,192 @@ mod tests {
         assert_eq!(estimate_gpu_bandwidth("Apple M1", "metal"), 68.0);
         // Without a memory size the top bin is assumed.
         assert_eq!(estimate_gpu_bandwidth("Apple M4 Max", "metal"), 546.0);
-        // Real detection passes hw.model, which never names the chip.
+        // Computer model identifiers must not be interpreted as chip names.
         assert_eq!(
-            estimate_apple_bandwidth("Mac16,1"),
+            estimate_apple_bandwidth("Mac16,1", Some(24.0)),
             APPLE_FALLBACK_BANDWIDTH_GB_S
         );
+    }
+
+    async fn detected_mac(
+        brand: Result<&str, &str>,
+        sysinfo_brand: &str,
+        memory_gb: f64,
+        native_arm64: bool,
+        arm64: Result<&str, &str>,
+        translated: Result<&str, &str>,
+    ) -> Result<HardwareProfile, String> {
+        let (chip, gpu) =
+            detect_apple_silicon_with(sysinfo_brand, memory_gb, native_arm64, |key| {
+                let result = match key {
+                    "machdep.cpu.brand_string" => brand,
+                    "hw.optional.arm64" => arm64,
+                    "sysctl.proc_translated" => translated,
+                    _ => panic!("unexpected sysctl key: {key}"),
+                };
+                std::future::ready(result.map(str::to_string).map_err(str::to_string))
+            })
+            .await?;
+        Ok(HardwareProfile {
+            platform: "macos".into(),
+            cpu_name: chip,
+            cpu_cores: 10, // OS-reported cores, not inferred from the spec table.
+            ram_gb: memory_gb,
+            available_ram_gb: 12.0, // Real memory pressure can differ from simulation.
+            total_vram_gb: gpu.vram_gb,
+            gpus: vec![gpu],
+            gpu_count: 1,
+            primary_backend: "metal".into(),
+            is_cpu_only: false,
+            detected_at: "fixture".into(),
+        })
+    }
+
+    #[tokio::test]
+    async fn detected_m4_24gb_matches_simulated_mac() {
+        // Synthetic sysctl output for the user's Mac mini M4 / 24 GiB.
+        // hw.model (Mac16,10) is deliberately never queried or mapped.
+        let detected = detected_mac(
+            Ok("Apple M4\n"),
+            "Unknown CPU",
+            24.0,
+            false,
+            Err("unused"),
+            Err("unused"),
+        )
+        .await
+        .unwrap();
+        let simulated = simulate_mac("Apple M4", 24.0);
+        assert_eq!(detected.cpu_name, simulated.cpu_name);
+        assert_eq!(detected.cpu_cores, simulated.cpu_cores);
+        assert_eq!(detected.ram_gb, simulated.ram_gb);
+        assert_eq!(detected.total_vram_gb, 18.0);
+        assert_eq!(detected.total_vram_gb, simulated.total_vram_gb);
+        assert_eq!(detected.primary_backend, simulated.primary_backend);
+        assert_eq!(detected.is_cpu_only, simulated.is_cpu_only);
+        assert_eq!(detected.gpu_count, simulated.gpu_count);
+        assert_eq!(detected.gpus[0].bandwidth_gb_s, Some(120.0));
+        assert_eq!(
+            serde_json::to_value(&detected.gpus).unwrap(),
+            serde_json::to_value(&simulated.gpus).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn detected_chips_use_memory_dependent_bandwidth_like_simulation() {
+        for (chip, gb, bandwidth) in [
+            ("Apple M1", 16.0, 68.0),
+            ("Apple M2 Pro", 32.0, 200.0),
+            ("Apple M3 Max", 36.0, 300.0),
+            ("Apple M3 Max", 96.0, 300.0),
+            ("Apple M3 Max", 128.0, 400.0),
+            ("Apple M4 Pro", 24.0, 273.0),
+            ("Apple M4 Max", 36.0, 410.0),
+            ("Apple M4 Max", 48.0, 546.0),
+        ] {
+            let mac = detected_mac(Ok(chip), "", gb, false, Err("unused"), Err("unused"))
+                .await
+                .unwrap();
+            assert_eq!(mac.gpus[0].bandwidth_gb_s, Some(bandwidth), "{chip} {gb}");
+            assert_eq!(
+                serde_json::to_value(&mac.gpus).unwrap(),
+                serde_json::to_value(&simulate_mac(chip, gb).gpus).unwrap()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn detection_falls_back_to_sysinfo_when_brand_query_fails_or_is_empty() {
+        for brand in [Err("sysctl failed"), Ok("  \n")] {
+            let mac = detected_mac(brand, "Apple M4", 24.0, false, Err("unused"), Err("unused"))
+                .await
+                .unwrap();
+            assert_eq!(mac.cpu_name, "Apple M4");
+            assert_eq!(mac.gpus[0].bandwidth_gb_s, Some(120.0));
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_apple_chips_keep_fallback_without_guessing_a_generation() {
+        let mac = detected_mac(
+            Ok("Apple M99"),
+            "",
+            24.0,
+            false,
+            Err("unused"),
+            Err("unused"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(mac.cpu_name, "Apple M99");
+        assert_eq!(
+            mac.gpus[0].bandwidth_gb_s,
+            Some(APPLE_FALLBACK_BANDWIDTH_GB_S)
+        );
+        assert_eq!(
+            serde_json::to_value(&mac.gpus).unwrap(),
+            serde_json::to_value(&simulate_mac("Apple M99", 24.0).gpus).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_brand_requires_arm_host_evidence_including_rosetta() {
+        for (native, arm64, translated) in [
+            (true, Err("unused"), Err("unused")),
+            (false, Ok("1\n"), Err("unused")),
+            (false, Ok("0"), Ok("1\n")),
+            (false, Err("missing"), Ok("1")),
+        ] {
+            let mac = detected_mac(
+                Err("missing"),
+                "Unknown CPU",
+                24.0,
+                native,
+                arm64,
+                translated,
+            )
+            .await
+            .unwrap();
+            assert_eq!(mac.gpus[0].name, "Apple Silicon GPU");
+            assert_eq!(
+                mac.gpus[0].bandwidth_gb_s,
+                Some(APPLE_FALLBACK_BANDWIDTH_GB_S)
+            );
+        }
+        for brand in [
+            "Intel(R) Core(TM) i7",
+            "Mac16,10",
+            "MacBookPro18,3",
+            "",
+            "Tesla M4",
+        ] {
+            assert!(
+                detected_mac(Ok(brand), brand, 24.0, false, Ok("0"), Err("missing"))
+                    .await
+                    .is_err(),
+                "{brand} is not ARM host evidence"
+            );
+        }
+        assert!(detected_mac(
+            Err("missing"),
+            "",
+            24.0,
+            false,
+            Err("missing"),
+            Err("missing")
+        )
+        .await
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn detection_rejects_invalid_unified_memory() {
+        for gb in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(
+                detected_mac(Ok("Apple M4"), "", gb, true, Err("unused"), Err("unused"))
+                    .await
+                    .is_err()
+            );
+        }
     }
 }
