@@ -323,6 +323,14 @@ class FakeChannelBackend {
       };
     }
 
+    if (path === "/agent/channels/rename-account" && options.method === "POST") {
+      const channel = this.findChannel(payload.channel);
+      const account = channel.accounts.find(entry => entry.account_id === payload.account_id);
+      account.account_id = payload.new_account_id;
+      if (account.is_default) channel.default_account_id = account.account_id;
+      return channel;
+    }
+
     if (path === "/agent/channels/remove-account" && options.method === "POST") {
       const channel = this.findChannel(payload.channel);
       channel.accounts = channel.accounts.filter((entry) => entry.account_id !== payload.account_id);
@@ -552,7 +560,7 @@ test("channels smoke renders catalog, supports add/default, and shows logs", asy
     const telegramSection = dom.window.document.getElementById("agent-channel-list").textContent;
     assert.match(telegramSection, /bot-b/);
     assert.match(telegramSection, /\(default\)/);
-    assert.match(telegramSection, /adapter_config: configurado/);
+    assert.match(telegramSection, /Adaptador configurado/);
 
     assert.match(dom.window.document.getElementById("agent-channel-onboarding-title").textContent, /Telegram/);
     assert.match(dom.window.document.getElementById("agent-channel-credential-hint").textContent, /token/i);

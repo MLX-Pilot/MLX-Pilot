@@ -967,11 +967,11 @@ struct SkillIntegrityState {
 // ── Helpers ──────────────────────────────────────────────────────
 
 fn parse_execution_mode(s: Option<&str>) -> ExecutionMode {
-    match s.map(str::to_lowercase).as_deref() {
-        Some("read_only") | Some("readonly") => ExecutionMode::ReadOnly,
-        Some("locked") => ExecutionMode::Locked,
-        Some("dry_run") | Some("dryrun") => ExecutionMode::DryRun,
-        _ => ExecutionMode::Full,
+    match s.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+        None | Some("full") => ExecutionMode::Full,
+        Some("read-only" | "read_only" | "readonly") => ExecutionMode::ReadOnly,
+        Some("dry-run" | "dry_run" | "dryrun") => ExecutionMode::DryRun,
+        _ => ExecutionMode::Locked,
     }
 }
 
@@ -2923,6 +2923,7 @@ struct ResolvedProvider {
 
 #[derive(Clone)]
 struct DelegateExecutor {
+    approval_mode: String,
     state: super::AppState,
     agent_cfg: super::config::AgentUiConfig,
     resolved: ResolvedProvider,
@@ -2970,8 +2971,8 @@ impl crate::agent_runtime_tools::DelegateSessionExecutor for DelegateExecutor {
             fallback_enabled: Some(false),
             fallback_provider: None,
             fallback_model_id: None,
-            execution_mode: Some("full".to_string()),
-            approval_mode: Some(self.agent_cfg.approval_mode.clone()),
+            execution_mode: Some(ctx.mode.as_str().to_owned()),
+            approval_mode: Some(self.approval_mode.clone()),
             system_prompt: Some(build_delegate_system_prompt(
                 request.goal.as_deref(),
                 request.handoff_summary.as_deref(),
@@ -3095,9 +3096,7 @@ fn resolve_provider(
     let provider_id = provider.trim().to_ascii_lowercase();
     let normalized_model = normalize_agent_model_id(&provider_id, model_id);
     let model = normalized_model.trim();
-    if model.is_empty() {
-        return Err(AgentApiError::bad_request("model_id cannot be empty"));
-    }
+    crate::chat_input::validate_model_id(model_id).map_err(AgentApiError::bad_request)?;
 
     let runtime = configured_runtime(api_key, base_url, headers);
 
@@ -3317,6 +3316,10 @@ fn build_tool_registry(
     );
     let delegate_executor = if runtime_variant == RuntimeVariant::HermesInspired {
         Some(Arc::new(DelegateExecutor {
+            approval_mode: request
+                .approval_mode
+                .clone()
+                .unwrap_or_else(|| agent_cfg.approval_mode.clone()),
             state: state.clone(),
             agent_cfg: agent_cfg.clone(),
             resolved: resolved.clone(),
@@ -3584,7 +3587,7 @@ async fn run_agent_once(
             .as_deref()
             .or(Some(agent_cfg.approval_mode.as_str())),
     );
-    state.agent_state.approval.set_mode(approval_mode);
+    let run_approval = Arc::new(state.agent_state.approval.for_run(approval_mode));
 
     let known_skill_hashes = load_skill_integrity_state();
     let tool_policy = build_tool_policy_state(
@@ -3764,13 +3767,13 @@ async fn run_agent_once(
                 tool_registry,
                 skill_runtime,
                 policy,
-                state.agent_state.approval.clone(),
+                run_approval.clone(),
                 state.agent_state.event_bus.clone(),
                 state.agent_state.audit.clone(),
             );
 
             let response = agent
-                .run(request.message.trim())
+                .run(&request.message)
                 .await
                 .map_err(AgentApiError::from_agent_error)?;
 
@@ -3833,9 +3836,9 @@ async fn run_agent_once(
                     tool_registry,
                     skill_runtime,
                     policy,
-                    state.agent_state.approval.clone(),
+                    run_approval,
                     state.agent_state.audit.clone(),
-                    request.message.trim(),
+                    &request.message,
                 )
                 .await
                 .map(|result| {
@@ -3880,10 +3883,8 @@ pub(crate) async fn execute_agent_request(
     request: AgentRunRequest,
 ) -> Result<AgentRunResponse, AgentApiError> {
     let started_at = Instant::now();
+    crate::chat_input::validate_agent(&request).map_err(AgentApiError::bad_request)?;
     let message = request.message.trim();
-    if message.is_empty() {
-        return Err(AgentApiError::bad_request("message cannot be empty"));
-    }
 
     let cfg = super::config::AppConfig::load_settings().apply_env();
     let agent_cfg = cfg.agent.clone();
@@ -4093,12 +4094,16 @@ pub(crate) async fn execute_agent_request(
 
 /// POST /agent/run — run the agent loop and return the final response.
 fn gateway_event_message(request: &AgentGatewayEventRequest) -> Option<String> {
-    first_non_empty([
+    [
         request.message.as_deref(),
         request.text.as_deref(),
         request.prompt.as_deref(),
         request.input.as_deref(),
-    ])
+    ]
+    .into_iter()
+    .flatten()
+    .find(|value| !value.trim().is_empty())
+    .map(str::to_owned)
 }
 
 fn first_non_empty<'a>(values: impl IntoIterator<Item = Option<&'a str>>) -> Option<String> {
@@ -4248,9 +4253,7 @@ pub async fn agent_stream(
     State(state): State<super::AppState>,
     Json(mut request): Json<AgentRunRequest>,
 ) -> Result<Response, AgentApiError> {
-    if request.message.trim().is_empty() {
-        return Err(AgentApiError::bad_request("message cannot be empty"));
-    }
+    crate::chat_input::validate_agent(&request).map_err(AgentApiError::bad_request)?;
 
     let session_id = request
         .session_id
@@ -5707,6 +5710,29 @@ mod tests {
     use std::sync::{Mutex, OnceLock};
     use tempfile::tempdir;
 
+    #[test]
+    fn execution_modes_round_trip_for_desktop_and_delegated_runs() {
+        for mode in [
+            ExecutionMode::Full,
+            ExecutionMode::ReadOnly,
+            ExecutionMode::DryRun,
+            ExecutionMode::Locked,
+        ] {
+            assert_eq!(parse_execution_mode(Some(mode.as_str())), mode);
+        }
+        for value in ["read-only", "read_only", "ReadOnly"] {
+            assert_eq!(parse_execution_mode(Some(value)), ExecutionMode::ReadOnly);
+        }
+        for value in ["dry-run", "dry_run", "DryRun"] {
+            assert_eq!(parse_execution_mode(Some(value)), ExecutionMode::DryRun);
+        }
+        assert_eq!(parse_execution_mode(None), ExecutionMode::Full);
+        assert_eq!(
+            parse_execution_mode(Some(" future-mode ")),
+            ExecutionMode::Locked
+        );
+    }
+
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
@@ -5926,6 +5952,16 @@ mod tests {
 
         assert!(!exec.allowed);
         assert_eq!(exec.final_rule, "session:session-a:deny:exec");
+    }
+
+    #[test]
+    fn gateway_message_keeps_original_markdown_and_alias_priority() {
+        let prompt = "    trecho preservado\n\tsegunda linha 🌳\n";
+        let request: AgentGatewayEventRequest = serde_json::from_value(json!({
+            "message": "  ", "text": prompt, "input": "fallback"
+        }))
+        .unwrap();
+        assert_eq!(gateway_event_message(&request).as_deref(), Some(prompt));
     }
 
     fn test_agent_request() -> AgentRunRequest {

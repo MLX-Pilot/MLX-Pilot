@@ -1,0 +1,131 @@
+{
+  "model": "qwen3:0.6b",
+  "provider": "ollama",
+  "phase": "final-24b9525-completo",
+  "cases": [
+    {
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      },
+      "steps": [
+        "toggle_history",
+        "composer_policy_control",
+        "keyboard_tabs",
+        "composer_model_selector",
+        "locked_and_risk_based_loaded_without_writes",
+        "deliberate_changes_preserve_execution_mode",
+        "desktop_frontend_workspace",
+        "new_session",
+        "locked_configuration",
+        "return_to_workspace",
+        "stream_local_model",
+        "session_persisted",
+        "restore_saved_conversation_with_keyboard"
+      ],
+      "layout": {
+        "agent-chat-messages": {
+          "x": 230.390625,
+          "y": 108,
+          "w": 1049.609375,
+          "h": 671.703125,
+          "fullyVisible": true
+        },
+        "agent-command-input": {
+          "x": 362.1875,
+          "y": 796.703125,
+          "w": 786.015625,
+          "h": 38,
+          "fullyVisible": true
+        },
+        "agent-send-btn": {
+          "x": 1116.203125,
+          "y": 834.703125,
+          "w": 32,
+          "h": 32,
+          "fullyVisible": true
+        }
+      },
+      "policyWrites": [
+        [
+          "locked",
+          "deny"
+        ],
+        [
+          "locked",
+          "risk_based"
+        ]
+      ],
+      "answer": "12",
+      "status": "pass"
+    },
+    {
+      "viewport": {
+        "width": 960,
+        "height": 600
+      },
+      "steps": [
+        "toggle_history",
+        "composer_policy_control",
+        "keyboard_tabs",
+        "composer_model_selector",
+        "locked_and_risk_based_loaded_without_writes",
+        "deliberate_changes_preserve_execution_mode",
+        "desktop_frontend_workspace",
+        "new_session",
+        "locked_configuration",
+        "return_to_workspace",
+        "stream_local_model",
+        "session_persisted",
+        "restore_saved_conversation_with_keyboard"
+      ],
+      "layout": {
+        "agent-chat-messages": {
+          "x": 0,
+          "y": 108,
+          "w": 960,
+          "h": 379.8125,
+          "fullyVisible": true
+        },
+        "agent-command-input": {
+          "x": 87,
+          "y": 504.8125,
+          "w": 786,
+          "h": 38,
+          "fullyVisible": true
+        },
+        "agent-send-btn": {
+          "x": 841,
+          "y": 542.8125,
+          "w": 32,
+          "h": 32,
+          "fullyVisible": true
+        }
+      },
+      "policyWrites": [
+        [
+          "locked",
+          "deny"
+        ],
+        [
+          "locked",
+          "risk_based"
+        ]
+      ],
+      "answer": "12",
+      "status": "pass"
+    }
+  ],
+  "inference": [
+    {
+      "url": "/api/chat",
+      "status": 200,
+      "model": "qwen3:0.6b"
+    },
+    {
+      "url": "/api/chat",
+      "status": 200,
+      "model": "qwen3:0.6b"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "steps": [
+    "create_default_account",
+    "edit_without_reentering_credentials",
+    "disabled_delivery_blocked",
+    "rename_default_account",
+    "enabled_delivery_received_once"
+  ],
+  "receiverRequests": 1
+}

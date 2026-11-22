@@ -1,0 +1,36 @@
+[
+  {
+    "execucao": 1,
+    "saude": {
+      "status": "ok",
+      "provider": "ollama",
+      "provider_ready": true,
+      "degraded": false
+    },
+    "modelo": {
+      "model": "qwen3:0.6b",
+      "temperature": 0,
+      "sent_via": "AXButton Enviar mensagem [id=agent-send-btn]",
+      "question": "Quanto é 2 + 2? Responda somente com o número, sem usar ferramentas. /no_think",
+      "persisted_answer": "4",
+      "rendered": true
+    }
+  },
+  {
+    "execucao": 2,
+    "saude": {
+      "status": "ok",
+      "provider": "ollama",
+      "provider_ready": true,
+      "degraded": false
+    },
+    "modelo": {
+      "model": "qwen3:0.6b",
+      "temperature": 0,
+      "sent_via": "AXButton Enviar mensagem [id=agent-send-btn]",
+      "question": "Quanto é 2 + 2? Responda somente com o número, sem usar ferramentas. /no_think",
+      "persisted_answer": "4",
+      "rendered": true
+    }
+  }
+]

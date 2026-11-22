@@ -678,11 +678,7 @@ fn is_memory_pressure_error(text: &str) -> bool {
         || normalized.contains("command buffer")
         || normalized.contains("iokit")
         || normalized.contains("iogpu");
-    if signal_terminated && gpu_crash {
-        return true;
-    }
-
-    false
+    signal_terminated && gpu_crash
 }
 
 fn normalize_airllm_backend(raw: &str) -> &'static str {

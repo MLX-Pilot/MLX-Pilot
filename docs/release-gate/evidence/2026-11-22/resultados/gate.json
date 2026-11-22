@@ -1,0 +1,97 @@
+{
+  "generated_at": "2026-11-22T09:54:53.931Z",
+  "revision": {
+    "commit": "24b9525e26bf0194228703d9f2c23ccd008f5a71",
+    "dirty": false
+  },
+  "decision": "GO",
+  "blockers": [],
+  "blocks": [
+    {
+      "id": "plugin_browser_smoke",
+      "title": "Reading Notes and Studio in Chromium",
+      "status": "pass",
+      "executed": true,
+      "blockers": []
+    },
+    {
+      "id": "channels_real_validation",
+      "title": "Bloco 1 - Canais e controle de contas",
+      "status": "pass",
+      "executed": true,
+      "blockers": []
+    },
+    {
+      "id": "load_smoke",
+      "title": "Bloco 2 - Carga curta e concorrencia",
+      "status": "pass",
+      "executed": true,
+      "blockers": []
+    },
+    {
+      "id": "migration_upgrade_rollback",
+      "title": "Bloco 3 - Upgrade e rollback de migracao",
+      "status": "pass",
+      "executed": true,
+      "blockers": []
+    },
+    {
+      "id": "security_audit_smoke",
+      "title": "Bloco 4 - Auditoria pratica de seguranca",
+      "status": "pass",
+      "executed": true,
+      "blockers": []
+    },
+    {
+      "id": "crash_recovery_smoke",
+      "title": "Bloco 5 - Recuperacao de falha",
+      "status": "pass",
+      "executed": true,
+      "blockers": []
+    },
+    {
+      "id": "release_dry_run",
+      "title": "Bloco 6 - Release dry-run",
+      "status": "pass",
+      "executed": true,
+      "blockers": []
+    },
+    {
+      "id": "plugin_security_smoke",
+      "title": "Plugin broker and bridge security",
+      "status": "pass",
+      "executed": true,
+      "blockers": []
+    }
+  ],
+  "agent_tool_policy": {
+    "profile_policy_effective": {
+      "minimal": {
+        "exec_allowed": false,
+        "message_allowed": false
+      },
+      "coding": {
+        "exec_allowed": true,
+        "message_allowed": false
+      },
+      "messaging": {
+        "exec_allowed": false,
+        "message_allowed": true
+      },
+      "full": {
+        "exec_allowed": true,
+        "message_allowed": true
+      }
+    },
+    "allow_deny_runtime": {
+      "minimal_exec_denied": true,
+      "agent_allow_exec_passed": true,
+      "global_deny_exec_denied": true,
+      "execution_mode_and_skill_denials": {
+        "read-only": true,
+        "locked": true,
+        "summarize": true
+      }
+    }
+  }
+}

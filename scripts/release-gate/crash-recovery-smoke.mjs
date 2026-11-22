@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { startBotFixture } from "./channel-fixtures.mjs";
+
 import fs from "node:fs/promises";
 
 import {
@@ -24,13 +26,16 @@ export async function runCrashRecoverySmoke() {
   const daemonPort = await pickPort();
   let daemon;
   let provider;
+  let bot;
 
   try {
+    bot = await startBotFixture("tg-crash-recovery");
     await seedReleaseGateSkills(harness.skillsDir);
     await writeJson(harness.settingsPath, buildLegacySettings(harness.workspace));
     provider = await startOpenAiMockServer({ delayMs: 4_000, finalPrefix: "crash-recovery" });
 
     daemon = startDaemon({
+      env: { MLX_CHANNEL_BOT_FIXTURE_URL: bot.baseUrl },
       workspace: harness.workspace,
       settingsPath: harness.settingsPath,
       port: daemonPort,
@@ -62,7 +67,7 @@ export async function runCrashRecoverySmoke() {
       routing_defaults: {
         target: "+5511999999999",
       },
-      adapter_config: {},
+      adapter_config: { backend: "mock" },
       set_as_default: true,
     });
     await assertOkJson(daemon.baseUrl, "POST", "/agent/channels/login", {
@@ -109,6 +114,7 @@ export async function runCrashRecoverySmoke() {
     const inFlightResult = await inFlightRun;
 
     daemon = startDaemon({
+      env: { MLX_CHANNEL_BOT_FIXTURE_URL: bot.baseUrl },
       workspace: harness.workspace,
       settingsPath: harness.settingsPath,
       port: daemonPort,
@@ -202,6 +208,7 @@ export async function runCrashRecoverySmoke() {
   } finally {
     await stopDaemon(daemon);
     await provider?.close?.();
+    await bot?.close();
   }
 }
 

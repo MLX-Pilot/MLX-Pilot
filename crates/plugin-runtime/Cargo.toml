@@ -14,5 +14,6 @@ jsonschema = "0.29"
 url = "2"
 
 [dev-dependencies]
+mlx-ollama-core = { path = "../core" }
 wat = "1"
 tempfile = "3"

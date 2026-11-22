@@ -1,0 +1,123 @@
+{
+  "aplicativo": "MLX Pilot 0.1.0",
+  "origem": "24b9525e26bf0194228703d9f2c23ccd008f5a71",
+  "macos": "26.3.1",
+  "arquitetura": "arm64",
+  "pacote": {
+    "dmg": "MLX Pilot_0.1.0_aarch64.dmg",
+    "sha256": "c74013cddb10290a67a49567277d0e28a628838887767c3d514f5fb7b6df296f",
+    "bytes": 20931295,
+    "readonly_mount": true,
+    "app_files_verified": 5,
+    "executable_sha256": "4f7e2f51a37c5b892fae2bf02fc1846da46ad987d94fb1c7e421397965c3334c",
+    "applications_link": true
+  },
+  "execucoes": [
+    {
+      "execucao": 1,
+      "provedores": {
+        "ollama": "ready",
+        "llamacpp": "ready",
+        "mlx": "ready"
+      },
+      "saude": {
+        "status": "ok",
+        "provider": "ollama",
+        "provider_ready": true,
+        "degraded": false
+      },
+      "politicas": {
+        "before_navigation": {
+          "execution_mode": "locked",
+          "approval_mode": "risk_based",
+          "temperature": 0.0
+        },
+        "after_configuration_navigation": {
+          "execution_mode": "locked",
+          "approval_mode": "risk_based",
+          "temperature": 0.0
+        },
+        "after_answer": {
+          "execution_mode": "locked",
+          "approval_mode": "risk_based",
+          "temperature": 0.0
+        }
+      },
+      "interacoes": [
+        "AXButton Agente",
+        "AXButton Nova conversa [id=btn-new-session]",
+        "AXRadioButton Configurações [id=agent-tab-config]",
+        "AXRadioButton Conversa [id=agent-tab-workspace]"
+      ],
+      "sessoes_antes": 0,
+      "sessoes_depois": 1,
+      "inferencia": {
+        "model": "qwen3:0.6b",
+        "temperature": 0,
+        "sent_via": "AXButton Enviar mensagem [id=agent-send-btn]",
+        "question": "Quanto é 2 + 2? Responda somente com o número, sem usar ferramentas. /no_think",
+        "persisted_answer": "4",
+        "rendered": true
+      },
+      "video": {
+        "codec_name": "h264",
+        "width": 1280,
+        "height": 900,
+        "nb_frames": "230"
+      }
+    },
+    {
+      "execucao": 2,
+      "provedores": {
+        "ollama": "ready",
+        "llamacpp": "ready",
+        "mlx": "ready"
+      },
+      "saude": {
+        "status": "ok",
+        "provider": "ollama",
+        "provider_ready": true,
+        "degraded": false
+      },
+      "politicas": {
+        "before_navigation": {
+          "execution_mode": "locked",
+          "approval_mode": "risk_based",
+          "temperature": 0.0
+        },
+        "after_configuration_navigation": {
+          "execution_mode": "locked",
+          "approval_mode": "risk_based",
+          "temperature": 0.0
+        },
+        "after_answer": {
+          "execution_mode": "locked",
+          "approval_mode": "risk_based",
+          "temperature": 0.0
+        }
+      },
+      "interacoes": [
+        "AXButton Agente",
+        "AXButton Nova conversa [id=btn-new-session]",
+        "AXRadioButton Configurações [id=agent-tab-config]",
+        "AXRadioButton Conversa [id=agent-tab-workspace]"
+      ],
+      "sessoes_antes": 0,
+      "sessoes_depois": 1,
+      "inferencia": {
+        "model": "qwen3:0.6b",
+        "temperature": 0,
+        "sent_via": "AXButton Enviar mensagem [id=agent-send-btn]",
+        "question": "Quanto é 2 + 2? Responda somente com o número, sem usar ferramentas. /no_think",
+        "persisted_answer": "4",
+        "rendered": true
+      },
+      "video": {
+        "codec_name": "h264",
+        "width": 1280,
+        "height": 900,
+        "nb_frames": "255"
+      }
+    }
+  ]
+}
