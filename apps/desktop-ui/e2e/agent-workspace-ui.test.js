@@ -749,11 +749,15 @@ test("histórico do agente reabre a conversa e mantém o foco ao navegar pelo te
     toggle.click();
     assert.equal(toggle.getAttribute("aria-expanded"), "false");
     assert.ok(document.getElementById("agent-history-rail").hidden);
+    const auditFeed = document.getElementById("audit-feed");
+    auditFeed.replaceChildren();
     document.getElementById("agent-policy-control").click();
     const config = document.getElementById("agent-tab-config");
     assert.equal(config.getAttribute("aria-selected"), "true");
     config.dispatchEvent(new fixture.window.KeyboardEvent("keydown", {key:"ArrowLeft", bubbles:true}));
     assert.equal(document.activeElement.id, "agent-tab-workspace");
+    await flush();
+    assert.ok(auditFeed.childElementCount > 0);
   } finally {
     fixture.cleanup();
   }
