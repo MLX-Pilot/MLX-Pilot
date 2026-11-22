@@ -55,6 +55,10 @@ def exercise(binary, evidence, state, report, model):
     def visible(obj):
         return obj.getState().contains(pyatspi.STATE_SHOWING)
 
+    def x11(*args):
+        result = subprocess.run(["xdotool", *args], text=True, capture_output=True, timeout=5)
+        return result.stdout.strip() if result.returncode == 0 else ""
+
     def focus(control):
         subprocess.run(["xdotool", "windowactivate", "--sync", window], check=True, timeout=10)
         def focused():
@@ -66,9 +70,12 @@ def exercise(binary, evidence, state, report, model):
                 return None
         until("keyboard focus on the accessible control", focused)
 
-    def activate(control):
-        focus(control)
-        subprocess.run(["xdotool", "key", "--clearmodifiers", "space"], check=True)
+    def press(control):
+        # A timed-out accessibility reply can still have dispatched the click. The caller verifies the outcome.
+        try:
+            control.queryAction().doAction(0)
+        except GLib.GError:
+            pass
 
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -116,11 +123,12 @@ def exercise(binary, evidence, state, report, model):
     wm = recorder = app = None
     with (evidence / "native.log").open("w") as log:
         try:
-            wm = subprocess.Popen(["openbox"], stdout=log, stderr=log)
             recorder = subprocess.Popen(["ffmpeg", "-nostdin", "-loglevel", "warning", "-f", "x11grab",
                 "-framerate", "15", "-video_size", "1440x1000", "-i", os.environ["DISPLAY"],
                 "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
                 "-movflags", "+faststart", str(evidence / "linux-agent.mp4")], stdout=log, stderr=log)
+            wm = subprocess.Popen(["openbox", "--sm-disable"], stdout=log, stderr=log)
+            until("Openbox desktop registration", lambda: x11("get_num_desktops").isdigit())
             app = subprocess.Popen([binary], env=env, cwd=state, stdout=log, stderr=log)
             report["pid"] = app.pid
             report["health"] = until("embedded daemon", health)
@@ -128,11 +136,15 @@ def exercise(binary, evidence, state, report, model):
             assert report["listener_owned_by_app"], "The listener does not belong to the installed app"
             report["executable"] = str(Path(f"/proc/{app.pid}/exe").resolve())
             assert Path(report["executable"]) == Path(binary).resolve()
-            def app_windows():
-                result = subprocess.run(["xdotool", "search", "--all", "--onlyvisible", "--pid",
-                    str(app.pid), "--name", "MLX Pilot"], capture_output=True, text=True, check=False)
-                return result.stdout.splitlines()
-            window = until("installed desktop window", app_windows)[0]
+            def app_window():
+                # GTK may create the titled window before it is mapped or publishes _NET_WM_PID.
+                for xid in x11("search", "--name", "^MLX Pilot").splitlines():
+                    if x11("getwindowpid", xid) in ("", str(app.pid)):
+                        return xid
+                return None
+            window = until("installed desktop window", app_window)
+            subprocess.run(["xdotool", "windowmap", window, "windowactivate", "--sync", window], check=True, timeout=10)
+            until("mapped and active app window", lambda: x11("getactivewindow") == window)
             report["window_title"] = output("xdotool", "getwindowname", window)
             if model:
                 check_policy("startup_policy")
@@ -140,13 +152,21 @@ def exercise(binary, evidence, state, report, model):
             tab = until("Agent tab", lambda: find(lambda o: o.getRole() in
                 (pyatspi.ROLE_PAGE_TAB, pyatspi.ROLE_PUSH_BUTTON) and visible(o)
                 and (o.name or "").strip().casefold() in {"agent", "agente"}))
-            time.sleep(1)
-            activate(tab)
+            # The splash can cover a web control that is already in the accessibility tree.
+            until("startup splash closed", lambda: not find(lambda o: visible(o) and "id:splash" in o.getAttributes()))
+            def new_conversation_button():
+                return find(lambda obj: obj.getRole() == pyatspi.ROLE_PUSH_BUTTON and visible(obj)
+                            and "id:btn-new-session" in obj.getAttributes())
+            def open_agent():
+                opened = new_conversation_button()
+                if opened:
+                    return opened
+                press(tab)
+                return None
+            new_session = until("active Agent panel with its New conversation button", open_agent)
+            report["agent_panel_visible"] = True
             before = session_ids()
-            new_session = until("New conversation button", lambda: find(lambda obj:
-                obj.getRole() == pyatspi.ROLE_PUSH_BUTTON and visible(obj)
-                and "id:btn-new-session" in obj.getAttributes()))
-            activate(new_session)
+            press(new_session)
             created = until("session created from the installed UI", lambda: session_ids() - before)
             session_id, = created
             report["session_created_via_ui"] = session_id
@@ -194,6 +214,16 @@ def exercise(binary, evidence, state, report, model):
                 assert report["session_tool_events"] == 0 and report["audit_tool_events"] == 0, "Unexpected tool event"
             time.sleep(2)
             assert recorder.poll() is None and app.poll() is None
+        except Exception:
+            report["display"] = os.environ["DISPLAY"]
+            report["openbox_desktops"] = x11("get_num_desktops")
+            report["active_window"] = x11("getactivewindow")
+            report["windows"] = [{"id": xid, "title": x11("getwindowname", xid), "pid": x11("getwindowpid", xid)}
+                for xid in x11("search", "--name", ".*").splitlines()[:40]]
+            desktop = pyatspi.Registry.getDesktop(0)
+            report["accessible_frames"] = [{"app": a.name, "frame": c.name, "showing": visible(c)}
+                for a in desktop if a for c in a if c]
+            raise
         finally:
             stop(recorder)
             stop(app)
@@ -212,8 +242,13 @@ def main():
     if not args.session:
         evidence.mkdir(parents=True, exist_ok=False)
         subprocess.run(["sudo", "-n", "dpkg", "-i", package], check=True)
-        subprocess.run(["xvfb-run", "-a", "-s", "-screen 0 1440x1000x24", "dbus-run-session",
-                        "--", sys.executable, __file__, *sys.argv[1:], "--session"], check=True)
+        with tempfile.TemporaryDirectory(prefix="mlx-qa-x11-") as runtime:
+            env = {**os.environ, "XDG_RUNTIME_DIR": runtime, "XDG_CONFIG_HOME": runtime + "/config",
+                   "XDG_SESSION_TYPE": "x11", "GDK_BACKEND": "x11", "LIBGL_ALWAYS_SOFTWARE": "1"}
+            for key in ("WAYLAND_DISPLAY", "SESSION_MANAGER", "AT_SPI_BUS_ADDRESS", "DESKTOP_STARTUP_ID"):
+                env.pop(key, None)
+            subprocess.run(["xvfb-run", "-a", "-s", "-screen 0 1440x1000x24 -noreset", "dbus-run-session",
+                            "--", sys.executable, __file__, *sys.argv[1:], "--session"], check=True, env=env)
         return
     name = output("dpkg-deb", "-f", package, "Package")
     binary, = [p for p in output("dpkg-query", "-L", name).splitlines()
