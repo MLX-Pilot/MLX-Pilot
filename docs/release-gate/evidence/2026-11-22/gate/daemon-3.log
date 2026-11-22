@@ -1,0 +1,2 @@
+2026-11-22T09:54:51.736546Z  WARN mlx_ollama_daemon::startup: managed Ollama startup failed error=provider unavailable: falha comunicando com a API Ollama: error sending request for url (http://127.0.0.1:1/api/version)
+2026-11-22T09:54:52.268115Z ERROR extism::plugin: call to spin encountered an error: plugin ran out of fuel plugin="649d7666-5c27-45c9-aaad-0997d5fc9850"

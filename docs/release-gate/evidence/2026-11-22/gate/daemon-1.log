@@ -1,0 +1,1 @@
+2026-11-22T09:54:49.878539Z  WARN mlx_ollama_daemon::startup: managed Ollama startup failed error=provider unavailable: falha comunicando com a API Ollama: error sending request for url (http://127.0.0.1:1/api/version)
