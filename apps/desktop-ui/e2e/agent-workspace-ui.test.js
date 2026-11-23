@@ -1910,3 +1910,67 @@ test("global navigation exposes every section and restores keyboard focus after 
     fixture.cleanup();
   }
 });
+
+test("an available engine leaves the desktop usable while Ollama downloads", async () => {
+  const fixture = createFixture({
+    startupResponse: {
+      phase: "downloading", step: "downloading", message: "Retomando Ollama",
+      progress_percent: 16, bytes_downloaded: 160, bytes_total: 1000,
+      can_cancel: true, app_ready: true, degraded: true,
+      providers: [
+        {provider: "ollama", phase: "downloading", ready: false, applicable: true},
+        {provider: "llamacpp", phase: "ready", ready: true, applicable: true},
+      ],
+    },
+  });
+  try {
+    await flush(10);
+    assert.equal(fixture.document.getElementById("runtime-notice").hidden, false);
+    assert.match(fixture.document.getElementById("runtime-notice").textContent, /16%/);
+    assert.ok(fixture.fetchCalls.some(r => r.path === "/agent/config"));
+    assert.equal(fixture.document.getElementById("agent-daemon-status").textContent, "Degradado");
+  } finally { fixture.cleanup(); }
+});
+
+test("continuing during first preparation opens settings without cancelling the download", async () => {
+  const fixture = createFixture({
+    useRealTimers: true,
+    startupResponse: {
+      phase: "downloading", step: "downloading", message: "Baixando Ollama",
+      progress_percent: 5, bytes_downloaded: 50, bytes_total: 1000,
+      can_cancel: true, app_ready: false, degraded: false,
+      providers: [{provider: "ollama", phase: "downloading", ready: false, applicable: true}],
+    },
+  });
+  try {
+    await flush(10);
+    const open = fixture.document.getElementById("startup-open");
+    assert.equal(open.hidden, false);
+    open.click();
+    await new Promise(resolve => setTimeout(resolve, 700));
+    assert.ok(fixture.fetchCalls.some(r => r.path === "/agent/config"));
+    assert.equal(fixture.fetchCalls.filter(r => r.path === "/runtime/startup/cancel").length, 0);
+    assert.equal(fixture.fetchCalls.filter(r => r.path === "/chat/stream").length, 0);
+  } finally { fixture.cleanup(); }
+});
+
+test("a failed background runtime exposes retry after the splash is dismissed", async () => {
+  const fixture = createFixture({
+    startupResponse: {
+      phase: "degraded", step: "degraded", app_ready: true, degraded: true,
+      providers: [
+        {provider: "ollama", phase: "failed", ready: false, applicable: true, error: "Download interrompido; os bytes foram preservados"},
+        {provider: "llamacpp", phase: "ready", ready: true, applicable: true},
+      ],
+    },
+  });
+  try {
+    await flush(10);
+    const retry = fixture.document.getElementById("runtime-retry");
+    assert.equal(retry.hidden, false);
+    assert.match(fixture.document.getElementById("runtime-notice-text").textContent, /bytes foram preservados/);
+    retry.click();
+    await flush(5);
+    assert.equal(fixture.fetchCalls.filter(r => r.path === "/runtime/startup/retry" && r.method === "POST").length, 1);
+  } finally { fixture.cleanup(); }
+});

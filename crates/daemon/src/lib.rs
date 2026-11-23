@@ -1000,7 +1000,17 @@ fn init_tracing() {
 
 async fn health(State(state): State<AppState>) -> Json<HealthBody> {
     let startup = state.startup.snapshot(&state.ollama_provider).await;
-    Json(HealthBody {
+    Json(health_body(state.provider_mode, &startup))
+}
+
+fn health_body(mode: LocalProviderMode, startup: &startup::StartupSnapshot) -> HealthBody {
+    // Application availability is global; readiness describes the declared provider.
+    let provider_ready = startup.providers.iter().any(|provider| {
+        provider.applicable
+            && provider.ready
+            && (mode == LocalProviderMode::Auto || provider.provider == mode.label())
+    });
+    HealthBody {
         status: if !startup.app_ready {
             "starting".to_string()
         } else if startup.degraded {
@@ -1010,10 +1020,10 @@ async fn health(State(state): State<AppState>) -> Json<HealthBody> {
         } else {
             "ok".to_string()
         },
-        provider: state.provider_mode.label(),
-        provider_ready: startup.providers.iter().any(|provider| provider.ready),
+        provider: mode.label(),
+        provider_ready,
         degraded: startup.degraded,
-    })
+    }
 }
 
 async fn runtime_startup_get(State(state): State<AppState>) -> Json<startup::StartupSnapshot> {
@@ -1543,6 +1553,47 @@ async fn chat_stream(
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn health_readiness_matches_the_selected_provider_during_background_preparation() {
+        let coordinator = crate::startup::StartupCoordinator::default();
+        let ollama = ollama_provider::OllamaProvider::new(Default::default());
+        let mut snapshot = coordinator.snapshot(&ollama).await;
+        snapshot.app_ready = true;
+        snapshot.degraded = true;
+        let llama = snapshot
+            .providers
+            .iter_mut()
+            .find(|p| p.provider == "llamacpp")
+            .unwrap();
+        llama.ready = true;
+        llama.phase = "ready".to_string();
+        for (mode, expected) in [
+            (crate::LocalProviderMode::Auto, true),
+            (crate::LocalProviderMode::Llamacpp, true),
+            (crate::LocalProviderMode::Ollama, false),
+            (crate::LocalProviderMode::Mlx, false),
+        ] {
+            let body = crate::health_body(mode, &snapshot);
+            assert_eq!(body.provider, mode.label());
+            assert_eq!(body.provider_ready, expected, "{mode:?}");
+            assert_eq!(body.status, "degraded");
+        }
+        let ollama = snapshot
+            .providers
+            .iter_mut()
+            .find(|p| p.provider == "ollama")
+            .unwrap();
+        ollama.ready = true;
+        ollama.phase = "ready".to_string();
+        assert!(crate::health_body(crate::LocalProviderMode::Ollama, &snapshot).provider_ready);
+        // An unsupported provider must not authorize auto mode even if its cached state says ready.
+        for provider in &mut snapshot.providers {
+            provider.ready = true;
+            provider.applicable = false;
+        }
+        assert!(!crate::health_body(crate::LocalProviderMode::Auto, &snapshot).provider_ready);
+    }
+
     #[test]
     fn local_catalog_does_not_duplicate_provider_prefixes() {
         assert_eq!(
@@ -2125,8 +2176,12 @@ async fn list_chat_models(state: &AppState) -> Result<Vec<ModelDescriptor>, Prov
         LocalProviderMode::Llamacpp => state.llamacpp_provider.list_models().await,
         LocalProviderMode::Ollama => state.ollama_provider.list_models().await,
         LocalProviderMode::Auto => {
-            let mlx_future =
-                tokio::time::timeout(Duration::from_secs(3), state.mlx_provider.list_models());
+            let mlx_future = async {
+                if cfg!(target_os = "windows") {
+                    return Ok(Ok(Vec::new()));
+                }
+                tokio::time::timeout(Duration::from_secs(3), state.mlx_provider.list_models()).await
+            };
             let llamacpp_future = tokio::time::timeout(
                 Duration::from_secs(3),
                 state.llamacpp_provider.list_models(),
@@ -2585,11 +2640,11 @@ fn auto_provider_priority() -> Vec<RoutedProvider> {
             RoutedProvider::Ollama,
         ]
     } else {
-        vec![
-            RoutedProvider::Llamacpp,
-            RoutedProvider::Ollama,
-            RoutedProvider::Mlx,
-        ]
+        let mut providers = vec![RoutedProvider::Llamacpp, RoutedProvider::Ollama];
+        if !cfg!(target_os = "windows") {
+            providers.push(RoutedProvider::Mlx);
+        }
+        providers
     }
 }
 

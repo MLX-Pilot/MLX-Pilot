@@ -284,7 +284,7 @@ fn configure_embedded_llamacpp(app: &tauri::App) {
     }
 
     for candidate in candidates {
-        if candidate.exists() {
+        if candidate.is_file() {
             append_desktop_log_line(
                 "info",
                 &format!("using bundled llama-server at {}", candidate.display()),
@@ -299,8 +299,8 @@ fn configure_embedded_llamacpp(app: &tauri::App) {
     }
 
     append_desktop_log_line(
-        "warn",
-        "bundled llama-server not found; relying on PATH or auto-install fallback",
+        "info",
+        "llama.cpp engine will be resolved by the daemon from the configured path, local cache or PATH",
     );
 }
 

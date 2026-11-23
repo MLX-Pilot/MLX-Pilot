@@ -242,7 +242,7 @@ def main():
     if not args.session:
         evidence.mkdir(parents=True, exist_ok=False)
         subprocess.run(["sudo", "-n", "dpkg", "-i", package], check=True)
-        with tempfile.TemporaryDirectory(prefix="mlx-qa-x11-") as runtime:
+        with tempfile.TemporaryDirectory(prefix="mlx-qa-x11-", ignore_cleanup_errors=True) as runtime:
             env = {**os.environ, "XDG_RUNTIME_DIR": runtime, "XDG_CONFIG_HOME": runtime + "/config",
                    "XDG_SESSION_TYPE": "x11", "GDK_BACKEND": "x11", "LIBGL_ALWAYS_SOFTWARE": "1"}
             for key in ("WAYLAND_DISPLAY", "SESSION_MANAGER", "AT_SPI_BUS_ADDRESS", "DESKTOP_STARTUP_ID"):

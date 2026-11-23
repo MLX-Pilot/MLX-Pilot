@@ -35,6 +35,7 @@
       <div class="startup-meta" id="startup-meta">Conectando ao daemon local...</div>
       <div class="startup-providers" id="startup-providers"></div>
       <div class="startup-actions">
+        <button class="startup-btn" id="startup-open" type="button" hidden>Continuar enquanto prepara</button>
         <button class="startup-btn danger" id="startup-cancel" type="button" hidden>Cancelar</button>
         <button class="startup-btn" id="startup-retry" type="button" hidden>Tentar novamente</button>
       </div>
@@ -208,6 +209,7 @@
           </div>
         </div>
       </header>
+      <div id="runtime-notice" class="runtime-notice" role="status" hidden><span id="runtime-notice-text"></span> <button class="startup-btn" id="runtime-retry" type="button" hidden>Tentar novamente</button></div>
 
       <!-- Panels -->
       <div class="panels">

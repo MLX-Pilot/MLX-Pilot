@@ -1,0 +1,186 @@
+name: Runtime release v0.1.1
+
+on:
+  push:
+    branches: ["fix/runtime-first-launch"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  linux:
+    name: Linux ${{ matrix.arch }} installer and runtime reopen
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop-ui/src-tauri -> target
+          cache-on-failure: true
+      - name: Install native build and recording dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev patchelf xvfb xauth dbus-x11 openbox xdotool ffmpeg python3-pyatspi
+      - name: Build Debian installer
+        working-directory: apps/desktop-ui
+        run: npm exec --yes --package=@tauri-apps/cli@2.10.0 -- tauri build --bundles deb -- --locked
+      - name: Install and exercise the native UI
+        run: /usr/bin/python3 scripts/release-gate/linux-package-smoke.py apps/desktop-ui/src-tauri/target/release/bundle/deb/*.deb "${{ runner.temp }}/native-ui"
+      - name: Download managed runtime, answer and reopen from cache
+        run: |
+          lscpu > "${{ runner.temp }}/cpu-info.txt"
+          xvfb-run -a -s '-screen 0 1440x1000x24 -noreset' dbus-run-session -- bash -euo pipefail -c '
+            openbox --sm-disable > "$RUNNER_TEMP/runtime-window.log" 2>&1 &
+            wm=$!
+            for attempt in $(seq 1 60); do xdotool get_num_desktops >/dev/null 2>&1 && break; sleep .25; done
+            ffmpeg -y -nostdin -loglevel error -f x11grab -framerate 5 -video_size 1440x1000 -i "$DISPLAY" -c:v libx264 -preset veryfast -pix_fmt yuv420p -movflags +faststart "$RUNNER_TEMP/runtime-reopen.mp4" &
+            recorder=$!
+            trap '\''kill -INT "$recorder" 2>/dev/null || true; wait "$recorder" || true; kill "$wm" 2>/dev/null || true'\'' EXIT
+            python3 scripts/release-gate/runtime-reopen.py /usr/bin/mlx-ollama-desktop "$RUNNER_TEMP/runtime-reopen"
+          '
+          python3 -c 'import subprocess; seconds=float(subprocess.check_output(["ffprobe","-v","error","-show_entries","format=duration","-of","default=nw=1:nk=1","${{ runner.temp }}/runtime-reopen.mp4"])); assert seconds > 3'
+      - name: Preserve installer, reports and recordings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}-v0.1.1
+          path: |
+            apps/desktop-ui/src-tauri/target/release/bundle/deb/*.deb
+            ${{ runner.temp }}/native-ui/
+            ${{ runner.temp }}/runtime-reopen/report.json
+            ${{ runner.temp }}/runtime-reopen/console-*.log
+            ${{ runner.temp }}/runtime-reopen/desktop-*.log
+            ${{ runner.temp }}/runtime-reopen/startup-*.json
+            ${{ runner.temp }}/runtime-reopen.mp4
+            ${{ runner.temp }}/cpu-info.txt
+            ${{ runner.temp }}/runtime-reopen/state/ollama/logs/
+            ${{ runner.temp }}/runtime-reopen/state/ollama/active.json
+            ${{ runner.temp }}/runtime-reopen/state/ollama/process.json
+            ${{ runner.temp }}/runtime-reopen/state/ollama/runtime-state.json
+          if-no-files-found: error
+
+  windows:
+    name: Windows x64 installer and runtime reopen
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop-ui/src-tauri -> target
+          cache-on-failure: true
+      - name: Build NSIS installer
+        working-directory: apps/desktop-ui
+        shell: pwsh
+        run: |
+          npm exec --yes --package=@tauri-apps/cli@2.10.0 -- tauri build --bundles nsis -- --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Tauri failed to build the installer' }
+      - name: Install desktop and exercise managed runtime twice
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cpu = Get-CimInstance Win32_Processor | Select-Object Name, Architecture, NumberOfCores, NumberOfLogicalProcessors, VirtualizationFirmwareEnabled
+          @{ processor = $cpu; avx = [System.Runtime.Intrinsics.X86.Avx]::IsSupported; avx2 = [System.Runtime.Intrinsics.X86.Avx2]::IsSupported; avx512f = [System.Runtime.Intrinsics.X86.Avx512F]::IsSupported; fma = [System.Runtime.Intrinsics.X86.Fma]::IsSupported } | ConvertTo-Json -Depth 4 | Set-Content "$env:RUNNER_TEMP/cpu-info.txt"
+          $package, $remaining = @(Get-ChildItem apps/desktop-ui/src-tauri/target/release/bundle/nsis -Filter '*-setup.exe')
+          if (!$package -or $remaining) { throw 'Expected exactly one installer' }
+          $installDir = Join-Path $env:RUNNER_TEMP 'mlx-pilot-install'
+          $installer = Start-Process -FilePath $package.FullName -ArgumentList "/S /D=$installDir" -Wait -PassThru
+          if ($installer.ExitCode -ne 0) { throw "Installer exited $($installer.ExitCode)" }
+          $binary = Join-Path $installDir 'mlx-ollama-desktop.exe'
+          if (!(Test-Path $binary)) { throw 'Installed executable missing' }
+          if (!(Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+            $archive = Join-Path $env:RUNNER_TEMP 'ffmpeg-9.1.zip'
+            $url = 'https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.1-essentials_build.zip'
+            curl.exe --fail --location --retry 3 --output $archive $url
+            if ($LASTEXITCODE -ne 0) { throw 'Could not download the test recorder' }
+            $expected = 'b9bbbb3acece000cbeec994f856649354e52c773807841e78908374b24d658fd'
+            if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Test recorder checksum differs' }
+            $tools = Join-Path $env:RUNNER_TEMP 'ffmpeg-tools'
+            Expand-Archive $archive -DestinationPath $tools
+            $ffmpeg = @(Get-ChildItem $tools -Recurse -Filter ffmpeg.exe)
+            if ($ffmpeg.Count -ne 1) { throw 'Expected one extracted recorder' }
+            $env:PATH = "$($ffmpeg[0].DirectoryName);$env:PATH"
+          }
+          $recorder = [System.Diagnostics.ProcessStartInfo]::new()
+          $recorder.FileName = (Get-Command ffmpeg).Source
+          $movie = Join-Path $env:RUNNER_TEMP 'runtime-reopen.mp4'
+          foreach ($arg in @('-loglevel','error','-y','-f','gdigrab','-framerate','5','-i','desktop','-c:v','libx264','-preset','veryfast','-pix_fmt','yuv420p','-movflags','+faststart',$movie)) { $recorder.ArgumentList.Add($arg) }
+          $recorder.UseShellExecute = $false
+          $recorder.RedirectStandardInput = $true
+          $recording = [System.Diagnostics.Process]::Start($recorder)
+          try {
+            python scripts/release-gate/runtime-reopen.py $binary "$env:RUNNER_TEMP/runtime-reopen"
+            if ($LASTEXITCODE -ne 0) { throw 'Runtime bootstrap/reopen test failed' }
+          } finally {
+            if (!$recording.HasExited) {
+              $recording.StandardInput.WriteLine('q')
+              if (!$recording.WaitForExit(15000)) { $recording.Kill() }
+            }
+          }
+          if (!(Test-Path $movie)) { throw 'Native recording missing' }
+          $seconds = & ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 $movie
+          if ($LASTEXITCODE -ne 0 -or [double]$seconds -le 3) { throw 'Native recording invalid' }
+      - name: Preserve installer, reports and recording
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-v0.1.1
+          path: |
+            apps/desktop-ui/src-tauri/target/release/bundle/nsis/*-setup.exe
+            ${{ runner.temp }}/runtime-reopen/report.json
+            ${{ runner.temp }}/runtime-reopen/console-*.log
+            ${{ runner.temp }}/runtime-reopen/desktop-*.log
+            ${{ runner.temp }}/runtime-reopen/startup-*.json
+            ${{ runner.temp }}/runtime-reopen.mp4
+            ${{ runner.temp }}/cpu-info.txt
+            ${{ runner.temp }}/runtime-reopen/state/ollama/logs/
+            ${{ runner.temp }}/runtime-reopen/state/ollama/active.json
+            ${{ runner.temp }}/runtime-reopen/state/ollama/process.json
+            ${{ runner.temp }}/runtime-reopen/state/ollama/runtime-state.json
+          if-no-files-found: error
+
+  upstream-ollama-cpu:
+    name: Upstream Ollama CPU inference diagnostics ${{ matrix.slot }}
+    strategy:
+      fail-fast: false
+      matrix:
+        slot: [1, 2]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare native warmup, chat and small CPU settings
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release-gate/ollama-native-repro.py "${{ runner.temp }}/ollama-native"
+      - name: Preserve native runtime comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-ollama-cpu-diagnostics-${{ matrix.slot }}
+          path: |
+            ${{ runner.temp }}/ollama-native/*.json
+            ${{ runner.temp }}/ollama-native/*.log
+            ${{ runner.temp }}/ollama-native/*.txt
+          if-no-files-found: error
