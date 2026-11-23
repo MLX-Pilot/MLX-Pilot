@@ -33,6 +33,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop-ui/src-tauri -> target
+          cache-on-failure: true
       - name: Install native build and recording dependencies
         run: |
           sudo apt-get update -qq
@@ -88,6 +89,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop-ui/src-tauri -> target
+          cache-on-failure: true
       - name: Build NSIS installer
         working-directory: apps/desktop-ui
         shell: pwsh
@@ -108,8 +110,17 @@ jobs:
           $binary = Join-Path $installDir 'mlx-ollama-desktop.exe'
           if (!(Test-Path $binary)) { throw 'Installed executable missing' }
           if (!(Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
-            choco install ffmpeg --no-progress -y
-            if ($LASTEXITCODE -ne 0) { throw 'Could not install the test recorder' }
+            $archive = Join-Path $env:RUNNER_TEMP 'ffmpeg-9.1.zip'
+            $url = 'https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.1-essentials_build.zip'
+            curl.exe --fail --location --retry 3 --output $archive $url
+            if ($LASTEXITCODE -ne 0) { throw 'Could not download the test recorder' }
+            $expected = 'b9bbbb3acece000cbeec994f856649354e52c773807841e78908374b24d658fd'
+            if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Test recorder checksum differs' }
+            $tools = Join-Path $env:RUNNER_TEMP 'ffmpeg-tools'
+            Expand-Archive $archive -DestinationPath $tools
+            $ffmpeg = @(Get-ChildItem $tools -Recurse -Filter ffmpeg.exe)
+            if ($ffmpeg.Count -ne 1) { throw 'Expected one extracted recorder' }
+            $env:PATH = "$($ffmpeg[0].DirectoryName);$env:PATH"
           }
           $recorder = [System.Diagnostics.ProcessStartInfo]::new()
           $recorder.FileName = (Get-Command ffmpeg).Source
@@ -147,4 +158,25 @@ jobs:
             ${{ runner.temp }}/runtime-reopen/state/ollama/active.json
             ${{ runner.temp }}/runtime-reopen/state/ollama/process.json
             ${{ runner.temp }}/runtime-reopen/state/ollama/runtime-state.json
+          if-no-files-found: error
+
+  upstream-ollama-cpu:
+    name: Upstream Ollama CPU inference diagnostics
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare native warmup, chat and small CPU settings
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release-gate/ollama-native-repro.py "${{ runner.temp }}/ollama-native"
+      - name: Preserve native runtime comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-ollama-cpu-diagnostics
+          path: |
+            ${{ runner.temp }}/ollama-native/*.json
+            ${{ runner.temp }}/ollama-native/*.log
+            ${{ runner.temp }}/ollama-native/*.txt
           if-no-files-found: error
