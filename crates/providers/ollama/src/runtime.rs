@@ -19,6 +19,7 @@ use uuid::Uuid;
 
 use crate::silence_console;
 
+mod amx;
 mod archive;
 mod download;
 
@@ -967,22 +968,31 @@ impl OllamaRuntime {
         }
 
         let generate_url = format!("{}/api/generate", self.cfg.base_url.trim_end_matches('/'));
-        let response = self
-            .client
-            .post(generate_url)
-            .json(&serde_json::json!({
-                "model": model,
-                "prompt": "",
-                "stream": false,
-                "keep_alive": "5m",
-                "options": { "num_predict": 1 }
-            }))
-            .send()
-            .await
-            .map_err(network_error)?;
-        if !response.status().is_success() {
+        for attempt in 0..2 {
+            let response = self
+                .client
+                .post(&generate_url)
+                .json(&serde_json::json!({
+                    "model": model,
+                    "prompt": "",
+                    "stream": false,
+                    "keep_alive": "5m",
+                    "options": { "num_predict": 1 }
+                }))
+                .send()
+                .await
+                .map_err(network_error)?;
+            if response.status().is_success() {
+                break;
+            }
             let status = response.status();
             let detail = response.text().await.unwrap_or_default();
+            if attempt == 0
+                && status == StatusCode::INTERNAL_SERVER_ERROR
+                && self.recover_known_amx_failure(model, &detail).await?
+            {
+                continue;
+            }
             return Err(ProviderError::Unavailable {
                 details: format!(
                     "runner Ollama falhou ao validar '{model}' (HTTP {status}): {}",
@@ -1044,6 +1054,78 @@ impl OllamaRuntime {
         })
         .await;
         Ok(())
+    }
+
+    async fn recover_known_amx_failure(
+        &self,
+        model: &str,
+        response: &str,
+    ) -> Result<bool, ProviderError> {
+        let status = self.status().await;
+        let log_path = self.cfg.root.join("logs/ollama.log");
+        let log = fs::read_to_string(&log_path).unwrap_or_default();
+        if !amx::matches_known_failure(
+            cfg!(all(target_os = "linux", target_arch = "x86_64")),
+            status.installed_version.as_deref(),
+            &status.process_origin,
+            response,
+            &log,
+        ) {
+            return Ok(false);
+        }
+        // A status string alone must never authorize changes to a shared install.
+        // Only the live process created by this runtime may be restarted here.
+        let executable = {
+            let mut process = self.process.lock().await;
+            let Some(process) = process.as_mut() else {
+                return Ok(false);
+            };
+            if process.child.id() != status.pid {
+                return Ok(false);
+            }
+            if process
+                .child
+                .try_wait()
+                .map_err(|source| ProviderError::Io {
+                    context: "verificando propriedade do processo antes da recuperacao AMX".into(),
+                    source,
+                })?
+                .is_some()
+            {
+                return Ok(false);
+            }
+            process.executable.clone()
+        };
+        let Some(plan) = amx::RecoveryPlan::checked(&self.cfg.root, &executable)? else {
+            return Ok(false);
+        };
+        // Keep the failing backend's evidence before start_and_validate truncates
+        // the current log. Model storage and the verified executable stay intact.
+        fs::copy(&log_path, self.cfg.root.join("logs/ollama-amx-failure.log")).map_err(
+            |source| ProviderError::Io {
+                context: "preservando diagnostico da falha AMX".into(),
+                source,
+            },
+        )?;
+        self.update_status(|status| {
+            status.provider_ready = false;
+            status.recovery_attempted = true;
+            status.message = "Recuperando compatibilidade do backend CPU".into();
+        })
+        .await;
+        self.stop_owned_process().await;
+        plan.apply()?;
+        warn!(
+            executable = %executable.display(),
+            "isolated known-broken GCC 11 AMX backend; retrying with remaining CPU/GPU backends"
+        );
+        // Do not use the separate NVIDIA recovery flag: normal CUDA/Vulkan/CPU
+        // discovery must still run after the defective CPU library is isolated.
+        self.start_and_validate(&executable, Some(model), false, "managed")
+            .await?;
+        self.update_status(|status| status.recovery_attempted = true)
+            .await;
+        Ok(true)
     }
 
     async fn wait_for_api(&self) -> Result<(), ProviderError> {
@@ -1954,6 +2036,145 @@ mod tests {
     use std::sync::{Mutex as StdMutex, OnceLock};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    #[test]
+    fn amx_recovery_http_peer() {
+        let Ok(models) = std::env::var("OLLAMA_MODELS") else {
+            return;
+        };
+        let root = Path::new(&models).parent().unwrap();
+        if !root.join("controlled-amx-peer").exists() {
+            return;
+        }
+        let address = std::env::var("OLLAMA_HOST").unwrap();
+        let listener = std::net::TcpListener::bind(address).unwrap();
+        for socket in listener.incoming() {
+            let mut socket = socket.unwrap();
+            let mut bytes = [0u8; 8192];
+            let n = std::io::Read::read(&mut socket, &mut bytes).unwrap();
+            let request = String::from_utf8_lossy(&bytes[..n]);
+            let (status, body) = if request.starts_with("GET /api/version") {
+                (200, serde_json::json!({"version":"0.30.7"}))
+            } else if request.starts_with("GET /api/tags") {
+                (200, serde_json::json!({"models":[{"name":"tiny"}]}))
+            } else if request.starts_with("POST /api/generate") {
+                let count_path = root.join("generate-count");
+                let count = fs::read_to_string(&count_path)
+                    .ok()
+                    .and_then(|n| n.parse::<u32>().ok())
+                    .unwrap_or(0);
+                fs::write(count_path, (count + 1).to_string()).unwrap();
+                let amx_exists = root
+                    .join("versions/0.30.7/lib/ollama/libggml-cpu-sapphirerapids.so")
+                    .exists();
+                if amx_exists || root.join("always-fail").exists() {
+                    eprintln!("AMX model buffer size = 414.51 MiB");
+                    eprintln!("warming up the model with an empty run");
+                    (
+                        500,
+                        serde_json::json!({"error":"llama-server process has terminated: signal: segmentation fault (core dumped)"}),
+                    )
+                } else {
+                    (200, serde_json::json!({"done":true}))
+                }
+            } else {
+                panic!("unexpected request: {request}");
+            };
+            let body = body.to_string();
+            let response = format!(
+                "HTTP/1.1 {status} OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = std::io::Write::write_all(&mut socket, response.as_bytes());
+        }
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    async fn amx_crash_restarts_once_and_reopens_without_download_or_backend_rewrite() {
+        use std::os::unix::fs::PermissionsExt;
+        for always_fail in [false, true] {
+            let root = std::env::temp_dir().join(format!("mlx-amx-restart-{}", Uuid::new_v4()));
+            let version = root.join("versions/0.30.7");
+            fs::create_dir_all(version.join("bin")).unwrap();
+            fs::create_dir_all(version.join("lib/ollama/cuda_v13")).unwrap();
+            fs::write(root.join("controlled-amx-peer"), b"fixture").unwrap();
+            if always_fail {
+                fs::write(root.join("always-fail"), b"fixture").unwrap();
+            }
+            let executable = version.join("bin/ollama");
+            let test_binary = std::env::current_exe().unwrap();
+            let quoted_binary = format!(
+                "'{}'",
+                test_binary.display().to_string().replace('\'', "'\"'\"'")
+            );
+            fs::write(&executable, format!("#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'ollama version is 0.30.7'; exit 0; fi\nexec {quoted_binary} --exact runtime::tests::amx_recovery_http_peer --nocapture\n")).unwrap();
+            fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+            fs::write(
+                version.join("lib/ollama/libggml-cpu-sapphirerapids.so"),
+                b"bad AMX",
+            )
+            .unwrap();
+            let cuda = version.join("lib/ollama/cuda_v13/libggml-cuda.so");
+            fs::write(&cuda, b"working CUDA").unwrap();
+            let manifest = ActiveRuntimeManifest {
+                schema_version: 1,
+                version: "0.30.7".into(),
+                executable_relative_path: "bin/ollama".into(),
+                executable_sha256: sha256_file(&executable).unwrap(),
+                source_url: "controlled fixture".into(),
+                installed_at_epoch_ms: epoch_ms(),
+                validated_at_epoch_ms: epoch_ms(),
+            };
+            write_json_atomic(&root.join("active.json"), &manifest).unwrap();
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            drop(listener);
+            let cfg = OllamaRuntimeConfig {
+                root: root.clone(),
+                models_dir: root.join("models"),
+                base_url: format!("http://{address}"),
+                startup_timeout: Duration::from_secs(2),
+                auto_install: false,
+                auto_start: true,
+            };
+            let runtime = OllamaRuntime::new(cfg.clone());
+            runtime
+                .start_and_validate(&executable, None, false, "managed")
+                .await
+                .unwrap();
+            let first_pid = runtime.status().await.pid;
+            let result = runtime.ensure_ready_for_model(Some("tiny")).await;
+            assert_eq!(result.is_err(), always_fail);
+            assert_eq!(
+                fs::read_to_string(root.join("generate-count")).unwrap(),
+                "2"
+            );
+            assert_ne!(runtime.status().await.pid, first_pid);
+            assert!(runtime.status().await.recovery_attempted);
+            assert!(root.join("logs/ollama-amx-failure.log").is_file());
+            assert!(version.join("cpu-compatibility.json").is_file());
+            assert_eq!(fs::read(&cuda).unwrap(), b"working CUDA");
+            assert!(runtime.valid_active_runtime().await.unwrap().is_some());
+            runtime.stop_owned_process().await;
+            if !always_fail {
+                let reopened = OllamaRuntime::new(cfg);
+                assert!(reopened.valid_active_runtime().await.unwrap().is_some());
+                reopened
+                    .start_and_validate(&executable, None, false, "managed")
+                    .await
+                    .unwrap();
+                reopened.ensure_ready_for_model(Some("tiny")).await.unwrap();
+                assert_eq!(
+                    fs::read_to_string(root.join("generate-count")).unwrap(),
+                    "3"
+                );
+                reopened.stop_owned_process().await;
+            }
+            assert!(!root.join("downloads").exists());
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
 
     #[tokio::test]
     async fn new_runtime_does_not_remove_another_instances_process_marker() {
