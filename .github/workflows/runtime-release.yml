@@ -44,6 +44,7 @@ jobs:
         run: /usr/bin/python3 scripts/release-gate/linux-package-smoke.py apps/desktop-ui/src-tauri/target/release/bundle/deb/*.deb "${{ runner.temp }}/native-ui"
       - name: Download managed runtime, answer and reopen from cache
         run: |
+          lscpu > "${{ runner.temp }}/cpu-info.txt"
           xvfb-run -a -s '-screen 0 1440x1000x24 -noreset' dbus-run-session -- bash -euo pipefail -c '
             openbox --sm-disable > "$RUNNER_TEMP/runtime-window.log" 2>&1 &
             wm=$!
@@ -67,6 +68,11 @@ jobs:
             ${{ runner.temp }}/runtime-reopen/desktop-*.log
             ${{ runner.temp }}/runtime-reopen/startup-*.json
             ${{ runner.temp }}/runtime-reopen.mp4
+            ${{ runner.temp }}/cpu-info.txt
+            ${{ runner.temp }}/runtime-reopen/state/ollama/logs/
+            ${{ runner.temp }}/runtime-reopen/state/ollama/active.json
+            ${{ runner.temp }}/runtime-reopen/state/ollama/process.json
+            ${{ runner.temp }}/runtime-reopen/state/ollama/runtime-state.json
           if-no-files-found: error
 
   windows:
@@ -92,6 +98,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $cpu = Get-CimInstance Win32_Processor | Select-Object Name, Architecture, NumberOfCores, NumberOfLogicalProcessors, VirtualizationFirmwareEnabled
+          @{ processor = $cpu; avx = [System.Runtime.Intrinsics.X86.Avx]::IsSupported; avx2 = [System.Runtime.Intrinsics.X86.Avx2]::IsSupported; avx512f = [System.Runtime.Intrinsics.X86.Avx512F]::IsSupported; fma = [System.Runtime.Intrinsics.X86.Fma]::IsSupported } | ConvertTo-Json -Depth 4 | Set-Content "$env:RUNNER_TEMP/cpu-info.txt"
           $package, $remaining = @(Get-ChildItem apps/desktop-ui/src-tauri/target/release/bundle/nsis -Filter '*-setup.exe')
           if (!$package -or $remaining) { throw 'Expected exactly one installer' }
           $installDir = Join-Path $env:RUNNER_TEMP 'mlx-pilot-install'
@@ -134,4 +142,9 @@ jobs:
             ${{ runner.temp }}/runtime-reopen/desktop-*.log
             ${{ runner.temp }}/runtime-reopen/startup-*.json
             ${{ runner.temp }}/runtime-reopen.mp4
+            ${{ runner.temp }}/cpu-info.txt
+            ${{ runner.temp }}/runtime-reopen/state/ollama/logs/
+            ${{ runner.temp }}/runtime-reopen/state/ollama/active.json
+            ${{ runner.temp }}/runtime-reopen/state/ollama/process.json
+            ${{ runner.temp }}/runtime-reopen/state/ollama/runtime-state.json
           if-no-files-found: error
